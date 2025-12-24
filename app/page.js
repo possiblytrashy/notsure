@@ -3,6 +3,23 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { Search, MapPin, Calendar, ArrowRight, Zap } from 'lucide-react';
 
+const Skeleton = () => (
+  <div style={{ 
+    background: 'rgba(255,255,255,0.3)', 
+    borderRadius: '35px', 
+    padding: '20px', 
+    height: '400px',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '15px'
+  }}>
+    <div className="skeleton-pulse" style={{ height: '200px', background: 'rgba(0,0,0,0.05)', borderRadius: '25px' }} />
+    <div className="skeleton-pulse" style={{ height: '30px', width: '70%', background: 'rgba(0,0,0,0.05)', borderRadius: '10px' }} />
+    <div className="skeleton-pulse" style={{ height: '20px', width: '40%', background: 'rgba(0,0,0,0.05)', borderRadius: '10px' }} />
+    <div style={{ marginTop: 'auto', height: '50px', background: 'rgba(0,0,0,0.05)', borderRadius: '15px' }} className="skeleton-pulse" />
+  </div>
+);
+
 export default function Home() {
   const [events, setEvents] = useState([]);
   const [search, setSearch] = useState("");
