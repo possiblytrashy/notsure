@@ -2,15 +2,49 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --lumina-sky: #0ea5e9;
+  --lumina-accent: #f472b6;
+}
+
 body {
-  /* Bright, happy mesh gradient background */
-  background-color: #f3f4f6;
+  margin: 0;
+  padding: 0;
+  color: #0c4a6e; /* Using your lumina-900 for text */
+  background-color: #f8fafc;
+  /* Optimized Happy Mesh Gradient */
   background-image: 
-    radial-gradient(at 0% 0%, hsla(253,16%,7%,0) 0, hsla(253,16%,7%,0) 50%), 
-    radial-gradient(at 80% 0%, hsla(189,100%,56%,0.2) 0px, transparent 50%),
-    radial-gradient(at 0% 50%, hsla(355,100%,93%,1) 0px, transparent 50%),
-    radial-gradient(at 80% 50%, hsla(340,100%,76%,0.2) 0px, transparent 50%);
+    radial-gradient(at 0% 0%, hsla(189, 100%, 56%, 0.15) 0px, transparent 50%),
+    radial-gradient(at 100% 0%, hsla(340, 100%, 76%, 0.15) 0px, transparent 50%),
+    radial-gradient(at 50% 100%, hsla(225, 39%, 30%, 0.05) 0px, transparent 50%);
+  background-attachment: fixed;
   min-height: 100vh;
+}
+
+@layer components {
+  /* High-end Glassmorphism Card */
+  .glass-card {
+    @apply bg-white/40 backdrop-blur-md border border-white/20 shadow-xl rounded-[2.5rem];
+  }
+
+  /* Shimmer Animation for Voting/Loading */
+  .shimmer-sweep {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .shimmer-sweep::after {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.4),
+      transparent
+    );
+    animation: shimmer 2s infinite;
+  }
 }
 
 @keyframes shimmer {
@@ -18,30 +52,9 @@ body {
   100% { transform: translateX(100%); }
 }
 
-.voting-bar-glow {
-  position: relative;
-  overflow: hidden;
-  background: rgba(255, 255, 255, 0.1);
-  box-shadow: 0 0 15px rgba(99, 102, 241, 0.3);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-}
-
+/* Custom voting bar using your new accent colors */
 .voting-bar-fill {
-  background: linear-gradient(90deg, #6366f1, #ec4899);
+  background: linear-gradient(90deg, #0ea5e9, #f472b6);
   height: 100%;
   border-radius: inherit;
-  position: relative;
-}
-
-.voting-bar-fill::after {
-  content: "";
-  position: absolute;
-  top: 0; left: 0; right: 0; bottom: 0;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(255, 255, 255, 0.4),
-    transparent
-  );
-  animation: shimmer 2s infinite;
 }
