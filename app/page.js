@@ -60,6 +60,27 @@ export default function Home() {
           </a>
         ))}
       </div>
+          // ... add this section at the bottom of your app/page.js, before the final </div>
+<section style={{ 
+  marginTop: '100px', padding: '60px', borderRadius: '40px', 
+  background: '#000', color: '#fff', textAlign: 'center' 
+}}>
+  <h2 style={{ fontSize: '40px', fontWeight: 900, marginBottom: '20px' }}>Hosting an event in Accra?</h2>
+  <p style={{ color: '#ccc', maxWidth: '600px', margin: '0 auto 30px', fontSize: '18px' }}>
+    Join the most exclusive network of event organizers. Sell tickets, manage entries, and grow your brand with OUSTED.
+  </p>
+  <div style={{ display: 'flex', gap: '15px', justifyContent: 'center' }}>
+    <a href="/login" style={{ 
+      background: '#fff', color: '#000', padding: '18px 35px', borderRadius: '20px', 
+      textDecoration: 'none', fontWeight: 900, fontSize: '14px' 
+    }}>BECOME AN ORGANIZER</a>
+    <a href="/login" style={{ 
+      background: 'rgba(255,255,255,0.1)', color: '#fff', padding: '18px 35px', 
+      borderRadius: '20px', textDecoration: 'none', fontWeight: 900, fontSize: '14px',
+      border: '1px solid rgba(255,255,255,0.2)' 
+    }}>USER DASHBOARD</a>
+  </div>
+</section>
     </div>
   );
 }
