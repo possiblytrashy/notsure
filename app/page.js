@@ -57,7 +57,22 @@ export default function Home() {
           />
         </div>
       </div>
-
+     // Inside your Home component's return:
+<div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '30px' }}>
+  {loading ? (
+    <>
+      <Skeleton />
+      <Skeleton />
+      <Skeleton />
+    </>
+  ) : (
+    filtered.map(event => (
+       <a key={event.id} href={`/events/${event.id}`}>
+          {/* ... existing event card content */}
+       </a>
+    ))
+  )}
+</div>
       {/* EVENTS GRID */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '30px' }}>
         {filtered.map(event => (
