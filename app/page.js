@@ -46,7 +46,7 @@ export default function Home() {
           </h1>
         </motion.div>
         <p className="text-xl text-slate-500 font-medium italic">Premium experiences, curated for you.</p>
-        
+        <div className="fixed top-0 left-0 w-full h-2 bg-red-600 z-[9999]">Tailwind Test</div>
         <div className="relative mt-10">
           <input 
             type="text" 
