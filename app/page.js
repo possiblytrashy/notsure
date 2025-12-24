@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Search, Calendar, MapPin, Ticket, Zap } from 'lucide-react';
 import Link from 'next/link';
+import './globals.css'
 
 export default function Home() {
   const [events, setEvents] = useState([]);
