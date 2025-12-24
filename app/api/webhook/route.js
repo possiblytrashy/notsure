@@ -1,71 +1,48 @@
-import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import QRCode from 'qrcode';
 import axios from 'axios';
 
-// Admin client to bypass RLS policies
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 export async function POST(req) {
-  const secret = process.env.FLW_SECRET_HASH;
-  const signature = req.headers.get('verif-hash');
-  
-  if (!signature || signature !== secret) {
-    return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
+  const data = await req.json();
+  if (data.status !== 'successful') return new Response('Failed', { status: 400 });
+
+  const { type, target_id } = data.meta;
+  const phone = data.customer.phonenumber;
+
+  if (type === 'TICKET') {
+    const ticketHash = Buffer.from(`${target_id}-${Date.now()}`).toString('base64');
+    
+    // 1. Generate QR Code
+    const qrBuffer = await QRCode.toBuffer(ticketHash);
+    
+    // 2. Upload to Supabase Storage
+    await supabase.storage.from('media').upload(`qrs/${ticketHash}.png`, qrBuffer);
+    const qrUrl = supabase.storage.from('media').getPublicUrl(`qrs/${ticketHash}.png`).data.publicUrl;
+
+    // 3. Save Ticket
+    await supabase.from('tickets').insert({ event_id: target_id, ticket_hash: ticketHash, customer_phone: phone });
+
+    // 4. Send WhatsApp via Meta Cloud API
+    await axios.post(`https://graph.facebook.com/v18.0/${process.env.META_PHONE_ID}/messages`, {
+      messaging_product: "whatsapp",
+      to: phone,
+      type: "template",
+      template: {
+        name: "ticket_delivery",
+        language: { code: "en" },
+        components: [
+          { type: "header", parameters: [{ type: "image", image: { link: qrUrl } }] },
+          { type: "body", parameters: [{ type: "text", text: ticketHash }] }
+        ]
+      }
+    }, { headers: { Authorization: `Bearer ${process.env.META_TOKEN}` } });
+
+  } else if (type === 'VOTE') {
+    // Increment Vote Count in Database
+    await supabase.rpc('increment_vote', { candidate_id: target_id });
   }
 
-  const payload = await req.json();
-
-  if (payload.status === 'successful') {
-    const { eventId, userId } = payload.meta;
-    const { email, phone_number } = payload.customer;
-
-    // 1. Generate Unique Ticket ID
-    const ticketNum = `TIX-${Math.random().toString(36).substr(2, 6).toUpperCase()}`;
-
-    // 2. Generate QR Code Image
-    const qrBuffer = await QRCode.toBuffer(ticketNum);
-    const { data: uploadData } = await supabaseAdmin.storage
-      .from('tickets')
-      .upload(`${ticketNum}.png`, qrBuffer, { contentType: 'image/png' });
-
-    const qrUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/tickets/${ticketNum}.png`;
-
-    // 3. Save to DB
-    await supabaseAdmin.from('tickets').insert({
-      event_id: eventId,
-      user_email: email,
-      user_phone: phone_number,
-      ticket_number: ticketNum,
-      qr_code_url: qrUrl
-    });
-
-    // 4. Send WhatsApp via Meta
-    await axios.post(
-      `https://graph.facebook.com/v17.0/${process.env.META_PHONE_ID}/messages`,
-      {
-        messaging_product: "whatsapp",
-        to: phone_number,
-        type: "template",
-        template: {
-          name: "ticket_confirmation", // Must match Meta template
-          language: { code: "en" },
-          components: [
-            { type: "header", parameters: [{ type: "image", image: { link: qrUrl } }] },
-            { type: "body", parameters: [
-                { type: "text", text: "Event Guest" }, 
-                { type: "text", text: "Lumina Event" }, 
-                { type: "text", text: ticketNum }
-            ]}
-          ]
-        }
-      },
-      { headers: { Authorization: `Bearer ${process.env.META_ACCESS_TOKEN}` } }
-    );
-  }
-
-  return NextResponse.json({ received: true });
+  return new Response('OK', { status: 200 });
 }
