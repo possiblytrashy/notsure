@@ -1,15 +1,22 @@
 "use client";
 import { useState, useEffect } from 'react';
-import { supabase } from '../../lib/supabase';
-import { Zap, Trophy, Search, TrendingUp, Filter, XCircle } from 'lucide-react';
+import { supabase } from '../lib/supabase';
+import { 
+  Zap, Trophy, Search, TrendingUp, ArrowLeft, 
+  ChevronRight, Share2, XCircle, BarChart3, Send 
+} from 'lucide-react';
 
 export default function VotingPortal() {
   const [contests, setContests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
+  
+  // Navigation State
+  const [selectedContest, setSelectedContest] = useState(null);
+  const [selectedCategory, setSelectedCategory] = useState(null);
 
   useEffect(() => {
-    async function loadContests() {
+    async function loadInitialData() {
       const { data } = await supabase
         .from('contests')
         .select('*, candidates(*)')
@@ -17,167 +24,180 @@ export default function VotingPortal() {
         .order('created_at', { ascending: false });
       
       setContests(data || []);
+
+      // DEEP LINKING: Check URL for ?contest=Title&cat=Category
+      const params = new URLSearchParams(window.location.search);
+      const urlContest = params.get('contest');
+      const urlCat = params.get('cat');
+
+      if (urlContest && data) {
+        const found = data.find(c => c.title === urlContest);
+        if (found) {
+          setSelectedContest(found);
+          if (urlCat) setSelectedCategory(urlCat);
+        }
+      }
       setLoading(false);
     }
-    loadContests();
+    loadInitialData();
+
+    // REAL-TIME: Listen for vote increments globally
+    const channel = supabase.channel('live-voting-results')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'candidates' }, 
+      payload => {
+        setContests(prev => prev.map(con => ({
+          ...con,
+          candidates: con.candidates.map(can => can.id === payload.new.id ? payload.new : can)
+        })));
+      }).subscribe();
+
+    return () => supabase.removeChannel(channel);
   }, []);
 
-  const handleVote = async (candidateId, price) => {
-    alert(`Initiating payment for GHS ${price}...`);
-    const { error } = await supabase.rpc('increment_vote', { candidate_id: candidateId });
-    if (error) alert("Voting error: " + error.message);
+  const handleShare = (contestTitle, categoryName) => {
+    const url = `${window.location.origin}/voting?contest=${encodeURIComponent(contestTitle)}&cat=${encodeURIComponent(categoryName)}`;
+    const text = `Check out the live leaderboard for ${categoryName} in the ${contestTitle}! Vote now on OUSTED. 🗳️`;
+    
+    if (navigator.share) {
+      navigator.share({ title: 'OUSTED Voting', text, url });
+    } else {
+      window.open(`https://wa.me/?text=${encodeURIComponent(text + " " + url)}`);
+    }
   };
 
-  // Logic to filter contests OR candidates based on search
-  const filteredContests = contests.filter(contest => {
-    const contestMatches = contest.title.toLowerCase().includes(searchQuery);
-    const nomineeMatches = contest.candidates?.some(c => 
-      c.name.toLowerCase().includes(searchQuery)
+  const handleVote = async (candidateId, price) => {
+    alert(`Redirecting to Mobile Money for GHS ${price}...`);
+    await supabase.rpc('increment_vote', { candidate_id: candidateId });
+  };
+
+  if (loading) return <div style={centerText}>Initializing OUSTED Choice Engine...</div>;
+
+  // VIEW 1: CONTEST LIST (With Search)
+  if (!selectedContest) {
+    const filteredContests = contests.filter(c => 
+      c.title.toLowerCase().includes(searchQuery) || 
+      c.candidates.some(can => can.name.toLowerCase().includes(searchQuery))
     );
-    return contestMatches || nomineeMatches;
-  });
 
-  if (loading) return <div style={centerText}>Loading Choice Engine...</div>;
-
-  return (
-    <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '140px 20px' }}>
-      
-      {/* HEADER & SEARCH SECTION */}
-      <header style={{ textAlign: 'center', marginBottom: '80px' }}>
-        <h1 style={{ fontSize: '72px', fontWeight: 900, letterSpacing: '-4px', margin: 0 }}>
-          Live <span style={{ color: '#0ea5e9' }}>Contests.</span>
-        </h1>
-        
-        <div style={searchWrapper}>
+    return (
+      <div style={container}>
+        <header style={headerStyle}>
+          <h1 style={mainTitle}>Live <span style={{color:'#0ea5e9'}}>Contests.</span></h1>
           <div style={searchContainer}>
             <Search size={20} color="#0ea5e9" />
             <input 
-              type="text" 
               placeholder="Search contests or nominees..." 
-              style={searchBar} 
-              value={searchQuery}
+              style={searchBar}
               onChange={(e) => setSearchQuery(e.target.value.toLowerCase())}
             />
-            {searchQuery && (
-              <XCircle 
-                size={20} 
-                color="#aaa" 
-                style={{ cursor: 'pointer' }} 
-                onClick={() => setSearchQuery("")} 
-              />
-            )}
           </div>
-        </div>
-      </header>
+        </header>
 
-      {/* NO RESULTS STATE */}
-      {filteredContests.length === 0 && (
-        <div style={{ textAlign: 'center', padding: '100px 0', opacity: 0.5 }}>
-          <Filter size={48} style={{ marginBottom: '20px' }} />
-          <h2 style={{ fontWeight: 900 }}>No contests or nominees found.</h2>
-          <p>Try searching for a different keyword.</p>
-        </div>
-      )}
-
-      {/* CONTEST LIST */}
-      {filteredContests.map(contest => {
-        const categories = contest.candidates?.reduce((acc, cand) => {
-          const cat = cand.category || 'Nominees';
-          if (!acc[cat]) acc[cat] = [];
-          acc[cat].push(cand);
-          return acc;
-        }, {});
-
-        return (
-          <div key={contest.id} style={contestWrapper}>
-            <div style={contestTitleBox}>
-              <div>
-                <h2 style={{ fontSize: '32px', fontWeight: 900, margin: 0 }}>{contest.title}</h2>
-                <p style={{ margin: 0, color: '#666', fontSize: '14px' }}>{contest.description}</p>
-              </div>
-              <div style={priceTag}>GHS {contest.vote_price} / VOTE</div>
+        <div style={contestGrid}>
+          {filteredContests.map(c => (
+            <div key={c.id} onClick={() => setSelectedContest(c)} style={contestCard}>
+              <div style={contestIcon}><Trophy size={24} color="#0ea5e9"/></div>
+              <h2 style={{margin:'15px 0 5px', fontWeight:900}}>{c.title}</h2>
+              <p style={{color:'#666', fontSize:'14px', marginBottom:'20px'}}>{c.description}</p>
+              <div style={categoryBadge}>{c.candidates?.length} Total Nominees</div>
             </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
-            {Object.keys(categories).map(catName => {
-              // Only show candidates that match search OR show all if contest title matched
-              const contestTitleMatched = contest.title.toLowerCase().includes(searchQuery);
-              const filteredCands = categories[catName].filter(c => 
-                contestTitleMatched || c.name.toLowerCase().includes(searchQuery)
-              );
+  // VIEW 2: CATEGORY SELECTION
+  if (selectedContest && !selectedCategory) {
+    const categories = [...new Set(selectedContest.candidates.map(c => c.category || 'General Nominees'))];
+    return (
+      <div style={container}>
+        <button onClick={() => setSelectedContest(null)} style={backBtn}><ArrowLeft size={18}/> Back to Contests</button>
+        <h1 style={mainTitle}>{selectedContest.title}</h1>
+        <div style={categoryList}>
+          {categories.map(cat => (
+            <div key={cat} onClick={() => setSelectedCategory(cat)} style={categoryRow}>
+              <span style={{fontWeight:800, fontSize:'18px'}}>{cat}</span>
+              <ChevronRight color="#ccc" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
-              if (filteredCands.length === 0) return null;
+  // VIEW 3: LIVE LEADERBOARD
+  const filteredCandidates = selectedContest.candidates
+    .filter(c => (c.category || 'General Nominees') === selectedCategory)
+    .sort((a, b) => b.vote_count - a.vote_count);
 
-              return (
-                <div key={catName} style={{ marginBottom: '40px' }}>
-                  <h3 style={categoryHeader}><Trophy size={18} /> {catName.toUpperCase()}</h3>
-                  
-                  <div style={candidateGrid}>
-                    {filteredCands.sort((a,b) => b.vote_count - a.vote_count).map((candidate, index) => (
-                      <div key={candidate.id} style={candidateCard}>
-                        <div style={{ position: 'relative' }}>
-                          <div style={{ 
-                            height: '300px', 
-                            borderRadius: '25px', 
-                            backgroundImage: `url(${candidate.image_url})`, 
-                            backgroundSize: 'cover', 
-                            backgroundPosition: 'center',
-                            backgroundColor: '#f0f0f0'
-                          }} />
-                          {index === 0 && <div style={leaderBadge}><TrendingUp size={12}/> LEADER</div>}
-                        </div>
+  const totalVotes = filteredCandidates.reduce((acc, curr) => acc + curr.vote_count, 0);
 
-                        <div style={{ padding: '20px 10px' }}>
-                          <h3 style={{ margin: '0 0 5px 0', fontWeight: 900, fontSize: '22px' }}>{candidate.name}</h3>
-                          <p style={bioStyle}>{candidate.description || "Official Nominee"}</p>
-                          
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '15px' }}>
-                            <span style={voteCount}>{candidate.vote_count.toLocaleString()} VOTES</span>
-                            <button 
-                              onClick={() => handleVote(candidate.id, contest.vote_price)}
-                              style={voteBtn}
-                            >
-                              <Zap size={16} fill="white" /> VOTE
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
+  return (
+    <div style={container}>
+      <div style={navHeader}>
+        <button onClick={() => setSelectedCategory(null)} style={backBtn}><ArrowLeft size={18}/> All Categories</button>
+        <button onClick={() => handleShare(selectedContest.title, selectedCategory)} style={shareBtn}>
+          <Share2 size={18}/> SHARE
+        </button>
+      </div>
+
+      <div style={leaderboardHead}>
+        <div>
+          <h1 style={{...mainTitle, fontSize:'40px', marginBottom:0}}>{selectedCategory}</h1>
+          <p style={{color:'#0ea5e9', fontWeight:800, letterSpacing:'1px'}}><BarChart3 size={16} inline/> LIVE LEADERBOARD</p>
+        </div>
+        <div style={totalBadge}>{totalVotes.toLocaleString()} VOTES</div>
+      </div>
+
+      
+
+      <div style={leaderboardBox}>
+        {filteredCandidates.map((can, index) => {
+          const percentage = totalVotes > 0 ? (can.vote_count / totalVotes) * 100 : 0;
+          return (
+            <div key={can.id} style={candidateRow}>
+              <div style={{display:'flex', gap:'20px', alignItems:'center'}}>
+                <div style={rankText}>{index + 1}</div>
+                <div style={avatarCircle}><img src={can.image_url} style={avatarImg} /></div>
+                <div style={{flex:1}}>
+                  <div style={{display:'flex', justifyContent:'space-between', marginBottom:'8px'}}>
+                    <span style={{fontWeight:900, fontSize:'18px'}}>{can.name}</span>
+                    <span style={{fontWeight:900, color:'#0ea5e9'}}>{can.vote_count}</span>
                   </div>
+                  <div style={barContainer}><div style={{...barFill, width: `${percentage}%`}} /></div>
                 </div>
-              );
-            })}
-          </div>
-        );
-      })}
+                <button onClick={() => handleVote(can.id, selectedContest.vote_price)} style={voteActionBtn}>VOTE</button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
-// UPDATED STYLES
-const searchWrapper = { display: 'flex', justifyContent: 'center', marginTop: '40px' };
-const searchContainer = { 
-  display: 'flex', 
-  alignItems: 'center', 
-  gap: '15px', 
-  width: '100%',
-  maxWidth: '600px', 
-  background: '#fff', 
-  padding: '18px 30px', 
-  borderRadius: '25px',
-  boxShadow: '0 20px 40px rgba(0,0,0,0.05)',
-  border: '1px solid #eee'
-};
-const searchBar = { border: 'none', background: 'none', width: '100%', fontSize: '18px', outline: 'none', fontWeight: 600, color: '#000' };
-
-// (Previous styles remain the same)
-const centerText = { padding: '150px', textAlign: 'center', fontWeight: 800, color: '#888', fontSize: '20px' };
-const contestWrapper = { marginBottom: '80px', background: 'rgba(255,255,255,0.8)', padding: '40px', borderRadius: '45px', border: '1px solid white', boxShadow: '0 30px 60px rgba(0,0,0,0.02)', backdropFilter: 'blur(20px)' };
-const contestTitleBox = { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '40px', borderBottom: '1px solid #eee', paddingBottom: '20px' };
-const priceTag = { background: '#000', color: '#fff', padding: '10px 20px', borderRadius: '15px', fontWeight: 900, fontSize: '14px', whiteSpace: 'nowrap' };
-const categoryHeader = { display: 'flex', alignItems: 'center', gap: '10px', fontSize: '14px', fontWeight: 800, color: '#0ea5e9', marginBottom: '25px', letterSpacing: '1px' };
-const candidateGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '25px' };
-const candidateCard = { background: 'white', padding: '15px', borderRadius: '35px', border: '1px solid #f0f0f0', transition: 'transform 0.2s ease' };
-const leaderBadge = { position: 'absolute', top: '15px', left: '15px', background: '#22c55e', color: '#fff', padding: '8px 15px', borderRadius: '12px', fontSize: '10px', fontWeight: 900, display: 'flex', alignItems: 'center', gap: '5px', boxShadow: '0 10px 20px rgba(34, 197, 94, 0.3)' };
-const bioStyle = { margin: 0, fontSize: '13px', color: '#666', lineHeight: 1.4, height: '36px', overflow: 'hidden' };
-const voteCount = { fontSize: '14px', fontWeight: 800, color: '#000' };
-const voteBtn = { background: '#000', color: '#fff', border: 'none', padding: '12px 20px', borderRadius: '15px', fontWeight: 900, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' };
+// STYLES
+const container = { maxWidth: '1000px', margin: '0 auto', padding: '140px 20px' };
+const headerStyle = { textAlign:'center', marginBottom:'60px' };
+const mainTitle = { fontSize: '64px', fontWeight: 900, letterSpacing: '-3px', marginBottom: '20px' };
+const searchContainer = { display: 'flex', alignItems: 'center', gap: '15px', maxWidth: '500px', margin: '0 auto', background: '#fff', padding: '15px 25px', borderRadius: '20px', boxShadow: '0 10px 40px rgba(0,0,0,0.05)' };
+const searchBar = { border: 'none', background: 'none', width: '100%', fontSize: '16px', outline: 'none', fontWeight: 600 };
+const contestGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px' };
+const contestCard = { background: '#fff', padding: '40px', borderRadius: '40px', border: '1px solid #eee', cursor: 'pointer', transition: 'transform 0.2s ease' };
+const contestIcon = { width:'50px', height:'50px', background:'#f0f9ff', borderRadius:'15px', display:'flex', alignItems:'center', justifyContent:'center' };
+const categoryBadge = { display:'inline-block', background:'#000', color:'#fff', padding:'5px 15px', borderRadius:'10px', fontSize:'11px', fontWeight:800 };
+const backBtn = { background:'none', border:'none', cursor:'pointer', fontWeight:800, display:'flex', alignItems:'center', gap:'8px', color:'#aaa' };
+const categoryRow = { background: '#fff', padding: '30px 40px', borderRadius: '30px', marginBottom: '15px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', border: '1px solid #eee' };
+const navHeader = { display:'flex', justifyContent:'space-between', marginBottom:'20px' };
+const shareBtn = { background:'#f8f8f8', border:'none', padding:'10px 20px', borderRadius:'15px', fontWeight:800, cursor:'pointer', display:'flex', alignItems:'center', gap:'8px' };
+const leaderboardHead = { display:'flex', justifyContent:'space-between', alignItems:'flex-end', marginBottom:'50px' };
+const totalBadge = { background:'#0ea5e9', color:'#fff', padding:'12px 25px', borderRadius:'20px', fontWeight:900, fontSize:'14px' };
+const candidateRow = { background:'#fff', padding:'25px', borderRadius:'35px', marginBottom:'15px', border:'1px solid #f0f0f0' };
+const rankText = { fontSize:'24px', fontWeight:900, color:'#ddd', width:'30px' };
+const avatarCircle = { width:'60px', height:'60px', borderRadius:'20px', overflow:'hidden', background:'#f0f0f0' };
+const avatarImg = { width:'100%', height:'100%', objectFit:'cover' };
+const barContainer = { background:'#f5f5f5', height:'8px', borderRadius:'10px', overflow:'hidden' };
+const barFill = { background: 'linear-gradient(to right, #0ea5e9, #6366f1)', height:'100%', transition:'width 1.5s cubic-bezier(0.19, 1, 0.22, 1)' };
+const voteActionBtn = { background:'#000', color:'#fff', border:'none', padding:'12px 25px', borderRadius:'15px', fontWeight:900, cursor:'pointer' };
+const centerText = { padding: '150px', textAlign: 'center', fontWeight: 800, color: '#aaa', fontSize: '20px' };
