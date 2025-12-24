@@ -5,19 +5,12 @@ import { Search, MapPin, Calendar, ArrowRight, Zap } from 'lucide-react';
 
 export default function Home() {
   const [events, setEvents] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
 
   useEffect(() => {
     async function load() {
-      try {
-        const { data } = await supabase.from('events').select('*').order('date', { ascending: true });
-        setEvents(data || []);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
+      const { data } = await supabase.from('events').select('*').order('date', { ascending: true });
+      setEvents(data || []);
     }
     load();
   }, []);
@@ -25,97 +18,42 @@ export default function Home() {
   const filtered = events.filter(e => e.title.toLowerCase().includes(search.toLowerCase()));
 
   return (
-    <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '0 24px' }}>
-      
-      {/* Hero Section */}
-      <section style={{ textAlign: 'center', marginBottom: '80px' }}>
-        <h1 style={{ fontSize: 'clamp(3rem, 8vw, 6rem)', fontWeight: 900, letterSpacing: '-4px', margin: '0 0 20px 0', lineHeight: 1 }}>
-          Accra <span style={{ color: '#0ea5e9' }}>unlocked.</span>
+    <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '40px 20px' }}>
+      <div style={{ textAlign: 'center', marginBottom: '60px' }}>
+        <h1 style={{ fontSize: '70px', fontWeight: 900, margin: 0, letterSpacing: '-4px', lineHeight: 0.9 }}>
+          Experience <br/><span style={{ color: 'rgba(0,0,0,0.4)' }}>Everything.</span>
         </h1>
-        <p style={{ fontSize: '18px', color: '#64748b', maxWidth: '600px', margin: '0 auto 40px' }}>
-          Secure access to the city's most exclusive parties, galleries, and private events.
-        </p>
-        
-        {/* Advanced Search Bar */}
-        <div style={{ position: 'relative', maxWidth: '500px', margin: '0 auto' }}>
-          <Search style={{ position: 'absolute', left: '20px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} size={20} />
+        <div style={{ position: 'relative', maxWidth: '500px', margin: '40px auto' }}>
+          <Search size={20} style={{ position: 'absolute', left: '20px', top: '50%', transform: 'translateY(-50%)', color: '#888' }} />
           <input 
-            type="text"
-            placeholder="Search by event or venue..."
             onChange={(e) => setSearch(e.target.value)}
-            style={{
-              width: '100%',
-              padding: '18px 20px 18px 55px',
-              borderRadius: '20px',
-              border: '1px solid rgba(255,255,255,0.5)',
-              background: 'rgba(255,255,255,0.8)',
-              backdropFilter: 'blur(10px)',
-              fontSize: '16px',
-              outline: 'none',
-              boxShadow: '0 4px 20px rgba(0,0,0,0.03)',
-              boxSizing: 'border-box'
-            }}
+            placeholder="Search Accra's best events..." 
+            style={{ width: '100%', padding: '20px 60px', borderRadius: '25px', border: 'none', outline: 'none', background: 'white', fontSize: '16px', boxShadow: '0 10px 30px rgba(0,0,0,0.05)' }}
           />
         </div>
-      </section>
+      </div>
 
-      {/* Events Grid */}
-      <div style={{ 
-        display: 'grid', 
-        gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', 
-        gap: '40px' 
-      }}>
-        {loading ? (
-          [1,2,3].map(i => <div key={i} style={{ height: '400px', borderRadius: '30px', background: 'rgba(255,255,255,0.3)', animate: 'pulse 2s infinite' }} />)
-        ) : filtered.map(event => (
-          <a key={event.id} href={`/events/${event.id}`} style={{ textDecoration: 'none', color: 'inherit', group: 'true' }}>
-            <div style={{
-              background: 'rgba(255, 255, 255, 0.5)',
-              backdropFilter: 'blur(20px)',
-              borderRadius: '32px',
-              border: '1px solid rgba(255, 255, 255, 0.6)',
-              overflow: 'hidden',
-              transition: 'all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)',
-              height: '100%',
-              display: 'flex',
-              flexDirection: 'column'
-            }}>
-              {/* Image Header */}
-              <div style={{ height: '240px', position: 'relative', overflow: 'hidden' }}>
-                <div style={{ 
-                  position: 'absolute', top: '15px', right: '15px', zIndex: 2,
-                  background: 'rgba(34, 197, 94, 0.9)', color: '#fff', padding: '6px 12px', 
-                  borderRadius: '100px', fontSize: '10px', fontWeight: 900, display: 'flex', alignItems: 'center', gap: '4px'
-                }}>
-                  <Zap size={10} fill="white" /> LIVE
-                </div>
-                <img 
-                  src={event.images?.[0] || 'https://images.unsplash.com/photo-1514525253361-bee8a187449a?w=800'} 
-                  style={{ width: '100%', height: '100%', objectCover: 'cover', transition: 'transform 0.5s' }}
-                />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '30px' }}>
+        {filtered.map(event => (
+          <a key={event.id} href={`/events/${event.id}`} style={{ 
+            textDecoration: 'none', color: 'inherit', background: 'rgba(255,255,255,0.4)', 
+            backdropFilter: 'blur(10px)', borderRadius: '35px', padding: '20px', border: '1px solid rgba(255,255,255,0.5)',
+            display: 'flex', flexDirection: 'column', transition: '0.3s'
+          }}>
+            <div style={{ height: '250px', borderRadius: '25px', background: '#ccc', backgroundImage: `url(${event.images?.[0]})`, backgroundSize: 'cover', backgroundPosition: 'center', marginBottom: '20px' }} />
+            <div style={{ padding: '0 10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <span style={{ fontSize: '12px', fontWeight: 900, color: '#e73c7e', textTransform: 'uppercase' }}>{event.date}</span>
+                <Zap size={14} fill="#e73c7e" color="#e73c7e" />
               </div>
-
-              {/* Content */}
-              <div style={{ padding: '28px', flexGrow: 1, display: 'flex', flexDirection: 'column' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', color: '#0ea5e9', fontSize: '12px', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '10px' }}>
-                  <Calendar size={14} /> {new Date(event.date).toLocaleDateString()}
-                </div>
-                <h3 style={{ fontSize: '26px', fontWeight: 900, margin: '0 0 8px 0', color: '#0f172a' }}>{event.title}</h3>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#64748b', fontSize: '14px', marginBottom: '20px' }}>
-                  <MapPin size={14} /> {event.location || "Venue TBD"}
-                </div>
-                
-                <div style={{ marginTop: 'auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 700 }}>Starting from</span>
-                    <div style={{ fontSize: '22px', fontWeight: 900, color: '#0f172a' }}>GHS {event.price}</div>
-                  </div>
-                  <div style={{ 
-                    width: '48px', height: '48px', borderRadius: '16px', background: '#0f172a', 
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff' 
-                  }}>
-                    <ArrowRight size={20} />
-                  </div>
+              <h3 style={{ fontSize: '24px', fontWeight: 900, margin: '0 0 10px 0' }}>{event.title}</h3>
+              <p style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#666', fontSize: '14px', margin: '0 0 20px 0' }}>
+                <MapPin size={14} /> {event.location}
+              </p>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid rgba(0,0,0,0.05)', paddingTop: '20px' }}>
+                <span style={{ fontWeight: 900, fontSize: '20px' }}>GHS {event.price}</span>
+                <div style={{ background: '#000', color: '#fff', width: '40px', height: '40px', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <ArrowRight size={18} />
                 </div>
               </div>
             </div>
