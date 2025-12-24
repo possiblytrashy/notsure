@@ -1,14 +1,11 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
-  // Added ./lib and updated extensions to include .ts/tsx just in case
-  /** @type {import('tailwindcss').Config} */
-module.exports = {
   content: [
     "./app/**/*.{js,jsx,ts,tsx}",
     "./components/**/*.{js,jsx,ts,tsx}",
     "./lib/**/*.{js,jsx,ts,tsx}",
     "./pages/**/*.{js,jsx,ts,tsx}",
-    "./src/**/*.{js,jsx,ts,tsx}", // Add this just in case
+    "./src/**/*.{js,jsx,ts,tsx}",
   ],
   theme: {
     extend: {
@@ -16,7 +13,7 @@ module.exports = {
         lumina: {
           50: '#f0f9ff',
           100: '#e0f2fe',
-          500: '#0ea5e9', // Sky Blue
+          500: '#0ea5e9', 
           600: '#0284c7',
           900: '#0c4a6e',
         },
@@ -32,7 +29,6 @@ module.exports = {
       backdropBlur: {
         xs: '2px',
       },
-      // Added for high-end card shadows
       boxShadow: {
         'glass': '0 8px 32px 0 rgba(31, 38, 135, 0.37)',
       }
