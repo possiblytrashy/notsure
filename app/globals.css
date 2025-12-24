@@ -12,3 +12,36 @@ body {
     radial-gradient(at 80% 50%, hsla(340,100%,76%,0.2) 0px, transparent 50%);
   min-height: 100vh;
 }
+
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+.voting-bar-glow {
+  position: relative;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 0 15px rgba(99, 102, 241, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.voting-bar-fill {
+  background: linear-gradient(90deg, #6366f1, #ec4899);
+  height: 100%;
+  border-radius: inherit;
+  position: relative;
+}
+
+.voting-bar-fill::after {
+  content: "";
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.4),
+    transparent
+  );
+  animation: shimmer 2s infinite;
+}
