@@ -3,6 +3,8 @@ import { Html5QrcodeScanner } from 'html5-qrcode';
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 
+export const dynamic = 'force-dynamic';
+// ... rest of your code
 export default function AdminScanner() {
   const [status, setStatus] = useState("Ready to Scan");
 
