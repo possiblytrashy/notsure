@@ -57,7 +57,6 @@ export default function Home() {
           />
         </div>
       </div>
-     // Inside your Home component's return:
 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '30px' }}>
   {loading ? (
     <>
