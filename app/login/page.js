@@ -1,47 +1,59 @@
 "use client";
 import { useState } from 'react';
 import { supabase } from '../../lib/supabase';
-import { Lock, User, Briefcase, ShieldCheck } from 'lucide-react';
 
-export default function UnifiedLogin() {
-  const [role, setRole] = useState('user'); // user, organizer, admin
+export default function UnifiedAuth() {
+  const [isSignup, setIsSignup] = useState(false);
+  const [role, setRole] = useState('user'); 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  const handleLogin = async () => {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) alert(error.message);
-    else window.location.href = role === 'admin' ? '/admin/dashboard' : role === 'organizer' ? '/dashboard/organizer' : '/dashboard/user';
-  };
+  const handleAuth = async () => {
+    setLoading(true);
+    const { data, error } = isSignup 
+      ? await supabase.auth.signUp({ 
+          email, password, 
+          options: { data: { role: role } } 
+        })
+      : await supabase.auth.signInWithPassword({ email, password });
 
-  const portalStyles = {
-    user: { color: '#0ea5e9', label: 'Party Attendee' },
-    organizer: { color: '#e73c7e', label: 'Event Host' },
-    admin: { color: '#000', label: 'System Staff' }
+    if (error) {
+      alert(error.message);
+    } else {
+      if (isSignup) alert("Check your email for the confirmation link!");
+      else window.location.href = role === 'admin' ? '/admin/dashboard' : role === 'organizer' ? '/dashboard/organizer' : '/dashboard/user';
+    }
+    setLoading(false);
   };
 
   return (
-    <div style={{ maxWidth: '450px', margin: '60px auto', padding: '40px', background: 'rgba(255,255,255,0.6)', backdropFilter: 'blur(20px)', borderRadius: '40px', border: '1px solid white', textAlign: 'center' }}>
-      <h2 style={{ fontWeight: 900, fontSize: '32px', marginBottom: '10px' }}>Welcome Back</h2>
-      <p style={{ color: '#666', marginBottom: '30px' }}>Access your {portalStyles[role].label} portal</p>
-
-      {/* Role Switcher */}
-      <div style={{ display: 'flex', background: 'rgba(0,0,0,0.05)', borderRadius: '15px', padding: '5px', marginBottom: '30px' }}>
-        {['user', 'organizer', 'admin'].map((r) => (
+    <div style={{ maxWidth: '450px', margin: '40px auto', padding: '40px', background: 'rgba(255,255,255,0.7)', backdropFilter: 'blur(20px)', borderRadius: '40px', border: '1px solid white' }}>
+      <h2 style={{ fontWeight: 900, fontSize: '32px', textAlign: 'center' }}>{isSignup ? 'Join Ousted' : 'Welcome Back'}</h2>
+      
+      {/* ROLE SELECTOR */}
+      <div style={{ display: 'flex', background: 'rgba(0,0,0,0.05)', borderRadius: '15px', padding: '5px', margin: '25px 0' }}>
+        {['user', 'organizer'].map((r) => (
           <button key={r} onClick={() => setRole(r)} style={{
             flex: 1, padding: '10px', border: 'none', borderRadius: '10px', cursor: 'pointer',
-            background: role === r ? 'white' : 'transparent', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase',
-            transition: '0.3s', boxShadow: role === r ? '0 4px 10px rgba(0,0,0,0.05)' : 'none'
+            background: role === r ? 'white' : 'transparent', fontWeight: 800, fontSize: '11px', textTransform: 'uppercase'
           }}>{r}</button>
         ))}
       </div>
 
-      <input type="email" placeholder="Email Address" onChange={(e) => setEmail(e.target.value)} style={{ width: '100%', padding: '15px', borderRadius: '15px', border: '1px solid #ddd', marginBottom: '15px', outline: 'none' }} />
-      <input type="password" placeholder="Password" onChange={(e) => setPassword(e.target.value)} style={{ width: '100%', padding: '15px', borderRadius: '15px', border: '1px solid #ddd', marginBottom: '25px', outline: 'none' }} />
+      <input type="email" placeholder="Email Address" onChange={(e) => setEmail(e.target.value)} style={{ width: '100%', padding: '15px', borderRadius: '15px', border: '1px solid #ddd', marginBottom: '15px' }} />
+      <input type="password" placeholder="Password" onChange={(e) => setPassword(e.target.value)} style={{ width: '100%', padding: '15px', borderRadius: '15px', border: '1px solid #ddd', marginBottom: '20px' }} />
       
-      <button onClick={handleLogin} style={{ width: '100%', padding: '18px', borderRadius: '15px', border: 'none', background: portalStyles[role].color, color: 'white', fontWeight: 900, cursor: 'pointer' }}>
-        ENTER {role.toUpperCase()} PORTAL
+      <button onClick={handleAuth} disabled={loading} style={{ width: '100%', padding: '18px', borderRadius: '15px', border: 'none', background: '#000', color: 'white', fontWeight: 900, cursor: 'pointer' }}>
+        {loading ? 'Processing...' : isSignup ? 'CREATE ACCOUNT' : 'SIGN IN'}
       </button>
+
+      <p style={{ textAlign: 'center', marginTop: '20px', fontSize: '14px', color: '#666' }}>
+        {isSignup ? 'Already have an account?' : "Don't have an account?"} 
+        <span onClick={() => setIsSignup(!isSignup)} style={{ color: '#0ea5e9', fontWeight: 800, cursor: 'pointer', marginLeft: '5px' }}>
+          {isSignup ? 'Login' : 'Create one'}
+        </span>
+      </p>
     </div>
   );
 }
