@@ -39,6 +39,25 @@ export async function POST(req) {
       }
     }, { headers: { Authorization: `Bearer ${process.env.META_TOKEN}` } });
 
+    import { Resend } from 'resend';
+
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+// Inside the successful payment block:
+await resend.emails.send({
+  from: 'Lumina <tickets@yourdomain.com>',
+  to: customerEmail,
+  subject: 'Your Lumina Event Ticket!',
+  html: `
+    <div style="font-family: sans-serif; text-align: center;">
+      <h1>You are going to ${eventName}!</h1>
+      <p>Show this QR code at the entrance:</p>
+      <img src="${qrUrl}" width="300" />
+      <p>Ticket ID: <b>${ticketId}</b></p>
+    </div>
+  `
+});  
+    
   } else if (type === 'VOTE') {
     // Increment Vote Count in Database
     await supabase.rpc('increment_vote', { candidate_id: target_id });
@@ -46,3 +65,8 @@ export async function POST(req) {
 
   return new Response('OK', { status: 200 });
 }
+
+import { Resend } from 'resend';
+
+const resend = new Resend(process.env.RESEND_API_KEY);
+
