@@ -1,4 +1,6 @@
 "use client";
+import { useState, useEffect } from 'react'; // Added useEffect here
+import { supabase } from '@/lib/supabase';
 import { motion } from 'framer-motion';
 import { Heart, Zap } from 'lucide-react';
 
