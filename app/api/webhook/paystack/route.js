@@ -1,60 +1,54 @@
 import { createClient } from '@supabase/supabase-js';
 import QRCode from 'qrcode';
-import axios from 'axios';
-import crypto from 'crypto';
+import { Resend } from 'resend';
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY);
+const resend = new Resend(process.env.RESEND_API_KEY);
 
 export async function POST(req) {
   const body = await req.json();
+  if (body.event !== 'charge.success') return new Response('OK');
+
+  const { type, target_id } = body.data.metadata;
+  const email = body.data.customer.email;
+
+  if (type === 'VOTE') {
+    await supabase.rpc('increment_vote', { candidate_id: target_id });
+  } 
   
-  // 1. Verify the Paystack Signature (Security)
-  const hash = crypto.createHmac('sha512', process.env.PAYSTACK_SECRET_KEY).update(JSON.stringify(body)).digest('hex');
-  if (hash !== req.headers.get('x-paystack-signature')) {
-    return new Response('Unauthorized', { status: 401 });
-  }
+  else if (type === 'TICKET') {
+    const ticketHash = `TIX-${Math.random().toString(36).toUpperCase().substring(2, 10)}`;
+    const qrBuffer = await QRCode.toBuffer(ticketHash);
 
-  if (body.event === 'charge.success') {
-    const { event_id } = body.data.metadata;
-    const phone = body.data.metadata.custom_fields[0].value;
-    const ticketId = `LMN-${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
+    // 1. Upload QR to Supabase Storage
+    const { data } = await supabase.storage.from('media').upload(`qrs/${ticketHash}.png`, qrBuffer, { contentType: 'image/png' });
+    const qrUrl = supabase.storage.from('media').getPublicUrl(`qrs/${ticketHash}.png`).data.publicUrl;
 
-    // 2. Generate QR Code
-    const qrBuffer = await QRCode.toBuffer(ticketId);
-    
-    // 3. Upload to Supabase
-    const fileName = `qrs/${ticketId}.png`;
-    await supabase.storage.from('media').upload(fileName, qrBuffer);
-    const { data: { publicUrl } } = supabase.storage.from('media').getPublicUrl(fileName);
-
-    // 4. Save to DB
+    // 2. Save Ticket to Database
     await supabase.from('tickets').insert({
-      event_id: event_id,
-      ticket_number: ticketId,
-      customer_phone: phone,
-      qr_url: publicUrl
+      event_id: target_id,
+      ticket_hash: ticketHash,
+      qr_url: qrUrl,
+      customer_email: email,
+      status: 'active'
     });
 
-    // 5. Send WhatsApp via Meta
-    await axios.post(`https://graph.facebook.com/v21.0/${process.env.META_PHONE_ID}/messages`, {
-      messaging_product: "whatsapp",
-      to: phone,
-      type: "template",
-      template: {
-        name: "ticket_delivery_bright", // Your approved Meta template
-        language: { code: "en" },
-        components: [
-          { type: "header", parameters: [{ type: "image", image: { link: publicUrl } }] },
-          { type: "body", parameters: [
-            { type: "text", text: body.data.customer.first_name || "Guest" },
-            { type: "text", text: ticketId }
-          ]}
-        ]
-      }
-    }, {
-      headers: { Authorization: `Bearer ${process.env.META_TOKEN}` }
+    // 3. Send High-End Email (Resend)
+    await resend.emails.send({
+      from: 'Lumina <tickets@yourdomain.com>',
+      to: email,
+      subject: 'Your Digital Ticket is Ready!',
+      html: `
+        <div style="font-family: sans-serif; max-width: 500px; margin: auto; text-align: center; border: 1px solid #eee; padding: 20px; border-radius: 20px;">
+          <h1 style="color: #6366f1;">LUMINA</h1>
+          <p>Your ticket for the event is confirmed.</p>
+          <img src="${qrUrl}" width="250" style="margin: 20px 0;" />
+          <p style="font-weight: bold; font-size: 18px;">ID: ${ticketHash}</p>
+          <p style="color: #666; font-size: 12px;">Present this QR code at the entrance.</p>
+        </div>
+      `
     });
   }
 
-  return new Response('OK', { status: 200 });
+  return new Response('OK');
 }
