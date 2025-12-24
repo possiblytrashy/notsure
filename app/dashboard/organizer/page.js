@@ -2,6 +2,8 @@
 import { useState } from 'react';
 import { supabase } from '@/lib/supabase';
 
+export const dynamic = 'force-dynamic';
+// ... rest of your code
 export default function OrganizerDashboard() {
   const [loading, setLoading] = useState(false);
 
