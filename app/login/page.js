@@ -21,32 +21,25 @@ const handleAuth = async () => {
       ? await supabase.auth.signUp({ 
           email, 
           password, 
-          options: { 
-            data: { role: role },
-            emailRedirectTo: `${window.location.origin}/auth/callback` 
-          } 
+          options: { data: { role: role } } 
         })
       : await supabase.auth.signInWithPassword({ email, password });
 
     if (error) {
-      // 422 often means the user already exists or password fails validation
-      if (error.status === 422) {
-        alert("Signup failed: Check if your email is valid or if you already have an account.");
-      } else {
-        alert("Error: " + error.message);
-      }
-      console.error("Auth Error details:", error);
-    } else {
-      if (isSignup && data.user && data.session === null) {
-        alert("Verification email sent! Please check your inbox (and spam) to activate your account.");
-      } else {
-        // Redirect based on metadata role
-        const userRole = data.user?.user_metadata?.role || 'user';
-        window.location.href = userRole === 'admin' ? '/admin/dashboard' : userRole === 'organizer' ? '/dashboard/organizer' : '/dashboard/user';
-      }
+      alert("Error: " + error.message);
+    } else if (data.user) {
+      // SUCCESS: Since email confirm is off, session is active immediately
+      const userRole = data.user.user_metadata?.role || 'user';
+      
+      // Determine destination
+      let destination = '/dashboard/user';
+      if (userRole === 'admin') destination = '/admin/dashboard';
+      if (userRole === 'organizer') destination = '/dashboard/organizer';
+      
+      window.location.href = destination;
     }
   } catch (err) {
-    alert("A system error occurred. Please try again later.");
+    alert("System error. Try again.");
   } finally {
     setLoading(false);
   }
