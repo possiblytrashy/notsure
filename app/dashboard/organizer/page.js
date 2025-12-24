@@ -1,14 +1,17 @@
 "use client";
 import { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
+import { useRouter } from 'next/navigation'; // Added for redirect after logout
 import { 
   Plus, BarChart3, Users, Ticket, Calendar, 
   Trophy, Wallet, ArrowUpRight, Settings, Image as ImageIcon,
   Link as LinkIcon, Share2, Check, Copy, QrCode, Download, X,
-  TrendingUp, Smartphone, Clock, CheckCircle2, XCircle, Loader2, Save, Trash2
+  TrendingUp, Smartphone, Clock, CheckCircle2, XCircle, Loader2, Save, Trash2,
+  LogOut // Added Logout icon
 } from 'lucide-react';
 
 export default function IntegratedDashboard() {
+  const router = useRouter();
   // Data State
   const [activeTab, setActiveTab] = useState('events');
   const [data, setData] = useState({ events: [], contests: [], payouts: [], profile: null });
@@ -30,34 +33,44 @@ export default function IntegratedDashboard() {
   });
 
   async function loadDashboard() {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        router.push('/login'); // Redirect if no user
+        return;
+      }
 
-    const userId = user.id;
+      const userId = user.id;
 
-    const [eventsRes, contestsRes, payoutsRes, statsRes] = await Promise.all([
-      supabase.from('events').select('*').eq('organizer_id', userId),
-      supabase.from('contests').select('*, candidates(*)').eq('organizer_id', userId),
-      supabase.from('payouts').select('*').eq('organizer_id', userId).order('created_at', { ascending: false }),
-      supabase.rpc('get_organizer_stats') 
-    ]);
+      // FIX: Added { organizer_id: userId } to the rpc call to resolve 400 error
+      const [eventsRes, contestsRes, payoutsRes, statsRes] = await Promise.all([
+        supabase.from('events').select('*').eq('organizer_id', userId),
+        supabase.from('contests').select('*, candidates(*)').eq('organizer_id', userId),
+        supabase.from('payouts').select('*').eq('organizer_id', userId).order('created_at', { ascending: false }),
+        supabase.rpc('get_organizer_stats', { organizer_id: userId }) 
+      ]);
 
-    if (statsRes.data && statsRes.data[0]) {
-      const s = statsRes.data[0];
-      setStats({
-        revenue: s.total_revenue || 0,
-        votes: s.total_votes || 0,
-        balance: (s.total_revenue || 0) - (s.total_payouts || 0)
+      if (statsRes.data) {
+        // SQL functions often return an array even for a single object
+        const s = Array.isArray(statsRes.data) ? statsRes.data[0] : statsRes.data;
+        setStats({
+          revenue: s.total_revenue || 0,
+          votes: s.total_votes || 0,
+          balance: (s.total_revenue || 0) - (s.total_payouts || 0)
+        });
+      }
+
+      setData({
+        events: eventsRes.data || [],
+        contests: contestsRes.data || [],
+        payouts: payoutsRes.data || [],
+        profile: user
       });
+    } catch (err) {
+      console.error("Dashboard Load Error:", err);
+    } finally {
+      setLoading(false);
     }
-
-    setData({
-      events: eventsRes.data || [],
-      contests: contestsRes.data || [],
-      payouts: payoutsRes.data || [],
-      profile: user
-    });
-    setLoading(false);
   }
 
   useEffect(() => {
@@ -66,6 +79,15 @@ export default function IntegratedDashboard() {
 
   // --- LOGIC HANDLERS ---
   
+  const handleLogout = async () => {
+    const { error } = await supabase.auth.signOut();
+    if (error) {
+      alert("Error logging out");
+    } else {
+      router.push('/login'); // Or your home/login page
+    }
+  };
+
   const deleteItem = async (table, id) => {
     if(!confirm("Are you sure you want to delete this? This cannot be undone.")) return;
     
@@ -73,7 +95,7 @@ export default function IntegratedDashboard() {
     if (error) {
         alert("Error deleting item");
     } else {
-        loadDashboard(); // Refresh data
+        loadDashboard(); 
     }
   };
 
@@ -135,12 +157,20 @@ export default function IntegratedDashboard() {
           <h2 style={revenueText}>GHS {stats.balance.toLocaleString(undefined, {minimumFractionDigits: 2})}</h2>
           <p style={{fontSize: '11px', color: 'rgba(255,255,255,0.4)', marginTop: '5px'}}>Lifetime: GHS {stats.revenue.toLocaleString()}</p>
         </div>
-        <div style={{ display: 'flex', gap: '15px' }}>
+        <div style={{ display: 'flex', gap: '15px', alignItems: 'center' }}>
           <button style={actionBtn('#fff', '#000')} onClick={() => setShowSettingsModal(true)}>
             <Wallet size={18}/> Payout Settings
           </button>
           <button style={actionBtn('#0ea5e9', '#fff')} onClick={() => setShowWithdrawModal(true)}>
             Withdraw <ArrowUpRight size={18}/>
+          </button>
+          {/* LOGOUT BUTTON */}
+          <button 
+            style={logoutBtn} 
+            onClick={handleLogout}
+            title="Sign Out"
+          >
+            <LogOut size={20} />
           </button>
         </div>
       </div>
@@ -269,7 +299,7 @@ export default function IntegratedDashboard() {
         )}
       </div>
 
-      {/* MODALS (Remain same) */}
+      {/* MODALS */}
       {showWithdrawModal && (
         <div style={modalBackdrop} onClick={() => setShowWithdrawModal(false)}>
             <div style={modalPaper} onClick={e => e.stopPropagation()}>
@@ -344,13 +374,26 @@ export default function IntegratedDashboard() {
   );
 }
 
-// --- NEW/UPDATED STYLES ---
+// --- UPDATED STYLES ---
+const logoutBtn = { 
+  background: 'rgba(255,50,50,0.1)', 
+  color: '#ff4d4d', 
+  border: 'none', 
+  width: '45px', 
+  height: '45px', 
+  borderRadius: '15px', 
+  cursor: 'pointer', 
+  display: 'flex', 
+  alignItems: 'center', 
+  justifyContent: 'center', 
+  transition: 'all 0.2s ease',
+  marginLeft: '10px'
+};
+
 const imagePlaceholder = { width: '100%', height: '100%', background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center' };
 const iconCircleDelete = { width: '38px', height: '38px', borderRadius: '12px', background: '#fef2f2', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 5px 15px rgba(0,0,0,0.1)' };
 const deleteBtnSmall = { background: '#fef2f2', border: 'none', width: '30px', height: '30px', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' };
 const actionBtnSmall = { background: '#fff', border: '1px solid #eee', padding: '6px 12px', borderRadius: '10px', fontSize: '12px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' };
-
-// (Previous styles)
 const analyticMiniCard = { background: '#fff', padding: '20px 40px', borderRadius: '25px', border: '1px solid #eee', flex: 1 };
 const analyticsPlaceholder = { padding: '60px 20px', textAlign: 'center', background: '#f9fafb', borderRadius: '35px', border: '2px dashed #eee' };
 const centerScreen = { padding: '200px', textAlign: 'center', fontWeight: 900, color: '#aaa' };
