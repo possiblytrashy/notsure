@@ -5,6 +5,8 @@ import { CheckCircle, ArrowRight, Download, Ticket } from 'lucide-react';
 import Link from 'next/link';
 import { supabase } from '@/lib/supabase';
 
+export const dynamic = 'force-dynamic';
+// ... rest of your code
 export default function SuccessPage() {
   const [ticket, setTicket] = useState(null);
   const [loading, setLoading] = useState(true);
