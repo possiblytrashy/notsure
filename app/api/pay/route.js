@@ -2,26 +2,35 @@ import { NextResponse } from 'next/server';
 import axios from 'axios';
 
 export async function POST(req) {
-  const { type, id, email, phone, amount, subaccount } = await req.json();
+  const { amount, email, phone, eventId, organizerSubaccount } = await req.json();
 
   try {
-    const payload = {
-      tx_ref: `LMN-${Date.now()}`,
-      amount: amount,
-      currency: "GHS",
-      redirect_url: `${process.env.NEXT_PUBLIC_APP_URL}/verify`,
-      customer: { email, phonenumber: phone },
-      // The Magic: Split Payment
-      subaccounts: [{ id: subaccount }], 
-      meta: { type, target_id: id } 
-    };
+    const response = await axios.post(
+      'https://api.paystack.co/transaction/initialize',
+      {
+        email: email,
+        amount: amount * 100, // Paystack uses pesewas/kobo (Amount * 100)
+        currency: "GHS",
+        callback_url: `${process.env.NEXT_PUBLIC_APP_URL}/verify`,
+        metadata: {
+          event_id: eventId,
+          custom_fields: [{ display_name: "Phone", variable_name: "phone", value: phone }]
+        },
+        // Automatic Split: Organizer gets their share, you get your commission
+        subaccount: organizerSubaccount, 
+        bearer: "subaccount" // The organizer pays the Paystack fee
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
 
-    const res = await axios.post('https://api.flutterwave.com/v3/payments', payload, {
-      headers: { Authorization: `Bearer ${process.env.FLW_SECRET_KEY}` }
-    });
-
-    return NextResponse.json({ url: res.data.data.link });
-  } catch (err) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    return NextResponse.json({ url: response.data.data.authorization_url });
+  } catch (error) {
+    console.error(error.response?.data);
+    return NextResponse.json({ error: 'Paystack Init Failed' }, { status: 500 });
   }
 }
