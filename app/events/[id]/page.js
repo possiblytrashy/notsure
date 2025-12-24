@@ -7,6 +7,8 @@ export default function EventPage() {
   const { id } = useParams();
   const [event, setEvent] = useState(null);
 
+  
+
   // Add this function inside your EventPage component in app/events/[id]/page.js
 const handlePurchase = async () => {
   const { data: { user } } = await supabase.auth.getUser();
@@ -23,10 +25,24 @@ const handlePurchase = async () => {
   else alert("Purchase failed: " + error.message);
 };
 
-// Update your button to:
-<button onClick={handlePurchase} style={{ /* existing styles */ }}>
-  SECURE ACCESS
-</button>
+  // Inside your EventPage component, map through the ticket_tiers:
+<div style={{ marginTop: '30px' }}>
+  <h3 style={{ fontWeight: 900, marginBottom: '15px' }}>Select Ticket Type</h3>
+  {event.ticket_tiers?.map((tier, idx) => (
+    <div key={idx} style={{ 
+      display: 'flex', justifyContent: 'space-between', alignItems: 'center', 
+      padding: '20px', borderRadius: '20px', background: '#f8fafc', marginBottom: '10px',
+      border: '2px solid transparent', cursor: 'pointer', transition: '0.2s'
+    }} onMouseEnter={(e) => e.currentTarget.style.borderColor = '#0ea5e9'}
+       onMouseLeave={(e) => e.currentTarget.style.borderColor = 'transparent'}>
+      <div>
+        <p style={{ margin: 0, fontWeight: 800 }}>{tier.name}</p>
+        <p style={{ margin: 0, fontSize: '12px', color: '#64748b' }}>GHS {tier.price}</p>
+      </div>
+      <button style={{ background: '#000', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: '12px', fontWeight: 700 }}>Select</button>
+    </div>
+  ))}
+</div>
 
   useEffect(() => {
     async function get() {
