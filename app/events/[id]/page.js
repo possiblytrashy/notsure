@@ -7,6 +7,27 @@ export default function EventPage() {
   const { id } = useParams();
   const [event, setEvent] = useState(null);
 
+  // Add this function inside your EventPage component in app/events/[id]/page.js
+const handlePurchase = async () => {
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return window.location.href = '/login';
+
+  const ticketData = {
+    event_id: id,
+    user_id: user.id,
+    qr_code: `TICKET-${Math.random().toString(36).substr(2, 9).toUpperCase()}`
+  };
+
+  const { error } = await supabase.from('tickets').insert([ticketData]);
+  if (!error) window.location.href = '/dashboard/user';
+  else alert("Purchase failed: " + error.message);
+};
+
+// Update your button to:
+<button onClick={handlePurchase} style={{ /* existing styles */ }}>
+  SECURE ACCESS
+</button>
+
   useEffect(() => {
     async function get() {
       const { data } = await supabase.from('events').select('*').eq('id', id).single();
@@ -34,10 +55,12 @@ export default function EventPage() {
             </div>
           </div>
           <p style={{ color: '#555', lineHeight: 1.6, fontSize: '18px', marginBottom: '40px' }}>{event.description || "Join us for an unforgettable experience in the heart of the city."}</p>
-          <button style={{ 
-            width: '100%', background: '#000', color: '#fff', border: 'none', padding: '25px', 
-            borderRadius: '20px', fontWeight: 900, fontSize: '16px', letterSpacing: '2px', cursor: 'pointer'
-          }}>SECURE ACCESS</button>
+        
+      // Update your button to:
+<button onClick={handlePurchase} style={{ width: '100%', background: '#000', color: '#fff', border: 'none', padding: '25px', 
+            borderRadius: '20px', fontWeight: 900, fontSize: '16px', letterSpacing: '2px', cursor: 'pointer'}}>
+  SECURE ACCESS
+<</button>
         </div>
       </div>
     </div>
