@@ -28,23 +28,6 @@ export default function RootLayout({ children }) {
         `}</style>
       </head>
       <body className={`${outfit.className} mesh-bg`} style={{ margin: 0, minHeight: '100vh' }}>
-        <nav className="glass-nav" style={{
-          position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)',
-          width: '95%', maxWidth: '1200px', borderRadius: '24px', padding: '12px 30px',
-          display: 'flex', justifyContent: 'space-between', alignItems: 'center', zIndex: 10000,
-          boxShadow: '0 8px 32px rgba(31, 38, 135, 0.15)'
-        }}>
-          <a href="/" style={{ textDecoration: 'none', color: '#000', fontWeight: 900, fontSize: '24px', letterSpacing: '-1.5px' }}>
-            OUSTED<span style={{ color: '#e73c7e' }}>.</span>
-          </a>
-          <div style={{ display: 'flex', gap: '25px', alignItems: 'center' }}>
-            <a href="/voting" style={{ textDecoration: 'none', color: '#333', fontSize: '12px', fontWeight: 800, textTransform: 'uppercase' }}>Voting</a>
-            <a href="/admin/scan" style={{ 
-              textDecoration: 'none', color: '#fff', background: '#000', padding: '10px 20px', 
-              borderRadius: '15px', fontSize: '11px', fontWeight: 900, letterSpacing: '1px' 
-            }}>STAFF SCANNER</a>
-          </div>
-              // ... inside your nav return in app/layout.js
 <nav className="glass-nav" style={{
   position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)',
   width: '95%', maxWidth: '1200px', borderRadius: '24px', padding: '12px 30px',
