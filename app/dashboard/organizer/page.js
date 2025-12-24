@@ -5,13 +5,13 @@ import {
   Plus, BarChart3, Users, Ticket, Calendar, 
   Trophy, Wallet, ArrowUpRight, Settings, Image as ImageIcon,
   Link as LinkIcon, Share2, Check, Copy, QrCode, Download, X,
-  TrendingUp, Smartphone
+  TrendingUp, Smartphone, Clock, CheckCircle2, XCircle, Loader2
 } from 'lucide-react';
 
 export default function IntegratedDashboard() {
   // Data State
   const [activeTab, setActiveTab] = useState('events');
-  const [data, setData] = useState({ events: [], contests: [], profile: null });
+  const [data, setData] = useState({ events: [], contests: [], payouts: [], profile: null });
   const [loading, setLoading] = useState(true);
   
   // UI State
@@ -26,17 +26,19 @@ export default function IntegratedDashboard() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      // FIX: Sanitize UUID to prevent 400 Bad Request error
       const userId = String(user.id).trim();
 
-      const [eventsRes, contestsRes] = await Promise.all([
+      // Fetch Events, Contests, and Payout History in one go
+      const [eventsRes, contestsRes, payoutsRes] = await Promise.all([
         supabase.from('events').select('*').eq('organizer_id', userId),
-        supabase.from('contests').select('*, candidates(*)').eq('organizer_id', userId)
+        supabase.from('contests').select('*, candidates(*)').eq('organizer_id', userId),
+        supabase.from('payouts').select('*').eq('organizer_id', userId).order('created_at', { ascending: false })
       ]);
 
       setData({
         events: eventsRes.data || [],
         contests: contestsRes.data || [],
+        payouts: payoutsRes.data || [],
         profile: user
       });
       setLoading(false);
@@ -62,15 +64,40 @@ export default function IntegratedDashboard() {
     setShowQR(`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(url)}`);
   };
 
-  const handleWithdrawal = () => {
+  const handleWithdrawal = async () => {
     if (!withdrawAmount || withdrawAmount <= 0) return alert("Enter a valid amount");
     setIsProcessing(true);
-    setTimeout(() => {
+
+    try {
+      // 1. Record the request in Supabase
+      const { data: payoutEntry, error: dbError } = await supabase
+        .from('payouts')
+        .insert([{ 
+            organizer_id: data.profile.id, 
+            amount: parseFloat(withdrawAmount),
+            momo_number: "054 **** 123", // Ideally from a settings state
+            momo_network: "MTN",
+            status: 'pending'
+        }]);
+
+      if (dbError) throw dbError;
+
+      // 2. Trigger the Paystack Edge Function (if deployed)
+      // await supabase.functions.invoke('process-payout', { body: { ... } });
+
       alert(`Request Received! GHS ${withdrawAmount} will be sent to your linked MoMo wallet.`);
+      
+      // Refresh local payout list
+      const { data: newPayouts } = await supabase.from('payouts').select('*').eq('organizer_id', data.profile.id).order('created_at', { ascending: false });
+      setData(prev => ({ ...prev, payouts: newPayouts || [] }));
+
+    } catch (err) {
+      alert("Error processing withdrawal. Please try again.");
+    } finally {
       setIsProcessing(false);
       setShowWithdrawModal(false);
       setWithdrawAmount('');
-    }, 2000);
+    }
   };
 
   const totalRevenue = 14500.50; 
@@ -95,6 +122,31 @@ export default function IntegratedDashboard() {
           </button>
         </div>
       </div>
+
+      {/* NEW: PAYOUT HISTORY QUICK VIEW */}
+      {data.payouts.length > 0 && (
+        <div style={historySection}>
+          <h4 style={{margin: '0 0 20px', fontWeight: 900, display: 'flex', alignItems: 'center', gap: '10px'}}>
+            <Clock size={18} color="#0ea5e9"/> Recent Withdrawals
+          </h4>
+          <div style={historyTable}>
+            {data.payouts.slice(0, 3).map((payout) => (
+              <div key={payout.id} style={historyRow}>
+                <div style={{display: 'flex', gap: '15px', alignItems: 'center'}}>
+                  <div style={statusIcon(payout.status)}>
+                    {payout.status === 'success' ? <CheckCircle2 size={16} /> : payout.status === 'failed' ? <XCircle size={16} /> : <Loader2 size={16} style={{animation: 'spin 2s linear infinite'}} />}
+                  </div>
+                  <div>
+                    <p style={{margin: 0, fontWeight: 800, fontSize: '14px'}}>GHS {payout.amount}</p>
+                    <p style={{margin: 0, fontSize: '11px', color: '#888'}}>{new Date(payout.created_at).toLocaleDateString()}</p>
+                  </div>
+                </div>
+                <div style={statusBadge(payout.status)}>{payout.status.toUpperCase()}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 2. NAVIGATION TABS */}
       <div style={tabContainer}>
@@ -181,6 +233,14 @@ export default function IntegratedDashboard() {
             })}
           </div>
         )}
+
+        {activeTab === 'analytics' && (
+           <div style={analyticsPlaceholder}>
+              <BarChart3 size={48} color="#0ea5e9" style={{marginBottom:'20px'}}/>
+              <h2 style={{fontWeight:900}}>Real-time Analytics</h2>
+              <p style={{color:'#666'}}>Visual data representation for tickets and voting trends will appear here.</p>
+           </div>
+        )}
       </div>
 
       {/* 4. MODALS (Withdrawal & QR) */}
@@ -228,12 +288,17 @@ export default function IntegratedDashboard() {
   );
 }
 
-// --- STYLING OBJECTS ---
+// --- ALL STYLES (Consolidated) ---
 const centerScreen = { padding: '200px', textAlign: 'center', fontWeight: 900, color: '#aaa' };
-const financeBar = { background: '#000', color: '#fff', padding: '40px', borderRadius: '40px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '50px' };
+const financeBar = { background: '#000', color: '#fff', padding: '40px', borderRadius: '40px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '40px' };
 const subLabel = { margin: 0, fontSize: '12px', fontWeight: 800, color: 'rgba(255,255,255,0.5)' };
 const revenueText = { margin: 0, fontSize: '36px', fontWeight: 900 };
 const actionBtn = (bg, col) => ({ background: bg, color: col, border: 'none', padding: '14px 24px', borderRadius: '18px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px', fontSize: '14px' });
+const historySection = { marginBottom: '50px', background: '#fff', padding: '30px', borderRadius: '35px', border: '1px solid #f0f0f0' };
+const historyTable = { display: 'flex', flexDirection: 'column', gap: '15px' };
+const historyRow = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px 20px', background: '#fcfcfc', borderRadius: '20px', border: '1px solid #f5f5f5' };
+const statusIcon = (status) => ({ width: '35px', height: '35px', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', background: status === 'success' ? '#f0fdf4' : status === 'failed' ? '#fef2f2' : '#eff6ff', color: status === 'success' ? '#22c55e' : status === 'failed' ? '#ef4444' : '#3b82f6' });
+const statusBadge = (status) => ({ fontSize: '10px', fontWeight: 900, padding: '5px 12px', borderRadius: '10px', letterSpacing: '0.5px', background: status === 'success' ? '#22c55e' : status === 'failed' ? '#ef4444' : '#000', color: '#fff' });
 const tabContainer = { display: 'flex', gap: '30px', marginBottom: '40px', borderBottom: '1px solid #eee' };
 const tabStyle = (active) => ({ padding: '15px 5px', border: 'none', background: 'none', cursor: 'pointer', fontSize: '15px', fontWeight: 800, textTransform: 'uppercase', color: active ? '#000' : '#aaa', borderBottom: active ? '3px solid #000' : '3px solid transparent' });
 const contentHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' };
@@ -260,3 +325,4 @@ const balancePreview = { background: '#f0f9ff', padding: '20px', borderRadius: '
 const largeInput = { width: '100%', padding: '20px', borderRadius: '15px', border: '2px solid #f0f0f0', fontSize: '20px', fontWeight: 800, marginBottom: '20px', textAlign: 'center', outline: 'none' };
 const momoCard = { display: 'flex', gap: '15px', alignItems: 'center', padding: '15px', background: '#fff', border: '1px solid #eee', borderRadius: '15px', marginBottom: '30px' };
 const payoutBtn = (loading) => ({ width: '100%', background: loading ? '#ccc' : '#0ea5e9', color: '#fff', border: 'none', padding: '20px', borderRadius: '20px', fontWeight: 900, cursor: loading ? 'not-allowed' : 'pointer', fontSize: '16px' });
+const analyticsPlaceholder = { padding: '80px 20px', textAlign: 'center', background: '#f9fafb', borderRadius: '35px', border: '2px dashed #eee' };
