@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabase';
+import { supabase } from '../../lib/supabase';
 import { 
   Zap, Trophy, Search, TrendingUp, ArrowLeft, 
   ChevronRight, Share2, XCircle, BarChart3, Send 
