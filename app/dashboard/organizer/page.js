@@ -12,13 +12,14 @@ export default function IntegratedDashboard() {
   // Data State
   const [activeTab, setActiveTab] = useState('events');
   const [data, setData] = useState({ events: [], contests: [], payouts: [], profile: null });
+  const [stats, setStats] = useState({ revenue: 0, votes: 0, balance: 0 }); // New Stats State
   const [loading, setLoading] = useState(true);
   
   // UI State
   const [copying, setCopying] = useState(null);
   const [showQR, setShowQR] = useState(null);
   const [showWithdrawModal, setShowWithdrawModal] = useState(false);
-  const [showSettingsModal, setShowSettingsModal] = useState(false); // New state
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [withdrawAmount, setWithdrawAmount] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
 
@@ -33,14 +34,25 @@ export default function IntegratedDashboard() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
 
-      const userId = String(user.id).trim();
+      const userId = user.id;
 
-      // Fetch Events, Contests, and Payout History
-      const [eventsRes, contestsRes, payoutsRes] = await Promise.all([
+      // 1. Fetch Lists and Stats in parallel
+      const [eventsRes, contestsRes, payoutsRes, statsRes] = await Promise.all([
         supabase.from('events').select('*').eq('organizer_id', userId),
         supabase.from('contests').select('*, candidates(*)').eq('organizer_id', userId),
-        supabase.from('payouts').select('*').eq('organizer_id', userId).order('created_at', { ascending: false })
+        supabase.from('payouts').select('*').eq('organizer_id', userId).order('created_at', { ascending: false }),
+        supabase.rpc('get_organizer_stats') // Calling the SQL function we created
       ]);
+
+      // 2. Process Stats
+      if (statsRes.data && statsRes.data[0]) {
+        const s = statsRes.data[0];
+        setStats({
+          revenue: s.total_revenue || 0,
+          votes: s.total_votes || 0,
+          balance: (s.total_revenue || 0) - (s.total_payouts || 0)
+        });
+      }
 
       setData({
         events: eventsRes.data || [],
@@ -55,15 +67,18 @@ export default function IntegratedDashboard() {
 
   // --- LOGIC HANDLERS ---
   const handleWithdrawal = async () => {
-    if (!withdrawAmount || withdrawAmount <= 0) return alert("Enter a valid amount");
+    const amount = parseFloat(withdrawAmount);
+    if (!amount || amount <= 0) return alert("Enter a valid amount");
+    if (amount > stats.balance) return alert("Insufficient balance");
+    
     setIsProcessing(true);
 
     try {
-      const { data: payoutEntry, error: dbError } = await supabase
+      const { error: dbError } = await supabase
         .from('payouts')
         .insert([{ 
             organizer_id: data.profile.id, 
-            amount: parseFloat(withdrawAmount),
+            amount: amount,
             momo_number: momoConfig.number,
             momo_network: momoConfig.network,
             status: 'pending'
@@ -71,13 +86,23 @@ export default function IntegratedDashboard() {
 
       if (dbError) throw dbError;
 
-      alert(`Request Received! GHS ${withdrawAmount} will be sent to your ${momoConfig.network} wallet.`);
+      alert(`Request Received! GHS ${amount} will be sent to your ${momoConfig.network} wallet.`);
       
+      // Refresh Payouts & Stats
       const { data: newPayouts } = await supabase.from('payouts').select('*').eq('organizer_id', data.profile.id).order('created_at', { ascending: false });
+      const { data: newStats } = await supabase.rpc('get_organizer_stats');
+      
       setData(prev => ({ ...prev, payouts: newPayouts || [] }));
+      if (newStats?.[0]) {
+          setStats({
+              revenue: newStats[0].total_revenue,
+              votes: newStats[0].total_votes,
+              balance: newStats[0].total_revenue - newStats[0].total_payouts
+          });
+      }
 
     } catch (err) {
-      alert("Error processing withdrawal. Check your internet or balance.");
+      alert("Error processing withdrawal.");
     } finally {
       setIsProcessing(false);
       setShowWithdrawModal(false);
@@ -101,8 +126,6 @@ export default function IntegratedDashboard() {
     setShowQR(`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(url)}`);
   };
 
-  const totalRevenue = 14500.50; 
-
   if (loading) return <div style={centerScreen}>Initialising OUSTED Systems...</div>;
 
   return (
@@ -111,8 +134,9 @@ export default function IntegratedDashboard() {
       {/* 1. FINANCIAL TOP BAR */}
       <div style={financeBar}>
         <div>
-          <p style={subLabel}>TOTAL REVENUE (NET)</p>
-          <h2 style={revenueText}>GHS {totalRevenue.toLocaleString()}</h2>
+          <p style={subLabel}>WITHDRAWABLE BALANCE</p>
+          <h2 style={revenueText}>GHS {stats.balance.toLocaleString(undefined, {minimumFractionDigits: 2})}</h2>
+          <p style={{fontSize: '11px', color: 'rgba(255,255,255,0.4)', marginTop: '5px'}}>Lifetime: GHS {stats.revenue.toLocaleString()}</p>
         </div>
         <div style={{ display: 'flex', gap: '15px' }}>
           <button style={actionBtn('#fff', '#000')} onClick={() => setShowSettingsModal(true)}>
@@ -188,8 +212,7 @@ export default function IntegratedDashboard() {
         {activeTab === 'contests' && (
           <div style={gridStyle}>
             {data.contests.map(contest => {
-               const categories = contest.candidates ? [...new Set(contest.candidates.map(c => c.category || 'General'))] : [];
-               const totalVotes = contest.candidates?.reduce((acc, curr) => acc + curr.vote_count, 0) || 0;
+               const contestVotes = contest.candidates?.reduce((acc, curr) => acc + (curr.vote_count || 0), 0) || 0;
                return (
                 <div key={contest.id} style={cardStyle}>
                   <div style={flexBetween}>
@@ -202,26 +225,42 @@ export default function IntegratedDashboard() {
                     </div>
                   </div>
                   <div style={statBox}>
-                    <p style={miniLabel}>CUMULATIVE VOTES</p>
-                    <p style={{ margin: 0, fontSize: '24px', fontWeight: 900 }}>{totalVotes.toLocaleString()}</p>
+                    <p style={miniLabel}>CONTEST VOTES</p>
+                    <p style={{ margin: 0, fontSize: '24px', fontWeight: 900 }}>{contestVotes.toLocaleString()}</p>
                   </div>
                 </div>
                )
             })}
           </div>
         )}
+
+        {activeTab === 'analytics' && (
+             <div style={analyticsPlaceholder}>
+                <div style={{display: 'flex', gap: '20px', justifyContent: 'center', marginBottom: '40px'}}>
+                    <div style={analyticMiniCard}>
+                        <p style={miniLabel}>TOTAL VOTES</p>
+                        <h2 style={{margin:0}}>{stats.votes.toLocaleString()}</h2>
+                    </div>
+                    <div style={analyticMiniCard}>
+                        <p style={miniLabel}>LIFETIME REVENUE</p>
+                        <h2 style={{margin:0}}>GHS {stats.revenue.toLocaleString()}</h2>
+                    </div>
+                </div>
+                <BarChart3 size={48} color="#0ea5e9" style={{marginBottom:'20px'}}/>
+                <h2 style={{fontWeight:900}}>Voting Trends</h2>
+                <p style={{color:'#666'}}>Visual charts are being connected to your real-time data.</p>
+             </div>
+        )}
       </div>
 
-      {/* --- MODALS --- */}
-
-      {/* WITHDRAW MODAL */}
+      {/* MODALS */}
       {showWithdrawModal && (
         <div style={modalBackdrop} onClick={() => setShowWithdrawModal(false)}>
             <div style={modalPaper} onClick={e => e.stopPropagation()}>
                 <h3 style={modalTitle}>Withdraw Funds</h3>
                 <div style={balancePreview}>
-                    <p style={miniLabel}>AVAILABLE</p>
-                    <h2 style={{margin:0, fontSize:'32px'}}>GHS {totalRevenue.toLocaleString()}</h2>
+                    <p style={miniLabel}>AVAILABLE TO WITHDRAW</p>
+                    <h2 style={{margin:0, fontSize:'32px'}}>GHS {stats.balance.toLocaleString()}</h2>
                 </div>
                 <input 
                     type="number" 
@@ -244,7 +283,6 @@ export default function IntegratedDashboard() {
         </div>
       )}
 
-      {/* PAYOUT SETTINGS MODAL */}
       {showSettingsModal && (
         <div style={modalBackdrop} onClick={() => setShowSettingsModal(false)}>
           <div style={modalPaper} onClick={e => e.stopPropagation()}>
@@ -260,7 +298,6 @@ export default function IntegratedDashboard() {
                 <option value="VODAFONE">Vodafone Cash</option>
                 <option value="AIRTELTIGO">AirtelTigo Money</option>
               </select>
-
               <p style={miniLabel}>PHONE NUMBER</p>
               <input 
                 type="text" 
@@ -291,8 +328,11 @@ export default function IntegratedDashboard() {
   );
 }
 
-// Styles remain identical to your previous version but adding a few for the new modal
-const analyticsPlaceholder = { padding: '80px 20px', textAlign: 'center', background: '#f9fafb', borderRadius: '35px', border: '2px dashed #eee' };
+// Additional Styles
+const analyticMiniCard = { background: '#fff', padding: '20px 40px', borderRadius: '25px', border: '1px solid #eee', flex: 1 };
+
+// (Previous styles remain same)
+const analyticsPlaceholder = { padding: '60px 20px', textAlign: 'center', background: '#f9fafb', borderRadius: '35px', border: '2px dashed #eee' };
 const centerScreen = { padding: '200px', textAlign: 'center', fontWeight: 900, color: '#aaa' };
 const financeBar = { background: '#000', color: '#fff', padding: '40px', borderRadius: '40px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '40px' };
 const subLabel = { margin: 0, fontSize: '12px', fontWeight: 800, color: 'rgba(255,255,255,0.5)' };
