@@ -53,7 +53,6 @@ export default function RootLayout({ children }) {
     }}>SCANNER</a>
   </div>
 </nav>
-        </nav>
         <main style={{ paddingTop: '110px' }}>{children}</main>
       </body>
     </html>
