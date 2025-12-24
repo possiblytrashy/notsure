@@ -60,7 +60,7 @@ const handlePurchase = async () => {
 <button onClick={handlePurchase} style={{ width: '100%', background: '#000', color: '#fff', border: 'none', padding: '25px', 
             borderRadius: '20px', fontWeight: 900, fontSize: '16px', letterSpacing: '2px', cursor: 'pointer'}}>
   SECURE ACCESS
-<</button>
+</button>
         </div>
       </div>
     </div>
