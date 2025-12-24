@@ -5,14 +5,14 @@ import {
   Plus, BarChart3, Users, Ticket, Calendar, 
   Trophy, Wallet, ArrowUpRight, Settings, Image as ImageIcon,
   Link as LinkIcon, Share2, Check, Copy, QrCode, Download, X,
-  TrendingUp, Smartphone, Clock, CheckCircle2, XCircle, Loader2, Save
+  TrendingUp, Smartphone, Clock, CheckCircle2, XCircle, Loader2, Save, Trash2
 } from 'lucide-react';
 
 export default function IntegratedDashboard() {
   // Data State
   const [activeTab, setActiveTab] = useState('events');
   const [data, setData] = useState({ events: [], contests: [], payouts: [], profile: null });
-  const [stats, setStats] = useState({ revenue: 0, votes: 0, balance: 0 }); // New Stats State
+  const [stats, setStats] = useState({ revenue: 0, votes: 0, balance: 0 });
   const [loading, setLoading] = useState(true);
   
   // UI State
@@ -29,43 +29,54 @@ export default function IntegratedDashboard() {
     network: "MTN"
   });
 
-  useEffect(() => {
-    async function loadDashboard() {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+  async function loadDashboard() {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
 
-      const userId = user.id;
+    const userId = user.id;
 
-      // 1. Fetch Lists and Stats in parallel
-      const [eventsRes, contestsRes, payoutsRes, statsRes] = await Promise.all([
-        supabase.from('events').select('*').eq('organizer_id', userId),
-        supabase.from('contests').select('*, candidates(*)').eq('organizer_id', userId),
-        supabase.from('payouts').select('*').eq('organizer_id', userId).order('created_at', { ascending: false }),
-        supabase.rpc('get_organizer_stats') // Calling the SQL function we created
-      ]);
+    const [eventsRes, contestsRes, payoutsRes, statsRes] = await Promise.all([
+      supabase.from('events').select('*').eq('organizer_id', userId),
+      supabase.from('contests').select('*, candidates(*)').eq('organizer_id', userId),
+      supabase.from('payouts').select('*').eq('organizer_id', userId).order('created_at', { ascending: false }),
+      supabase.rpc('get_organizer_stats') 
+    ]);
 
-      // 2. Process Stats
-      if (statsRes.data && statsRes.data[0]) {
-        const s = statsRes.data[0];
-        setStats({
-          revenue: s.total_revenue || 0,
-          votes: s.total_votes || 0,
-          balance: (s.total_revenue || 0) - (s.total_payouts || 0)
-        });
-      }
-
-      setData({
-        events: eventsRes.data || [],
-        contests: contestsRes.data || [],
-        payouts: payoutsRes.data || [],
-        profile: user
+    if (statsRes.data && statsRes.data[0]) {
+      const s = statsRes.data[0];
+      setStats({
+        revenue: s.total_revenue || 0,
+        votes: s.total_votes || 0,
+        balance: (s.total_revenue || 0) - (s.total_payouts || 0)
       });
-      setLoading(false);
     }
+
+    setData({
+      events: eventsRes.data || [],
+      contests: contestsRes.data || [],
+      payouts: payoutsRes.data || [],
+      profile: user
+    });
+    setLoading(false);
+  }
+
+  useEffect(() => {
     loadDashboard();
   }, []);
 
   // --- LOGIC HANDLERS ---
+  
+  const deleteItem = async (table, id) => {
+    if(!confirm("Are you sure you want to delete this? This cannot be undone.")) return;
+    
+    const { error } = await supabase.from(table).delete().eq('id', id);
+    if (error) {
+        alert("Error deleting item");
+    } else {
+        loadDashboard(); // Refresh data
+    }
+  };
+
   const handleWithdrawal = async () => {
     const amount = parseFloat(withdrawAmount);
     if (!amount || amount <= 0) return alert("Enter a valid amount");
@@ -85,22 +96,8 @@ export default function IntegratedDashboard() {
         }]);
 
       if (dbError) throw dbError;
-
-      alert(`Request Received! GHS ${amount} will be sent to your ${momoConfig.network} wallet.`);
-      
-      // Refresh Payouts & Stats
-      const { data: newPayouts } = await supabase.from('payouts').select('*').eq('organizer_id', data.profile.id).order('created_at', { ascending: false });
-      const { data: newStats } = await supabase.rpc('get_organizer_stats');
-      
-      setData(prev => ({ ...prev, payouts: newPayouts || [] }));
-      if (newStats?.[0]) {
-          setStats({
-              revenue: newStats[0].total_revenue,
-              votes: newStats[0].total_votes,
-              balance: newStats[0].total_revenue - newStats[0].total_payouts
-          });
-      }
-
+      alert(`Request Received! GHS ${amount} will be sent to your wallet.`);
+      loadDashboard();
     } catch (err) {
       alert("Error processing withdrawal.");
     } finally {
@@ -131,7 +128,7 @@ export default function IntegratedDashboard() {
   return (
     <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '120px 20px' }}>
       
-      {/* 1. FINANCIAL TOP BAR */}
+      {/* FINANCIAL TOP BAR */}
       <div style={financeBar}>
         <div>
           <p style={subLabel}>WITHDRAWABLE BALANCE</p>
@@ -193,19 +190,29 @@ export default function IntegratedDashboard() {
 
         {activeTab === 'events' && (
           <div style={gridStyle}>
-            {data.events.map(event => (
-              <div key={event.id} style={cardStyle}>
-                <div style={cardImage(event.images?.[0])}>
-                   <div style={cardOverlay}>
+            {data.events.map(event => {
+              const firstImg = event.images && Array.isArray(event.images) ? event.images[0] : null;
+              return (
+                <div key={event.id} style={cardStyle}>
+                  <div style={cardImage(firstImg)}>
+                    {!firstImg && <div style={imagePlaceholder}><ImageIcon size={30} color="#ccc"/></div>}
+                    <div style={cardOverlay}>
+                      <button onClick={() => deleteItem('events', event.id)} style={iconCircleDelete} title="Delete Event">
+                         <Trash2 size={16} color="#ef4444"/>
+                      </button>
                       <button onClick={() => copyMagicLink('event', event.id)} style={iconCircle}>
                         {copying === event.id ? <Check size={16} color="#22c55e"/> : <LinkIcon size={16}/>}
                       </button>
                       <button onClick={() => generateQR('event', event.id)} style={iconCircle}><QrCode size={16}/></button>
-                   </div>
+                    </div>
+                  </div>
+                  <h4 style={cardTitle}>{event.title || "Untitled Event"}</h4>
+                  <p style={{fontSize: '12px', color: '#888', margin: 0}}>
+                    {event.date ? new Date(event.date).toLocaleDateString() : 'No Date Set'}
+                  </p>
                 </div>
-                <h4 style={cardTitle}>{event.title}</h4>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
@@ -223,10 +230,19 @@ export default function IntegratedDashboard() {
                         <p style={{ margin: 0, fontSize: '12px', color: '#888' }}>{contest.candidates?.length || 0} Nominees</p>
                       </div>
                     </div>
+                    <button onClick={() => deleteItem('contests', contest.id)} style={deleteBtnSmall}>
+                        <Trash2 size={14} color="#ef4444"/>
+                    </button>
                   </div>
                   <div style={statBox}>
                     <p style={miniLabel}>CONTEST VOTES</p>
                     <p style={{ margin: 0, fontSize: '24px', fontWeight: 900 }}>{contestVotes.toLocaleString()}</p>
+                    <div style={{display: 'flex', gap: '8px', marginTop: '15px'}}>
+                        <button onClick={() => copyMagicLink('contest', contest.id)} style={actionBtnSmall}>
+                            {copying === contest.id ? <Check size={14}/> : <LinkIcon size={14}/>} Link
+                        </button>
+                        <button onClick={() => generateQR('contest', contest.id)} style={actionBtnSmall}><QrCode size={14}/> QR</button>
+                    </div>
                   </div>
                 </div>
                )
@@ -253,7 +269,7 @@ export default function IntegratedDashboard() {
         )}
       </div>
 
-      {/* MODALS */}
+      {/* MODALS (Remain same) */}
       {showWithdrawModal && (
         <div style={modalBackdrop} onClick={() => setShowWithdrawModal(false)}>
             <div style={modalPaper} onClick={e => e.stopPropagation()}>
@@ -328,10 +344,14 @@ export default function IntegratedDashboard() {
   );
 }
 
-// Additional Styles
-const analyticMiniCard = { background: '#fff', padding: '20px 40px', borderRadius: '25px', border: '1px solid #eee', flex: 1 };
+// --- NEW/UPDATED STYLES ---
+const imagePlaceholder = { width: '100%', height: '100%', background: '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center' };
+const iconCircleDelete = { width: '38px', height: '38px', borderRadius: '12px', background: '#fef2f2', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 5px 15px rgba(0,0,0,0.1)' };
+const deleteBtnSmall = { background: '#fef2f2', border: 'none', width: '30px', height: '30px', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' };
+const actionBtnSmall = { background: '#fff', border: '1px solid #eee', padding: '6px 12px', borderRadius: '10px', fontSize: '12px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' };
 
-// (Previous styles remain same)
+// (Previous styles)
+const analyticMiniCard = { background: '#fff', padding: '20px 40px', borderRadius: '25px', border: '1px solid #eee', flex: 1 };
 const analyticsPlaceholder = { padding: '60px 20px', textAlign: 'center', background: '#f9fafb', borderRadius: '35px', border: '2px dashed #eee' };
 const centerScreen = { padding: '200px', textAlign: 'center', fontWeight: 900, color: '#aaa' };
 const financeBar = { background: '#000', color: '#fff', padding: '40px', borderRadius: '40px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '40px' };
@@ -349,7 +369,7 @@ const contentHeader = { display: 'flex', justifyContent: 'space-between', alignI
 const createLink = { textDecoration: 'none', background: '#f0f9ff', color: '#0ea5e9', padding: '12px 24px', borderRadius: '15px', fontWeight: 800, fontSize: '14px', display: 'flex', alignItems: 'center', gap: '8px' };
 const gridStyle = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '25px' };
 const cardStyle = { background: '#fff', padding: '24px', borderRadius: '35px', border: '1px solid #f0f0f0' };
-const cardImage = (url) => ({ height: '160px', background: `url(${url}) center/cover`, borderRadius: '25px', position: 'relative', overflow: 'hidden' });
+const cardImage = (url) => ({ height: '160px', background: url ? `url(${url}) center/cover` : '#f8fafc', borderRadius: '25px', position: 'relative', overflow: 'hidden' });
 const cardOverlay = { position: 'absolute', top: 0, right: 0, padding: '15px', display: 'flex', gap: '10px' };
 const iconCircle = { width: '38px', height: '38px', borderRadius: '12px', background: 'rgba(255,255,255,0.95)', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 5px 15px rgba(0,0,0,0.1)' };
 const cardTitle = { margin: '15px 0 5px', fontWeight: 900, fontSize: '18px' };
