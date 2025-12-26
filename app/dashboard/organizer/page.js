@@ -61,7 +61,6 @@ export default function OrganizerDashboard() {
       if (!isSilent) setLoading(true);
       else setRefreshing(true);
 
-      // Auth validation
       const { data: { user }, error: authError } = await supabase.auth.getUser();
       if (authError || !user) {
         console.error("Auth session missing");
@@ -69,7 +68,6 @@ export default function OrganizerDashboard() {
         return;
       }
 
-      // Parallel data fetching for performance
       const [
         eventsRes, 
         contestsRes, 
@@ -82,15 +80,10 @@ export default function OrganizerDashboard() {
         supabase.from('tickets').select('*, events(title, organizer_id)').order('created_at', { ascending: false })
       ]);
 
-      // Check for fetch errors
       if (eventsRes.error) console.warn("Events load error:", eventsRes.error);
       if (payoutsRes.error) console.warn("Payouts load error:", payoutsRes.error);
 
-      // Filter tickets to only those belonging to this organizer
-      // In production, RLS usually handles this, but we filter here for redundancy
       const myTickets = ticketsRes.data?.filter(t => t.events?.organizer_id === user.id) || [];
-
-      // FINANCIAL CALCULATIONS - STRICT MATH
       const grossRevenue = myTickets.reduce((acc, t) => acc + (parseFloat(t.amount) || 0), 0);
       
       const successfulPayouts = payoutsRes.data
@@ -104,7 +97,6 @@ export default function OrganizerDashboard() {
       const totalVotes = contestsRes.data?.reduce((acc, c) => 
         acc + (c.candidates?.reduce((sum, cand) => sum + (parseInt(cand.vote_count) || 0), 0) || 0), 0) || 0;
 
-      // Update Analytics State
       setStats({
         totalRevenue: grossRevenue,
         totalVotes: totalVotes,
@@ -123,7 +115,6 @@ export default function OrganizerDashboard() {
         profile: user
       });
 
-      // Load MoMo settings from user metadata if they exist
       if (user.user_metadata?.momo_number) {
         setMomoConfig({
           number: user.user_metadata.momo_number,
@@ -159,8 +150,6 @@ export default function OrganizerDashboard() {
 
   const submitWithdrawal = async () => {
     const amount = parseFloat(withdrawAmount);
-    
-    // Validations
     if (!amount || amount < 5) return alert("Minimum withdrawal is GHS 5.00");
     if (amount > stats.availableBalance) return alert("Insufficient funds available.");
     if (!momoConfig.number || momoConfig.number.length < 10) {
@@ -180,7 +169,6 @@ export default function OrganizerDashboard() {
       }]);
 
       if (error) throw error;
-      
       alert("Withdrawal request sent! Funds typically arrive in 24 hours.");
       setShowWithdrawModal(false);
       setWithdrawAmount('');
@@ -220,7 +208,6 @@ export default function OrganizerDashboard() {
     setTimeout(() => setCopying(null), 2000);
   };
 
-  // Filtered ticket results
   const filteredTickets = data.tickets.filter(t => {
     const searchStr = ticketSearch.toLowerCase();
     const matchesSearch = t.guest_name?.toLowerCase().includes(searchStr) || 
@@ -239,8 +226,6 @@ export default function OrganizerDashboard() {
 
   return (
     <div style={mainWrapper}>
-      
-      {/* --- TOP NAVIGATION BAR --- */}
       <div style={topNav}>
         <div>
           <h1 style={logoText}>OUSTED <span style={badgePro}>ORGANIZER</span></h1>
@@ -259,7 +244,6 @@ export default function OrganizerDashboard() {
         </div>
       </div>
 
-      {/* --- FINANCIAL HUB (PAYMENTS FOCUS) --- */}
       <div style={financeGrid}>
         <div style={balanceCard}>
           <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start'}}>
@@ -302,7 +286,6 @@ export default function OrganizerDashboard() {
         </div>
       </div>
 
-      {/* --- CONTENT TABS --- */}
       <div style={tabBar}>
         <button onClick={() => setActiveTab('events')} style={tabItem(activeTab === 'events')}>
           <Calendar size={18}/> MY EVENTS
@@ -319,8 +302,6 @@ export default function OrganizerDashboard() {
       </div>
 
       <div style={viewPort}>
-        
-        {/* EVENTS VIEW */}
         {activeTab === 'events' && (
           <div style={fadeAnim}>
             <div style={viewHeader}>
@@ -361,7 +342,6 @@ export default function OrganizerDashboard() {
           </div>
         )}
 
-        {/* CONTESTS VIEW */}
         {activeTab === 'contests' && (
           <div style={fadeAnim}>
             <div style={viewHeader}>
@@ -398,7 +378,6 @@ export default function OrganizerDashboard() {
           </div>
         )}
 
-        {/* SALES & PAYOUTS VIEW */}
         {activeTab === 'sales' && (
           <div style={fadeAnim}>
             <div style={viewHeader}>
@@ -486,7 +465,6 @@ export default function OrganizerDashboard() {
           </div>
         )}
 
-        {/* ANALYTICS VIEW */}
         {activeTab === 'analytics' && (
           <div style={fadeAnim}>
             <div style={analyticsSplash}>
@@ -507,7 +485,6 @@ export default function OrganizerDashboard() {
 
       {/* --- MODALS --- */}
       
-      {/* 1. WITHDRAWAL MODAL */}
       {showWithdrawModal && (
         <div style={overlay} onClick={() => setShowWithdrawModal(false)}>
           <div style={modal} onClick={e => e.stopPropagation()}>
@@ -545,14 +522,30 @@ export default function OrganizerDashboard() {
         </div>
       )}
 
-      {/* 2. SETTINGS MODAL */}
       {showSettingsModal && (
         <div style={overlay} onClick={() => setShowSettingsModal(false)}>
           <div style={modal} onClick={e => e.stopPropagation()}>
             <div style={modalHead}>
-              <h2 style={modalTitle}>Payout Preferences</h2>
+              <h2 style={modalTitle}>Payout Setup</h2>
               <button style={closeBtn} onClick={() => setShowSettingsModal(false)}><X size={20}/></button>
             </div>
+
+            {/* PAYSTACK ONBOARDING ACCESS */}
+            <div style={onboardingPromo}>
+              <div style={{flex: 1}}>
+                <h4 style={{margin: 0, fontSize: '14px', fontWeight: 900}}>Automatic Ticket Splits</h4>
+                <p style={{margin: '5px 0 0', fontSize: '12px', color: '#64748b'}}>Onboard with Paystack to receive your 95% share of ticket sales instantly.</p>
+              </div>
+              <button 
+                style={onboardBtn} 
+                onClick={() => router.push('/dashboard/organizer/onboarding')}
+              >
+                ONBOARD NOW <ChevronRight size={16}/>
+              </button>
+            </div>
+
+            <div style={{height: '1px', background: '#f1f5f9', margin: '20px 0'}} />
+
             <div style={inputStack}>
               <label style={fieldLabel}>ACCOUNT HOLDER NAME</label>
               <input 
@@ -575,7 +568,7 @@ export default function OrganizerDashboard() {
               </select>
             </div>
             <div style={inputStack}>
-              <label style={fieldLabel}>PHONE NUMBER</label>
+              <label style={fieldLabel}>PHONE NUMBER (FOR VOTING PAYOUTS)</label>
               <input 
                 style={modalInput} 
                 placeholder="05XXXXXXXX"
@@ -590,7 +583,6 @@ export default function OrganizerDashboard() {
         </div>
       )}
 
-      {/* 3. QR MODAL */}
       {showQR && (
         <div style={overlay} onClick={() => setShowQR(null)}>
           <div style={qrContent} onClick={e => e.stopPropagation()}>
@@ -608,7 +600,7 @@ export default function OrganizerDashboard() {
   );
 }
 
-// --- 500+ LINE STYLE ARCHITECTURE ---
+// --- UPDATED LUXURY STYLES (REQUIRED FOR THE NEW SECTION) ---
 
 const mainWrapper = { padding: '40px 20px 100px', maxWidth: '1280px', margin: '0 auto', background: '#fcfdfe', minHeight: '100vh', fontFamily: '"Inter", sans-serif' };
 const topNav = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '50px' };
@@ -667,60 +659,52 @@ const voteLabelText = { margin: 0, fontSize: '10px', fontWeight: 800, color: '#9
 const voteNumText = { margin: 0, fontSize: '24px', fontWeight: 950 };
 const contestFooter = { display: 'flex', gap: '10px' };
 const contestLinkBtn = { flex: 1, background: '#fff', border: '1px solid #e2e8f0', padding: '10px', borderRadius: '12px', fontSize: '11px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' };
-const contestDeleteBtn = { width: '40px', height: '40px', background: '#fff1f2', border: 'none', borderRadius: '12px', color: '#e11d48', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' };
+const contestDeleteBtn = { width: '40px', height: '40px', background: '#fff1f2', border: 'none', borderRadius: '12px', color: '#e11d48', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
 
 const filterGroup = { display: 'flex', gap: '15px' };
-const searchBox = { background: '#fff', border: '1px solid #e2e8f0', padding: '0 15px', borderRadius: '15px', display: 'flex', alignItems: 'center', gap: '10px', minWidth: '250px' };
-const searchInputField = { border: 'none', background: 'none', padding: '12px 0', outline: 'none', fontSize: '14px', fontWeight: 500, width: '100%' };
-const eventDropdown = { background: '#fff', border: '1px solid #e2e8f0', padding: '0 15px', borderRadius: '15px', fontWeight: 700, fontSize: '13px', outline: 'none' };
+const searchBox = { background: '#f1f5f9', borderRadius: '12px', padding: '0 15px', display: 'flex', alignItems: 'center', gap: '10px' };
+const searchInputField = { background: 'none', border: 'none', padding: '12px 0', fontSize: '13px', fontWeight: 600, outline: 'none', width: '200px' };
+const eventDropdown = { background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '0 15px', fontSize: '13px', fontWeight: 700 };
 
 const tableWrapper = { background: '#fff', borderRadius: '25px', border: '1px solid #f1f5f9', overflow: 'hidden', marginTop: '20px' };
-const dataTable = { width: '100%', borderCollapse: 'collapse' };
-const tableTh = { textAlign: 'left', padding: '18px 25px', background: '#fafbfc', fontSize: '11px', fontWeight: 800, color: '#94a3b8', borderBottom: '1px solid #f1f5f9' };
-const tableTd = { padding: '18px 25px', fontSize: '14px', borderBottom: '1px solid #fcfdfe' };
-const tableTr = { transition: '0.2s' };
+const dataTable = { width: '100%', borderCollapse: 'collapse', textAlign: 'left' };
+const tableTh = { padding: '20px', fontSize: '11px', fontWeight: 800, color: '#94a3b8', borderBottom: '1px solid #f1f5f9' };
+const tableTr = { borderBottom: '1px solid #f8fafc' };
+const tableTd = { padding: '20px', fontSize: '13px', fontWeight: 600 };
 const guestBold = { margin: 0, fontWeight: 800 };
-const guestMuted = { margin: 0, fontSize: '12px', color: '#94a3b8' };
-const codeRef = { background: '#f8fafc', padding: '4px 8px', borderRadius: '6px', fontSize: '11px', color: '#64748b', fontFamily: 'monospace' };
-const scannedPill = { background: '#fff1f2', color: '#e11d48', padding: '4px 10px', borderRadius: '8px', fontSize: '10px', fontWeight: 900 };
-const activePill = { background: '#f0fdf4', color: '#16a34a', padding: '4px 10px', borderRadius: '8px', fontSize: '10px', fontWeight: 900 };
+const guestMuted = { margin: 0, fontSize: '11px', color: '#94a3b8' };
+const codeRef = { background: '#f1f5f9', padding: '4px 8px', borderRadius: '6px', fontSize: '11px' };
+const activePill = { background: '#f0fdf4', color: '#16a34a', padding: '6px 12px', borderRadius: '20px', fontSize: '11px', fontWeight: 800 };
+const scannedPill = { background: '#f1f5f9', color: '#94a3b8', padding: '6px 12px', borderRadius: '20px', fontSize: '11px', fontWeight: 800 };
+const statusBadge = (s) => ({ background: s === 'success' ? '#f0fdf4' : '#fff7ed', color: s === 'success' ? '#16a34a' : '#f97316', padding: '4px 10px', borderRadius: '8px', fontSize: '10px', fontWeight: 800 });
 
-const statusBadge = (status) => ({
-  fontSize: '10px', fontWeight: 900, padding: '4px 10px', borderRadius: '8px',
-  background: status === 'success' ? '#f0fdf4' : status === 'pending' ? '#fffbeb' : '#fef2f2',
-  color: status === 'success' ? '#16a34a' : status === 'pending' ? '#d97706' : '#dc2626'
-});
+const analyticsSplash = { textAlign: 'center', padding: '100px 20px' };
+const splashIcon = { marginBottom: '30px' };
+const splashTitle = { fontSize: '28px', fontWeight: 950, margin: '0 0 10px' };
+const splashText = { color: '#64748b', maxWidth: '400px', margin: '0 auto 40px', fontSize: '14px', lineHeight: 1.6 };
+const growthMock = { display: 'flex', alignItems: 'flex-end', justifyContent: 'center', gap: '15px', height: '150px' };
 
-const analyticsSplash = { padding: '80px 40px', textAlign: 'center', background: '#fff', borderRadius: '40px', border: '1px solid #f1f5f9' };
-const splashIcon = { marginBottom: '20px' };
-const splashTitle = { fontWeight: 900, fontSize: '22px', margin: '0 0 10px' };
-const splashText = { color: '#94a3b8', maxWidth: '400px', margin: '0 auto 40px', fontSize: '14px', lineHeight: 1.6 };
-const growthMock = { display: 'flex', gap: '15px', height: '120px', justifyContent: 'center', alignItems: 'flex-end' };
-
-const overlay = { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000 };
-const modal = { background: '#fff', padding: '40px', borderRadius: '40px', width: '90%', maxWidth: '480px', animation: 'slideUp 0.3s ease-out' };
+const overlay = { position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(8px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' };
+const modal = { background: '#fff', width: '90%', maxWidth: '450px', borderRadius: '35px', padding: '40px', boxShadow: '0 30px 60px rgba(0,0,0,0.2)' };
 const modalHead = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' };
-const modalTitle = { margin: 0, fontSize: '24px', fontWeight: 900 };
+const modalTitle = { fontSize: '20px', fontWeight: 950, margin: 0 };
 const closeBtn = { background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' };
-const modalInfoBox = { background: '#f0f9ff', padding: '20px', borderRadius: '20px', marginBottom: '25px', textAlign: 'center' };
-const infoLabel = { margin: 0, fontSize: '10px', fontWeight: 800, color: '#0ea5e9', letterSpacing: '1px' };
-const infoValue = { margin: '5px 0 0', fontSize: '32px', fontWeight: 950 };
-const inputStack = { marginBottom: '20px' };
-const fieldLabel = { display: 'block', fontSize: '11px', fontWeight: 800, color: '#94a3b8', marginBottom: '8px' };
-const bigInput = { width: '100%', background: '#f8fafc', border: '2px solid #f1f5f9', padding: '18px', borderRadius: '18px', fontSize: '28px', fontWeight: 950, textAlign: 'center', outline: 'none' };
-const modalInput = { width: '100%', background: '#f8fafc', border: '2px solid #f1f5f9', padding: '14px 18px', borderRadius: '15px', fontSize: '15px', fontWeight: 600, outline: 'none' };
-const inputHint = { fontSize: '12px', color: '#64748b', marginTop: '10px', textAlign: 'center' };
-const securityNote = { display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center', fontSize: '11px', color: '#16a34a', fontWeight: 700, marginBottom: '25px' };
+const modalInfoBox = { background: '#f8fafc', padding: '25px', borderRadius: '22px', marginBottom: '30px' };
+const infoLabel = { fontSize: '10px', fontWeight: 800, color: '#94a3b8', margin: '0 0 5px' };
+const infoValue = { fontSize: '28px', fontWeight: 950, margin: 0 };
+const inputStack = { display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' };
+const fieldLabel = { fontSize: '10px', fontWeight: 800, color: '#64748b' };
+const bigInput = { width: '100%', border: 'none', borderBottom: '2px solid #f1f5f9', padding: '15px 0', fontSize: '32px', fontWeight: 950, outline: 'none' };
+const modalInput = { width: '100%', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '15px', fontSize: '14px', fontWeight: 600 };
+const inputHint = { fontSize: '12px', color: '#94a3b8', margin: '10px 0 0' };
+const securityNote = { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: '#16a34a', fontWeight: 700, margin: '20px 0' };
+const actionSubmitBtn = (disabled) => ({ width: '100%', background: disabled ? '#f1f5f9' : '#000', color: disabled ? '#94a3b8' : '#fff', border: 'none', padding: '18px', borderRadius: '18px', fontWeight: 900, cursor: disabled ? 'not-allowed' : 'pointer', fontSize: '14px', marginTop: '10px' });
 
-const actionSubmitBtn = (disabled) => ({
-  width: '100%', background: disabled ? '#f1f5f9' : '#000', color: disabled ? '#cbd5e1' : '#fff',
-  padding: '18px', borderRadius: '18px', border: 'none', fontWeight: 850, fontSize: '15px',
-  cursor: disabled ? 'not-allowed' : 'pointer', transition: '0.2s', display: 'flex', alignItems: 'center', justifyContent: 'center'
-});
+const qrContent = { background: '#fff', padding: '40px', borderRadius: '35px', textAlign: 'center', width: '350px' };
+const qrBorder = { padding: '20px', border: '2px solid #f1f5f9', borderRadius: '25px', marginBottom: '25px' };
+const downloadBtn = { width: '100%', background: '#0ea5e9', color: '#fff', border: 'none', padding: '16px', borderRadius: '18px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' };
+const fullPageCenter = { height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#fcfdfe' };
 
-const qrContent = { background: '#fff', padding: '35px', borderRadius: '35px', textAlign: 'center', width: '350px' };
-const qrBorder = { padding: '20px', border: '1px solid #f1f5f9', borderRadius: '25px', background: '#fff', marginBottom: '25px' };
-const downloadBtn = { width: '100%', background: '#000', color: '#fff', border: 'none', padding: '15px', borderRadius: '15px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' };
-
-const fullPageCenter = { height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#fff' };
-const imagePlaceholder = { width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' };
+// NEW ONBOARDING STYLES
+const onboardingPromo = { background: '#e0f2fe', padding: '20px', borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '15px' };
+const onboardBtn = { background: '#0ea5e9', color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '12px', fontWeight: 800, fontSize: '11px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', whiteSpace: 'nowrap' };
