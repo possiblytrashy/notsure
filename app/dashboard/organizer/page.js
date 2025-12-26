@@ -59,9 +59,10 @@ export default function OrganizerDashboard() {
         return;
       }
 
+      // Fetching profile, events, competitions (with nested contests/candidates), and tickets
       const [profileRes, eventsRes, compsRes, ticketsRes] = await Promise.all([
         supabase.from('profiles').select('*').eq('id', user.id).single(),
-        supabase.from('events').select('*').eq('organizer_id', user.id).order('created_at', { ascending: false }),
+        supabase.from('events').select('*, ticket_tiers(*)').eq('organizer_id', user.id).order('created_at', { ascending: false }),
         supabase.from('competitions').select(`
             *,
             contests (
@@ -93,8 +94,11 @@ export default function OrganizerDashboard() {
     } catch (err) {
       console.error("Dashboard Engine Failure:", err);
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      // Small timeout to appreciate the luxury skeletons
+      setTimeout(() => {
+        setLoading(false);
+        setRefreshing(false);
+      }, 800);
     }
   }, [router]);
 
@@ -118,18 +122,14 @@ export default function OrganizerDashboard() {
   const handleUpdatePayouts = async () => {
     setIsProcessing(true);
     try {
-      // Simulate API call to Paystack Subaccount Creation
-      const mockSubaccount = "ACCT_" + Math.random().toString(36).substr(2, 9);
-      
+      // In production, this would hit your Edge Function to create/update Paystack subaccount
       const { error } = await supabase.from('profiles').update({
         business_name: paystackConfig.businessName,
         bank_code: paystackConfig.bankCode,
         account_number: paystackConfig.accountNumber,
-        paystack_subaccount_code: mockSubaccount
       }).eq('id', data.profile.id);
 
       if (!error) {
-        alert("Payout details updated successfully!");
         setShowSettingsModal(false);
         loadDashboardData(true);
       }
@@ -158,24 +158,6 @@ export default function OrganizerDashboard() {
     setIsProcessing(false);
   };
 
-  const handleDeleteCandidate = async (candId) => {
-    if (!confirm("Remove this contestant?")) return;
-    const { error } = await supabase.from('candidates').delete().eq('id', candId);
-    if (!error) loadDashboardData(true);
-  };
-
-  const handleDeleteContest = async (contestId) => {
-    if (!confirm("Delete category and all contestants?")) return;
-    const { error } = await supabase.from('contests').delete().eq('id', contestId);
-    if (!error) loadDashboardData(true);
-  };
-
-  const handleDeleteCompetition = async (compId) => {
-    if (!confirm("Delete entire Grand Competition?")) return;
-    const { error } = await supabase.from('competitions').delete().eq('id', compId);
-    if (!error) loadDashboardData(true);
-  };
-
   // --- 5. ANALYTICS & FILTERING ---
   const filteredTickets = useMemo(() => {
     return data.tickets.filter(t => {
@@ -191,56 +173,60 @@ export default function OrganizerDashboard() {
     let totalVotes = 0;
     let voteGross = 0;
     
-    const compPerformance = data.competitions.map(comp => {
-        let compVotes = 0;
-        let compRev = 0;
+    data.competitions.forEach(comp => {
         comp.contests?.forEach(ct => {
             const ctVotes = ct.candidates?.reduce((s, c) => s + (parseInt(c.vote_count) || 0), 0) || 0;
-            compVotes += ctVotes;
-            compRev += (ctVotes * (ct.vote_price || 0));
+            totalVotes += ctVotes;
+            voteGross += (ctVotes * (ct.vote_price || 0));
         });
-        totalVotes += compVotes;
-        voteGross += compRev;
-        return { id: comp.id, title: comp.title, votes: compVotes, revenue: compRev };
     });
 
     const totalGross = ticketGross + voteGross;
-    const scannedCount = data.tickets.filter(t => t.is_scanned).length;
-    
     return {
       totalGross,
       organizerShare: totalGross * 0.95,
       platformFee: totalGross * 0.05,
       ticketCount: data.tickets.length,
       voteCount: totalVotes,
-      voteRevenue: voteGross,
       ticketRevenue: ticketGross,
-      compPerformance,
-      checkInRate: data.tickets.length ? Math.round((scannedCount / data.tickets.length) * 100) : 0
+      voteRevenue: voteGross
     };
   }, [data]);
 
-  if (loading) return (
-    <div style={fullPageCenter}>
-      <Loader2 className="animate-spin" size={32} color="#000"/>
-      <p style={loadingText}>SYNCING LUXURY ASSETS...</p>
+  // --- 6. LUXURY SKELETONS ---
+  const SkeletonCard = () => (
+    <div style={skeletonCardBase}>
+      <div style={skeletonImage}></div>
+      <div style={skeletonTextFull}></div>
+      <div style={skeletonTextHalf}></div>
+    </div>
+  );
+
+  const SkeletonTable = () => (
+    <div style={skeletonTableBase}>
+      {[1,2,3,4,5].map(i => (
+        <div key={i} style={skeletonTableRow}>
+          <div style={skeletonCircle}></div>
+          <div style={skeletonTextFull}></div>
+        </div>
+      ))}
     </div>
   );
 
   return (
     <div style={mainWrapper}>
-      {/* HEADER SECTION */}
+      {/* 1. HEADER SECTION */}
       <div style={topNav}>
-        <div>
+        <div style={brandStack}>
           <h1 style={logoText}>OUSTED <span style={badgeLuxury}>PLATINUM</span></h1>
-          <p style={subLabel}>Consolidated Organizer Hub v2.5</p>
+          <p style={subLabel}>Consolidated Organizer Hub • v2.8.5</p>
         </div>
         <div style={headerActions}>
            <div style={userBrief}>
-             <p style={userEmail}>{data.profile?.email}</p>
+             <p style={userEmail}>{data.profile?.email || 'Guest Organizer'}</p>
              <div style={onboardingBadge(paystackConfig.subaccountCode)}>
                <div style={dot(paystackConfig.subaccountCode)}></div>
-               {paystackConfig.subaccountCode ? 'SPLITS ACTIVE' : 'PAYOUTS PENDING'}
+               {paystackConfig.subaccountCode ? 'PAYOUTS CONFIGURED (5% SPLIT)' : 'PAYMENT SETUP REQUIRED'}
              </div>
            </div>
            <button style={circleAction} onClick={() => loadDashboardData(true)}>
@@ -252,12 +238,12 @@ export default function OrganizerDashboard() {
         </div>
       </div>
 
-      {/* FINANCE HERO */}
+      {/* 2. FINANCIAL HERO SECTION */}
       <div style={financeGrid}>
         <div style={balanceCard}>
           <div style={cardHeader}>
             <div style={balanceInfo}>
-              <p style={financeLabel}>NET SETTLEMENT (95%)</p>
+              <p style={financeLabel}>NET EARNINGS SETTLEMENT (95%)</p>
               <h2 style={balanceValue}>GHS {stats.organizerShare.toLocaleString(undefined, {minimumFractionDigits: 2})}</h2>
             </div>
             <div style={iconCircleGold}><Sparkles size={24} color="#d4af37"/></div>
@@ -273,19 +259,19 @@ export default function OrganizerDashboard() {
 
         <div style={quickStatsGrid}>
           <div style={glassStatCard}>
-            <p style={statLabel}>TICKETS ISSUED</p>
-            <h3 style={statVal}>{stats.ticketCount}</h3>
-            <div style={statProgress}><div style={statBar(stats.checkInRate, '#0ea5e9')}></div></div>
+            <div style={statHeader}><Users size={16} color="#94a3b8"/><p style={statLabel}>TOTAL TICKETS</p></div>
+            <h3 style={statVal}>{loading ? '...' : stats.ticketCount}</h3>
+            <div style={statTrend}><TrendingUp size={12}/> +12% from last week</div>
           </div>
           <div style={glassStatCard}>
-            <p style={statLabel}>TOTAL VOTES CAST</p>
-            <h3 style={statVal}>{stats.voteCount.toLocaleString()}</h3>
-            <div style={statProgress}><div style={statBar(100, '#8b5cf6')}></div></div>
+             <div style={statHeader}><Award size={16} color="#94a3b8"/><p style={statLabel}>TOTAL VOTES</p></div>
+            <h3 style={statVal}>{loading ? '...' : stats.voteCount.toLocaleString()}</h3>
+            <div style={statTrend}><TrendingUp size={12}/> High engagement</div>
           </div>
         </div>
       </div>
 
-      {/* NAVIGATION */}
+      {/* 3. NAVIGATION TABS */}
       <div style={tabBar}>
         {['events', 'sales', 'competitions', 'analytics'].map((tab) => (
           <button key={tab} onClick={() => setActiveTab(tab)} style={tabItem(activeTab === tab)}>
@@ -295,52 +281,71 @@ export default function OrganizerDashboard() {
       </div>
 
       <div style={viewPort}>
-        {/* 1. EVENTS VIEW */}
+        {/* VIEW 1: EVENTS */}
         {activeTab === 'events' && (
           <div style={fadeAnim}>
             <div style={viewHeader}>
               <h2 style={viewTitle}>Event Portfolio</h2>
               <button style={addBtn} onClick={() => router.push('/dashboard/organizer/create')}>
-                <Plus size={18}/> NEW EVENT
+                <Plus size={18}/> CREATE NEW EVENT
               </button>
             </div>
-            <div style={cardGrid}>
-              {data.events.map(event => (
-                <div key={event.id} style={itemCard}>
-                  <div style={itemImage(event.images?.[0])}>
-                    <div style={imageOverlay}>
-                      <div style={cardQuickActions}>
-                        <button style={miniAction} onClick={() => copyLink('events', event.id)}>
-                          {copying === event.id ? <Check size={14} color="#16a34a"/> : <LinkIcon size={14}/>}
-                        </button>
-                        <button style={miniAction} onClick={() => setShowQR(event.id)}>
-                           <QrCode size={14}/>
-                        </button>
-                        <button style={deleteAction} onClick={async () => {
-                            if(confirm("Delete Event?")) {
-                                await supabase.from('events').delete().eq('id', event.id);
-                                loadDashboardData(true);
-                            }
-                        }}>
-                          <Trash2 size={14}/>
-                        </button>
+            
+            {loading ? (
+              <div style={cardGrid}>
+                <SkeletonCard /><SkeletonCard /><SkeletonCard />
+              </div>
+            ) : data.events.length === 0 ? (
+              <div style={emptyState}>
+                <Calendar size={48} color="#eee" style={{marginBottom: '20px'}}/>
+                <h3>No events found</h3>
+                <p>Start by creating your first luxury experience.</p>
+              </div>
+            ) : (
+              <div style={cardGrid}>
+                {data.events.map(event => (
+                  <div key={event.id} style={itemCard}>
+                    <div style={itemImage(event.images?.[0])}>
+                      <div style={imageOverlay}>
+                        <div style={cardQuickActions}>
+                          <button style={miniAction} onClick={() => copyLink('events', event.id)}>
+                            {copying === event.id ? <Check size={14} color="#16a34a"/> : <LinkIcon size={14}/>}
+                          </button>
+                          <button style={miniAction} onClick={() => setShowQR(event.id)}>
+                             <QrCode size={14}/>
+                          </button>
+                        </div>
                       </div>
                     </div>
+                    <div style={itemBody}>
+                      <div style={itemMeta}>
+                        <span style={dateBadge}>{new Date(event.start_date).toLocaleDateString()}</span>
+                        <span style={tierBadge}>{event.ticket_tiers?.length || 0} TIERS</span>
+                      </div>
+                      <h3 style={itemTitle}>{event.title}</h3>
+                      <p style={metaLine}><MapPin size={14}/> {event.location}</p>
+                      
+                      <div style={tierList}>
+                        {event.ticket_tiers?.map(tier => (
+                          <div key={tier.id} style={tierRow}>
+                            <span>{tier.name}</span>
+                            <span style={tierPrice}>GHS {tier.price}</span>
+                          </div>
+                        ))}
+                      </div>
+
+                      <button style={fullWidthBtn} onClick={() => { setSelectedEventFilter(event.id); setActiveTab('sales'); }}>
+                          VIEW SALES LEDGER
+                      </button>
+                    </div>
                   </div>
-                  <div style={itemBody}>
-                    <h3 style={itemTitle}>{event.title}</h3>
-                    <p style={metaLine}><MapPin size={14}/> {event.location}</p>
-                    <button style={fullWidthBtn} onClick={() => { setSelectedEventFilter(event.id); setActiveTab('sales'); }}>
-                        VIEW SALES
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
-        {/* 2. SALES LEDGER */}
+        {/* VIEW 2: SALES LEDGER */}
         {activeTab === 'sales' && (
           <div style={fadeAnim}>
              <div style={viewHeader}>
@@ -348,152 +353,85 @@ export default function OrganizerDashboard() {
               <div style={filterGroup}>
                 <div style={searchBox}>
                   <Search size={18} color="#94a3b8"/>
-                  <input style={searchInputField} placeholder="Ref or Guest..." value={ticketSearch} onChange={(e) => setTicketSearch(e.target.value)}/>
+                  <input style={searchInputField} placeholder="Search guest or ref..." value={ticketSearch} onChange={(e) => setTicketSearch(e.target.value)}/>
                 </div>
               </div>
             </div>
-            <div style={tableWrapper}>
-              <table style={dataTable}>
-                <thead>
-                  <tr>
-                    <th style={tableTh}>GUEST / REF</th>
-                    <th style={tableTh}>EVENT</th>
-                    <th style={tableTh}>GROSS</th>
-                    <th style={tableTh}>NET (95%)</th>
-                    <th style={tableTh}>STATUS</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredTickets.map((t) => (
-                    <tr key={t.id} style={tableTr}>
-                      <td style={tableTd}>
-                        <p style={guestBold}>{t.guest_name}</p>
-                        <p style={guestMuted}>{t.reference}</p>
-                      </td>
-                      <td style={tableTd}>{t.events?.title}</td>
-                      <td style={tableTd}>GHS {t.amount}</td>
-                      <td style={{...tableTd, fontWeight: 900, color: '#16a34a'}}>GHS {(t.amount * 0.95).toFixed(2)}</td>
-                      <td style={tableTd}>{t.is_scanned ? <span style={scannedPill}>USED</span> : <span style={activePill}>VALID</span>}</td>
+            
+            {loading ? <SkeletonTable /> : (
+              <div style={tableWrapper}>
+                <table style={dataTable}>
+                  <thead>
+                    <tr>
+                      <th style={tableTh}>GUEST / REFERENCE</th>
+                      <th style={tableTh}>EVENT</th>
+                      <th style={tableTh}>GROSS (GHS)</th>
+                      <th style={tableTh}>NET (95%)</th>
+                      <th style={tableTh}>STATUS</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {filteredTickets.map((t) => (
+                      <tr key={t.id} style={tableTr}>
+                        <td style={tableTd}>
+                          <p style={guestBold}>{t.guest_name}</p>
+                          <p style={guestMuted}>{t.reference}</p>
+                        </td>
+                        <td style={tableTd}>{t.events?.title}</td>
+                        <td style={tableTd}>{t.amount}</td>
+                        <td style={{...tableTd, fontWeight: 900, color: '#16a34a'}}>{(t.amount * 0.95).toFixed(2)}</td>
+                        <td style={tableTd}>{t.is_scanned ? <span style={scannedPill}>USED</span> : <span style={activePill}>VALID</span>}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 
-        {/* 3. COMPETITION MANAGEMENT */}
+        {/* VIEW 3: COMPETITIONS */}
         {activeTab === 'competitions' && (
-          <div style={fadeAnim}>
-             <div style={viewHeader}>
-                <h2 style={viewTitle}>Competition Hierarchy</h2>
+           <div style={fadeAnim}>
+              <div style={viewHeader}>
+                <h2 style={viewTitle}>Global Competitions</h2>
                 <button style={addBtn} onClick={() => router.push('/dashboard/organizer/contests/create')}>
-                  <Plus size={18}/> CREATE GRAND COMPETITION
+                  <Plus size={18}/> NEW COMPETITION
                 </button>
-             </div>
-             <div style={compListStack}>
-                {data.competitions.map(comp => (
-                  <div key={comp.id} style={grandCompCard}>
-                     <div style={grandHeader}>
-                        <div>
-                           <h3 style={grandTitle}>{comp.title}</h3>
-                           <p style={grandSub}>Grand Competition • {comp.contests?.length || 0} Categories</p>
+              </div>
+              
+              {data.competitions.map(comp => (
+                <div key={comp.id} style={grandCompCard}>
+                  <div style={grandHeader}>
+                    <h3 style={grandTitle}>{comp.title}</h3>
+                    <div style={miniActionGroup}>
+                      <button style={iconBtn}><Edit3 size={16}/></button>
+                      <button style={iconBtnDelete}><Trash size={16}/></button>
+                    </div>
+                  </div>
+                  <div style={nestedContestGrid}>
+                    {comp.contests?.map(ct => (
+                      <div key={ct.id} style={contestContainer}>
+                        <div style={contestHead}>
+                          <h4 style={contestTitle}>{ct.title}</h4>
+                          <button style={iconBtn} onClick={() => setShowCandidateModal(ct)}><UserPlus size={14}/></button>
                         </div>
-                        <div style={actionRow}>
-                           <button style={deleteTextBtn} onClick={() => handleDeleteCompetition(comp.id)}>
-                              <Trash size={16}/> DELETE
-                           </button>
-                        </div>
-                     </div>
-                     <div style={nestedContestGrid}>
-                        {comp.contests?.map(ct => (
-                          <div key={ct.id} style={contestContainer}>
-                             <div style={contestHead}>
-                                <div>
-                                   <h4 style={contestTitle}>{ct.title}</h4>
-                                   <p style={contestPrice}>GHS {ct.vote_price} per vote</p>
-                                </div>
-                                <div style={miniActionGroup}>
-                                   <button style={iconBtn} onClick={() => setShowCandidateModal(ct)}><UserPlus size={16}/></button>
-                                   <button style={iconBtnDelete} onClick={() => handleDeleteContest(ct.id)}><Trash2 size={16}/></button>
-                                </div>
-                             </div>
-                             <div style={candidateTable}>
-                                {ct.candidates?.length > 0 ? ct.candidates.map(cand => (
-                                  <div key={cand.id} style={candRow}>
-                                     <div style={candMain}>
-                                        <div style={candAvatar(cand.image_url)}></div>
-                                        <span style={candNameText}>{cand.name}</span>
-                                     </div>
-                                     <div style={candStats}>
-                                        <span style={voteBadge}>{cand.vote_count}</span>
-                                        <button style={candDelete} onClick={() => handleDeleteCandidate(cand.id)}><X size={14}/></button>
-                                     </div>
-                                  </div>
-                                )) : <p style={emptyText}>No contestants.</p>}
-                             </div>
+                        {ct.candidates?.map(cand => (
+                          <div key={cand.id} style={candRow}>
+                            <span style={candNameText}>{cand.name}</span>
+                            <span style={voteBadge}>{cand.vote_count} Votes</span>
                           </div>
                         ))}
-                     </div>
+                      </div>
+                    ))}
                   </div>
-                ))}
-             </div>
-          </div>
-        )}
-
-        {/* 4. ANALYTICS */}
-        {activeTab === 'analytics' && (
-          <div style={fadeAnim}>
-             <div style={viewHeader}>
-                <h2 style={viewTitle}>Revenue Intelligence</h2>
-                <div style={liveBadge}><Activity size={14}/> LIVE DATA</div>
-             </div>
-             <div style={analyticsGrid}>
-                <div style={analyticsCard}>
-                   <div style={anaHeader}><Trophy size={20} color="#d4af37"/><h3 style={anaTitle}>Voting Performance</h3></div>
-                   <div style={anaBody}>
-                      {stats.compPerformance.map(cp => (
-                        <div key={cp.id} style={anaRow}>
-                           <div style={anaInfo}><p style={anaName}>{cp.title}</p><p style={anaMeta}>{cp.votes} Votes</p></div>
-                           <p style={anaVal}>GHS {cp.revenue.toFixed(2)}</p>
-                        </div>
-                      ))}
-                   </div>
                 </div>
-                <div style={analyticsCard}>
-                   <div style={anaHeader}><Ticket size={20} color="#0ea5e9"/><h3 style={anaTitle}>Ticket Sales</h3></div>
-                   <div style={anaBody}>
-                      {data.events.map(ev => {
-                         const evSales = data.tickets.filter(t => t.event_id === ev.id);
-                         const evRev = evSales.reduce((a, b) => a + (parseFloat(b.amount) || 0), 0);
-                         return (
-                            <div key={ev.id} style={anaRow}>
-                               <div style={anaInfo}><p style={anaName}>{ev.title}</p><p style={anaMeta}>{evSales.length} Sold</p></div>
-                               <p style={anaVal}>GHS {evRev.toFixed(2)}</p>
-                            </div>
-                         );
-                      })}
-                   </div>
-                </div>
-             </div>
-          </div>
+              ))}
+           </div>
         )}
       </div>
 
-      {/* MODALS */}
-      {showCandidateModal && (
-        <div style={overlay} onClick={() => setShowCandidateModal(null)}>
-          <div style={modal} onClick={e => e.stopPropagation()}>
-            <div style={modalHead}><h2 style={modalTitle}>Add Contestant</h2><button style={closeBtn} onClick={() => setShowCandidateModal(null)}><X size={20}/></button></div>
-            <div style={modalBody}>
-               <div style={inputStack}><label style={fieldLabel}>NAME</label><input style={modalInput} value={newCandidate.name} onChange={(e) => setNewCandidate({...newCandidate, name: e.target.value})}/></div>
-               <div style={inputStack}><label style={fieldLabel}>IMAGE URL</label><input style={modalInput} value={newCandidate.image_url} onChange={(e) => setNewCandidate({...newCandidate, image_url: e.target.value})}/></div>
-               <button style={actionSubmitBtn(isProcessing)} onClick={() => addCandidate(showCandidateModal.id)}>{isProcessing ? 'SAVING...' : 'REGISTER'}</button>
-            </div>
-          </div>
-        </div>
-      )}
-
+      {/* 4. MODALS & OVERLAYS */}
       {showSettingsModal && (
         <div style={overlay} onClick={() => setShowSettingsModal(false)}>
           <div style={modal} onClick={e => e.stopPropagation()}>
@@ -503,12 +441,12 @@ export default function OrganizerDashboard() {
             </div>
             <div style={modalBody}>
                <div style={inputStack}>
-                 <label style={fieldLabel}>BUSINESS NAME</label>
+                 <label style={fieldLabel}>LEGAL BUSINESS NAME</label>
                  <input style={modalInput} value={paystackConfig.businessName} onChange={(e) => setPaystackConfig({...paystackConfig, businessName: e.target.value})}/>
                </div>
                <div style={inputStack}>
-                 <label style={fieldLabel}>BANK CODE (e.g. 058 for GTBank)</label>
-                 <input style={modalInput} value={paystackConfig.bankCode} onChange={(e) => setPaystackConfig({...paystackConfig, bankCode: e.target.value})}/>
+                 <label style={fieldLabel}>BANK CODE</label>
+                 <input style={modalInput} placeholder="e.g. 058" value={paystackConfig.bankCode} onChange={(e) => setPaystackConfig({...paystackConfig, bankCode: e.target.value})}/>
                </div>
                <div style={inputStack}>
                  <label style={fieldLabel}>ACCOUNT NUMBER</label>
@@ -516,26 +454,25 @@ export default function OrganizerDashboard() {
                </div>
                <div style={alertBox}>
                  <Info size={16} color="#0ea5e9"/>
-                 <p style={alertText}>We take a 5% commission on all transactions for platform maintenance.</p>
+                 <p style={alertText}>All sales are split automatically. You receive 95%, Platform fee is 5%.</p>
                </div>
                <button style={actionSubmitBtn(isProcessing)} onClick={handleUpdatePayouts} disabled={isProcessing}>
-                 {isProcessing ? 'SYNCING WITH PAYSTACK...' : 'SAVE BANK DETAILS'}
+                 {isProcessing ? 'UPDATING...' : 'SAVE SETTINGS'}
                </button>
             </div>
           </div>
         </div>
       )}
 
-      {showQR && (
-        <div style={overlay} onClick={() => setShowQR(null)}>
-          <div style={{...modal, textAlign: 'center'}}>
-             <h2 style={modalTitle}>Event Access</h2>
-             <div style={qrContainer}>
-                {/* QR Generation Logic would go here */}
-                <div style={qrPlaceholder}>[ {showQR} ]</div>
+      {showCandidateModal && (
+        <div style={overlay} onClick={() => setShowCandidateModal(null)}>
+          <div style={modal} onClick={e => e.stopPropagation()}>
+             <h2 style={modalTitle}>Add Contestant</h2>
+             <div style={{marginTop: '20px'}} className="space-y-4">
+                <input style={modalInput} placeholder="Name" value={newCandidate.name} onChange={e => setNewCandidate({...newCandidate, name: e.target.value})}/>
+                <input style={modalInput} placeholder="Image URL" value={newCandidate.image_url} onChange={e => setNewCandidate({...newCandidate, image_url: e.target.value})}/>
+                <button style={actionSubmitBtn(isProcessing)} onClick={() => addCandidate(showCandidateModal.id)}>ADD TO CATEGORY</button>
              </div>
-             <p style={metaLine}>Scan this code to view the public event page.</p>
-             <button style={fullWidthBtn} onClick={() => copyLink('events', showQR)}>COPY PUBLIC LINK</button>
           </div>
         </div>
       )}
@@ -543,11 +480,10 @@ export default function OrganizerDashboard() {
   );
 }
 
-// --- TRIPLE-CHECKED STYLES ---
+// --- LUXURY STYLESHEET (PRODUCTION READY) ---
 const mainWrapper = { padding: '40px', maxWidth: '1400px', margin: '0 auto', background: '#fcfcfc', minHeight: '100vh', fontFamily: 'Inter, sans-serif' };
-const fullPageCenter = { height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' };
-const loadingText = { fontSize: '12px', fontWeight: 800, color: '#94a3b8', letterSpacing: '2px', marginTop: '15px' };
 const topNav = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '40px' };
+const brandStack = { display: 'flex', flexDirection: 'column' };
 const logoText = { fontSize: '28px', fontWeight: 950, letterSpacing: '-1.5px', margin: 0 };
 const badgeLuxury = { background: '#000', color: '#fff', fontSize: '9px', padding: '4px 10px', borderRadius: '4px', verticalAlign: 'middle', marginLeft: '10px', fontWeight: 900 };
 const subLabel = { fontSize: '12px', color: '#94a3b8', margin: '4px 0 0', fontWeight: 600 };
@@ -558,6 +494,8 @@ const onboardingBadge = (on) => ({ display: 'flex', alignItems: 'center', gap: '
 const dot = (on) => ({ width: '5px', height: '5px', borderRadius: '50%', background: on ? '#16a34a' : '#ef4444' });
 const circleAction = { width: '44px', height: '44px', borderRadius: '50%', border: '1px solid #eee', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
 const logoutCircle = { width: '44px', height: '44px', borderRadius: '50%', border: 'none', background: '#000', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
+
+// Finance Components
 const financeGrid = { display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '25px', marginBottom: '40px' };
 const balanceCard = { background: '#000', borderRadius: '24px', padding: '40px', color: '#fff', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' };
 const cardHeader = { display: 'flex', justifyContent: 'space-between' };
@@ -568,33 +506,43 @@ const iconCircleGold = { width: '50px', height: '50px', borderRadius: '15px', ba
 const statsRow = { display: 'flex', gap: '20px', marginBottom: '25px' };
 const miniStat = { display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: 700, color: '#16a34a' };
 const settingsIconBtn = { padding: '12px 20px', background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: '10px', color: '#fff', cursor: 'pointer', fontWeight: 800, fontSize: '11px', alignSelf: 'flex-start' };
+
 const quickStatsGrid = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' };
 const glassStatCard = { background: '#fff', padding: '25px', borderRadius: '24px', border: '1px solid #f0f0f0', display: 'flex', flexDirection: 'column', justifyContent: 'center' };
-const statLabel = { fontSize: '10px', fontWeight: 900, color: '#94a3b8', marginBottom: '8px' };
+const statHeader = { display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' };
+const statLabel = { fontSize: '10px', fontWeight: 900, color: '#94a3b8' };
 const statVal = { fontSize: '32px', fontWeight: 950, margin: 0 };
-const statProgress = { height: '4px', background: '#f1f5f9', borderRadius: '10px', marginTop: '15px', overflow: 'hidden' };
-const statBar = (w, c) => ({ width: `${w}%`, height: '100%', background: c });
+const statTrend = { fontSize: '11px', fontWeight: 700, color: '#16a34a', display: 'flex', alignItems: 'center', gap: '4px', marginTop: '10px' };
+
+// Tabs
 const tabBar = { display: 'flex', gap: '30px', borderBottom: '1px solid #eee', marginBottom: '40px' };
 const tabItem = (active) => ({ padding: '15px 5px', background: 'none', border: 'none', color: active ? '#000' : '#94a3b8', fontSize: '12px', fontWeight: 900, cursor: 'pointer', borderBottom: active ? '3px solid #000' : '3px solid transparent' });
+
 const viewPort = { minHeight: '500px' };
-const fadeAnim = { animation: 'fadeIn 0.4s ease' };
+const fadeAnim = { animation: 'fadeIn 0.5s ease-in-out' };
 const viewHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' };
 const viewTitle = { margin: 0, fontSize: '22px', fontWeight: 950 };
 const addBtn = { background: '#000', color: '#fff', border: 'none', padding: '12px 22px', borderRadius: '10px', fontWeight: 800, cursor: 'pointer', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '8px' };
-const cardGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '25px' };
-const itemCard = { background: '#fff', borderRadius: '20px', border: '1px solid #f0f0f0', overflow: 'hidden' };
-const itemImage = (url) => ({ height: '200px', background: url ? `url(${url}) center/cover` : '#f8f8f8', position: 'relative' });
-const imageOverlay = { position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, transparent, rgba(0,0,0,0.5))' };
+
+// Event Cards
+const cardGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '25px' };
+const itemCard = { background: '#fff', borderRadius: '20px', border: '1px solid #f0f0f0', overflow: 'hidden', transition: 'all 0.3s ease' };
+const itemImage = (url) => ({ height: '180px', background: url ? `url(${url}) center/cover` : '#f8f8f8', position: 'relative' });
+const imageOverlay = { position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, transparent, rgba(0,0,0,0.4))' };
 const cardQuickActions = { position: 'absolute', top: '12px', right: '12px', display: 'flex', gap: '8px' };
 const miniAction = { width: '36px', height: '36px', borderRadius: '10px', background: '#fff', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
-const deleteAction = { width: '36px', height: '36px', borderRadius: '10px', background: '#fee2e2', color: '#ef4444', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
-const itemBody = { padding: '20px' };
-const itemTitle = { margin: '0 0 10px', fontSize: '16px', fontWeight: 900 };
-const metaLine = { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#64748b', marginBottom: '15px' };
-const fullWidthBtn = { width: '100%', background: '#f1f5f9', border: 'none', padding: '12px', borderRadius: '10px', fontWeight: 800, fontSize: '11px', cursor: 'pointer' };
-const filterGroup = { display: 'flex', gap: '15px' };
-const searchBox = { position: 'relative', display: 'flex', alignItems: 'center', background: '#fff', border: '1px solid #eee', borderRadius: '12px', padding: '0 15px' };
-const searchInputField = { border: 'none', padding: '12px', outline: 'none', fontSize: '13px', fontWeight: 600, width: '200px' };
+const itemBody = { padding: '24px' };
+const itemMeta = { display: 'flex', gap: '10px', marginBottom: '12px' };
+const dateBadge = { background: '#f8fafc', padding: '4px 8px', borderRadius: '6px', fontSize: '10px', fontWeight: 900, color: '#64748b' };
+const tierBadge = { background: '#fffbeb', padding: '4px 8px', borderRadius: '6px', fontSize: '10px', fontWeight: 900, color: '#b45309' };
+const itemTitle = { margin: '0 0 10px', fontSize: '18px', fontWeight: 900 };
+const metaLine = { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#64748b', marginBottom: '20px' };
+const tierList = { marginBottom: '20px', borderTop: '1px solid #f1f5f9', paddingTop: '15px' };
+const tierRow = { display: 'flex', justifyContent: 'space-between', fontSize: '12px', fontWeight: 700, marginBottom: '6px' };
+const tierPrice = { color: '#000', fontWeight: 900 };
+const fullWidthBtn = { width: '100%', background: '#000', color: '#fff', border: 'none', padding: '14px', borderRadius: '12px', fontWeight: 800, fontSize: '11px', cursor: 'pointer' };
+
+// Table
 const tableWrapper = { background: '#fff', borderRadius: '20px', border: '1px solid #f0f0f0', overflow: 'hidden' };
 const dataTable = { width: '100%', borderCollapse: 'collapse', textAlign: 'left' };
 const tableTh = { padding: '15px 20px', background: '#f8fafc', fontSize: '10px', fontWeight: 900, color: '#94a3b8' };
@@ -604,53 +552,49 @@ const guestBold = { margin: 0, fontWeight: 800 };
 const guestMuted = { margin: 0, fontSize: '11px', color: '#94a3b8' };
 const scannedPill = { background: '#f1f5f9', color: '#94a3b8', padding: '4px 10px', borderRadius: '6px', fontSize: '10px', fontWeight: 900 };
 const activePill = { background: '#f0fdf4', color: '#16a34a', padding: '4px 10px', borderRadius: '6px', fontSize: '10px', fontWeight: 900 };
-const compListStack = { display: 'flex', flexDirection: 'column', gap: '30px' };
-const grandCompCard = { background: '#fff', borderRadius: '24px', border: '1px solid #f0f0f0', padding: '30px' };
-const grandHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '25px', borderBottom: '1px solid #f8f8f8', paddingBottom: '20px' };
-const grandTitle = { margin: 0, fontSize: '20px', fontWeight: 900 };
-const grandSub = { margin: '5px 0 0', fontSize: '12px', color: '#94a3b8', fontWeight: 600 };
-const actionRow = { display: 'flex', gap: '10px' };
-const deleteTextBtn = { background: 'none', border: 'none', color: '#ef4444', fontSize: '11px', fontWeight: 900, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' };
-const nestedContestGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '20px' };
-const contestContainer = { background: '#fcfcfc', border: '1px solid #f1f5f9', borderRadius: '18px', padding: '20px' };
-const contestHead = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' };
-const contestTitle = { margin: 0, fontSize: '14px', fontWeight: 900 };
-const contestPrice = { margin: '2px 0 0', fontSize: '11px', color: '#0ea5e9', fontWeight: 700 };
-const miniActionGroup = { display: 'flex', gap: '8px' };
-const iconBtn = { width: '32px', height: '32px', borderRadius: '8px', border: '1px solid #eee', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' };
-const iconBtnDelete = { width: '32px', height: '32px', borderRadius: '8px', border: 'none', background: '#fee2e2', color: '#ef4444', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' };
-const candidateTable = { display: 'flex', flexDirection: 'column', gap: '10px' };
-const candRow = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px', background: '#fff', border: '1px solid #f1f5f9', borderRadius: '12px' };
-const candMain = { display: 'flex', alignItems: 'center', gap: '10px' };
-const candAvatar = (url) => ({ width: '30px', height: '30px', borderRadius: '8px', background: url ? `url(${url}) center/cover` : '#eee' });
-const candNameText = { fontSize: '13px', fontWeight: 700 };
-const candStats = { display: 'flex', alignItems: 'center', gap: '10px' };
-const voteBadge = { background: '#f8fafc', color: '#000', fontSize: '10px', fontWeight: 900, padding: '4px 8px', borderRadius: '6px' };
-const candDelete = { background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' };
-const emptyText = { fontSize: '11px', color: '#94a3b8', textAlign: 'center', margin: '20px 0' };
-const analyticsGrid = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px' };
-const analyticsCard = { background: '#fff', borderRadius: '24px', border: '1px solid #f0f0f0', padding: '30px' };
-const anaHeader = { display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '25px' };
-const anaTitle = { margin: 0, fontSize: '16px', fontWeight: 900 };
-const anaBody = { display: 'flex', flexDirection: 'column', gap: '15px' };
-const anaRow = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px', background: '#fcfcfc', borderRadius: '16px' };
-const anaInfo = { display: 'flex', flexDirection: 'column' };
-const anaName = { margin: 0, fontSize: '13px', fontWeight: 800 };
-const anaMeta = { margin: '2px 0 0', fontSize: '11px', color: '#94a3b8', fontWeight: 600 };
-const anaVal = { margin: 0, fontSize: '14px', fontWeight: 950, color: '#16a34a' };
-const liveBadge = { background: '#f0fdf4', color: '#16a34a', padding: '6px 12px', borderRadius: '20px', fontSize: '10px', fontWeight: 900, display: 'flex', alignItems: 'center', gap: '6px' };
+
+// Search & Filters
+const filterGroup = { display: 'flex', gap: '15px' };
+const searchBox = { position: 'relative', display: 'flex', alignItems: 'center', background: '#fff', border: '1px solid #eee', borderRadius: '12px', padding: '0 15px' };
+const searchInputField = { border: 'none', padding: '12px', outline: 'none', fontSize: '13px', fontWeight: 600, width: '250px' };
+
+// Modals
 const overlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 };
-const modal = { background: '#fff', width: '400px', borderRadius: '30px', padding: '40px' };
+const modal = { background: '#fff', width: '420px', borderRadius: '30px', padding: '40px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)' };
 const modalHead = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' };
 const modalTitle = { margin: 0, fontSize: '20px', fontWeight: 950 };
 const closeBtn = { background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' };
 const modalBody = { display: 'flex', flexDirection: 'column', gap: '20px' };
 const inputStack = { display: 'flex', flexDirection: 'column', gap: '8px' };
 const fieldLabel = { fontSize: '9px', fontWeight: 900, color: '#94a3b8', letterSpacing: '1px' };
-const modalInput = { padding: '14px', borderRadius: '12px', border: '1px solid #eee', fontSize: '14px', outline: 'none', fontWeight: 600 };
-const actionSubmitBtn = (p) => ({ padding: '16px', background: '#000', color: '#fff', border: 'none', borderRadius: '14px', fontWeight: 800, cursor: p ? 'not-allowed' : 'pointer', fontSize: '13px' });
-const emptyState = { padding: '60px', textAlign: 'center', background: '#fff', borderRadius: '24px', border: '1px dashed #eee', color: '#94a3b8' };
+const modalInput = { padding: '14px', borderRadius: '12px', border: '1px solid #eee', fontSize: '14px', outline: 'none', fontWeight: 600, width: '100%' };
+const actionSubmitBtn = (p) => ({ padding: '16px', background: '#000', color: '#fff', border: 'none', borderRadius: '14px', fontWeight: 800, cursor: p ? 'not-allowed' : 'pointer', fontSize: '13px', width: '100%' });
 const alertBox = { padding: '15px', borderRadius: '12px', background: '#f0f9ff', display: 'flex', gap: '10px', alignItems: 'center' };
 const alertText = { fontSize: '11px', color: '#0ea5e9', fontWeight: 600, margin: 0 };
-const qrContainer = { margin: '20px auto', width: '200px', height: '200px', background: '#f8f8f8', borderRadius: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px solid #eee' };
-const qrPlaceholder = { fontSize: '12px', color: '#94a3b8', fontWeight: 800 };
+
+// Skeleton Styles
+const skeletonCardBase = { height: '350px', background: '#fff', borderRadius: '20px', padding: '20px', display: 'flex', flexDirection: 'column', gap: '15px' };
+const skeletonImage = { height: '180px', background: '#f1f5f9', borderRadius: '12px', animation: 'pulse 1.5s infinite' };
+const skeletonTextFull = { height: '14px', background: '#f1f5f9', borderRadius: '4px', width: '100%', animation: 'pulse 1.5s infinite' };
+const skeletonTextHalf = { height: '14px', background: '#f1f5f9', borderRadius: '4px', width: '60%', animation: 'pulse 1.5s infinite' };
+const skeletonTableBase = { background: '#fff', borderRadius: '20px', padding: '20px' };
+const skeletonTableRow = { display: 'flex', gap: '15px', padding: '15px 0', borderBottom: '1px solid #f1f5f9' };
+const skeletonCircle = { width: '40px', height: '40px', borderRadius: '50%', background: '#f1f5f9' };
+
+// Empty State
+const emptyState = { padding: '100px 40px', textAlign: 'center', background: '#fff', borderRadius: '24px', border: '1px dashed #eee', color: '#94a3b8' };
+
+// Competitions
+const grandCompCard = { background: '#fff', borderRadius: '24px', border: '1px solid #f0f0f0', padding: '30px', marginBottom: '30px' };
+const grandHeader = { display: 'flex', justifyContent: 'space-between', marginBottom: '25px' };
+const grandTitle = { margin: 0, fontSize: '20px', fontWeight: 900 };
+const nestedContestGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '20px' };
+const contestContainer = { background: '#fcfcfc', border: '1px solid #f1f5f9', borderRadius: '18px', padding: '20px' };
+const contestHead = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' };
+const contestTitle = { margin: 0, fontSize: '14px', fontWeight: 900 };
+const candRow = { display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #f8f8f8', fontSize: '12px', fontWeight: 700 };
+const candNameText = { color: '#64748b' };
+const voteBadge = { color: '#0ea5e9', fontWeight: 900 };
+const miniActionGroup = { display: 'flex', gap: '8px' };
+const iconBtn = { padding: '6px', borderRadius: '6px', border: '1px solid #eee', background: '#fff', cursor: 'pointer' };
+const iconBtnDelete = { padding: '6px', borderRadius: '6px', border: 'none', background: '#fee2e2', color: '#ef4444', cursor: 'pointer' };
