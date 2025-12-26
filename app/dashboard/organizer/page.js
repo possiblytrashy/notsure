@@ -1,20 +1,18 @@
 "use client";
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '../../../lib/supabase'; // Adjust this path to match your project structure
+// IMPORT NOTE: Ensure your supabase client is exported from this path
+import { supabase } from '@/lib/supabase'; 
 import { useRouter } from 'next/navigation';
 import { 
-  Plus, BarChart3, Users, Ticket, Calendar, 
-  Trophy, Wallet, ArrowUpRight, Settings, Image as ImageIcon,
-  Link as LinkIcon, Share2, Check, Copy, QrCode, Download, X,
-  TrendingUp, Smartphone, Clock, CheckCircle2, XCircle, Loader2, Save, Trash2,
-  LogOut, Search, Filter, Eye, ChevronRight, RefreshCcw, MoreHorizontal,
-  ExternalLink, Mail, Phone, MapPin, UserPlus, Award, AlertCircle, Info,
-  Banknote, CreditCard, ShieldCheck, History, Zap
+  Plus, Ticket, Calendar, Trophy, Wallet, Settings, 
+  Link as LinkIcon, Check, QrCode, Download, X,
+  Loader2, LogOut, Search, RefreshCcw, MoreHorizontal,
+  ChevronRight, MapPin, Award, AlertCircle, Info,
+  ShieldCheck, History, Zap
 } from 'lucide-react';
 
 export default function OrganizerDashboard() {
   const router = useRouter();
-  const supabase = createClientComponentClient();
 
   // --- 1. CORE DATA STATE ---
   const [activeTab, setActiveTab] = useState('events');
@@ -27,7 +25,7 @@ export default function OrganizerDashboard() {
     profile: null 
   });
 
-  // --- 2. FINANCIAL & ANALYTICS STATE (Initialized with 0 to prevent toLocaleString errors) ---
+  // --- 2. FINANCIAL & ANALYTICS STATE ---
   const [stats, setStats] = useState({
     totalGross: 0,
     organizerShare: 0,
@@ -59,35 +57,39 @@ export default function OrganizerDashboard() {
       if (!isSilent) setLoading(true);
       else setRefreshing(true);
 
+      // Get current authenticated user
       const { data: { user }, error: authError } = await supabase.auth.getUser();
+      
       if (authError || !user) {
         router.push('/login');
         return;
       }
 
-      // Fetch Profile for Subaccount Info
+      // 1. Fetch Profile
       const { data: profile } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', user.id)
         .single();
 
-      // Parallel Fetch with fixed ordering syntax to avoid 400 errors
+      // 2. Parallel Fetch Data
       const [eventsRes, contestsRes, ticketsRes] = await Promise.all([
         supabase.from('events').select('*').eq('organizer_id', user.id).order('created_at', { ascending: false }),
         supabase.from('contests').select('*, candidates(*)').eq('organizer_id', user.id).order('created_at', { ascending: false }),
         supabase.from('tickets').select('*, events(title, organizer_id)').order('created_at', { ascending: false })
       ]);
 
+      // Filter tickets owned by this organizer's events
       const myTickets = ticketsRes.data?.filter(t => t.events?.organizer_id === user.id) || [];
       
-      // Calculate Financials (The 95/5 Split)
+      // Calculate Financial Splits (95/5)
       const totalGross = myTickets.reduce((acc, t) => acc + (parseFloat(t.amount) || 0), 0);
       
-      // Safe Vote Count calculation
+      // Calculate Votes
       const totalVotes = contestsRes.data?.reduce((acc, c) => 
         acc + (c.candidates?.reduce((sum, cand) => sum + (parseInt(cand.vote_count) || 0), 0) || 0), 0) || 0;
 
+      // Set Stats
       setStats({
         totalGross,
         organizerShare: totalGross * 0.95,
@@ -97,6 +99,7 @@ export default function OrganizerDashboard() {
         totalVotes: totalVotes
       });
 
+      // Set Main Data
       setData({
         events: eventsRes.data || [],
         contests: contestsRes.data || [],
@@ -104,6 +107,7 @@ export default function OrganizerDashboard() {
         profile: { ...user, ...profile }
       });
 
+      // Set Onboarding Config
       if (profile?.paystack_subaccount_code) {
         setPaystackConfig({
           businessName: profile.business_name || "",
@@ -120,7 +124,7 @@ export default function OrganizerDashboard() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [router, supabase]);
+  }, [router]);
 
   useEffect(() => {
     loadDashboardData();
@@ -135,7 +139,6 @@ export default function OrganizerDashboard() {
   const saveOnboardingDetails = async () => {
     setIsProcessing(true);
     try {
-      // Logic for saving bank details and triggering your subaccount creation
       const { error } = await supabase.from('profiles').update({
         business_name: paystackConfig.businessName,
         bank_code: paystackConfig.bankCode,
@@ -143,11 +146,11 @@ export default function OrganizerDashboard() {
       }).eq('id', data.profile.id);
 
       if (error) throw error;
-      alert("Details saved! Automated 95% payouts are ready.");
+      alert("Details saved! Automated payouts are active.");
       setShowSettingsModal(false);
       loadDashboardData(true);
     } catch (err) {
-      alert("Error updating payout details.");
+      alert("Error updating details.");
     } finally {
       setIsProcessing(false);
     }
@@ -171,7 +174,7 @@ export default function OrganizerDashboard() {
   if (loading) return (
     <div style={fullPageCenter}>
       <Loader2 className="animate-spin" size={48} color="#0ea5e9"/>
-      <h2 style={{marginTop: '24px', fontWeight: 900, letterSpacing: '-1px'}}>SYNCING FINANCIALS...</h2>
+      <h2 style={{marginTop: '24px', fontWeight: 900, letterSpacing: '-1px'}}>SECURE ACCESS...</h2>
     </div>
   );
 
@@ -187,7 +190,7 @@ export default function OrganizerDashboard() {
              <p style={userEmail}>{data.profile?.email}</p>
              <div style={onboardingBadge(paystackConfig.subaccountCode)}>
                {paystackConfig.subaccountCode ? <ShieldCheck size={12}/> : <AlertCircle size={12}/>}
-               {paystackConfig.subaccountCode ? 'AUTOMATED SPLITS ACTIVE' : 'PAYOUTS NOT CONFIGURED'}
+               {paystackConfig.subaccountCode ? 'SPLITS ACTIVE' : 'ONBOARDING REQUIRED'}
              </div>
            </div>
            <button style={circleAction} onClick={() => loadDashboardData(true)}>
@@ -199,15 +202,15 @@ export default function OrganizerDashboard() {
         </div>
       </div>
 
-      {/* FINANCE OVERVIEW */}
+      {/* FINANCE SECTION */}
       <div style={financeGrid}>
         <div style={balanceCard}>
           <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start'}}>
             <div>
-              <p style={financeLabel}>YOUR 95% NET EARNINGS</p>
+              <p style={financeLabel}>YOUR 95% SHARE</p>
               <h2 style={balanceValue}>GHS {(stats.organizerShare || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</h2>
               <div style={autoPayoutTag}>
-                <Zap size={14} fill="#0ea5e9"/> Settled automatically via Paystack
+                <Zap size={14} fill="#0ea5e9"/> Automated by Paystack
               </div>
             </div>
             <div style={iconCircleLarge}><Wallet size={32} color="#0ea5e9"/></div>
@@ -215,11 +218,11 @@ export default function OrganizerDashboard() {
           
           <div style={financeActionRow}>
             <div style={miniStatSplit}>
-               <span style={miniLabel}>GROSS REVENUE (100%)</span>
+               <span style={miniLabel}>GROSS SALES</span>
                <span style={miniValue}>GHS {(stats.totalGross || 0).toLocaleString()}</span>
             </div>
             <div style={miniStatSplit}>
-               <span style={miniLabel}>SYSTEM FEE (5%)</span>
+               <span style={miniLabel}>5% FEE</span>
                <span style={miniValue}>GHS {(stats.commissionPaid || 0).toLocaleString()}</span>
             </div>
             <button style={settingsIconBtn} onClick={() => setShowSettingsModal(true)}>
@@ -231,14 +234,14 @@ export default function OrganizerDashboard() {
         <div style={statsOverview}>
           <div style={statBox}>
             <div>
-              <p style={statLabel}>TICKETS SOLD</p>
+              <p style={statLabel}>TICKETS</p>
               <p style={statNumber}>{stats.ticketCount || 0}</p>
             </div>
             <Ticket size={24} color="#0ea5e9"/>
           </div>
           <div style={statBox}>
             <div>
-              <p style={statLabel}>CONTEST VOTES</p>
+              <p style={statLabel}>VOTES</p>
               <p style={statNumber}>{(stats.totalVotes || 0).toLocaleString()}</p>
             </div>
             <Award size={24} color="#f59e0b"/>
@@ -246,7 +249,7 @@ export default function OrganizerDashboard() {
           {!paystackConfig.subaccountCode && (
             <div style={alertBox} onClick={() => setShowSettingsModal(true)}>
               <Info size={18}/>
-              <span>Configure your bank account to receive 95% splits</span>
+              <span>Setup Payouts to receive 95% share</span>
               <ChevronRight size={18}/>
             </div>
           )}
@@ -256,28 +259,28 @@ export default function OrganizerDashboard() {
       {/* TABS */}
       <div style={tabBar}>
         <button onClick={() => setActiveTab('events')} style={tabItem(activeTab === 'events')}>
-          <Calendar size={18}/> MY EVENTS
+          <Calendar size={18}/> EVENTS
         </button>
         <button onClick={() => setActiveTab('sales')} style={tabItem(activeTab === 'sales')}>
-          <History size={18}/> SALES & TIERS
+          <History size={18}/> SALES LEDGER
         </button>
         <button onClick={() => setActiveTab('contests')} style={tabItem(activeTab === 'contests')}>
           <Trophy size={18}/> CONTESTS
         </button>
       </div>
 
-      {/* VIEWPORT */}
+      {/* VIEWS */}
       <div style={viewPort}>
         {activeTab === 'events' && (
           <div style={fadeAnim}>
             <div style={viewHeader}>
-              <h2 style={viewTitle}>Event Management</h2>
+              <h2 style={viewTitle}>Your Events</h2>
               <button style={addBtn} onClick={() => router.push('/dashboard/organizer/create')}>
-                <Plus size={20}/> CREATE LUXURY EVENT
+                <Plus size={20}/> NEW EVENT
               </button>
             </div>
             <div style={cardGrid}>
-              {data.events.length > 0 ? data.events.map(event => (
+              {data.events.map(event => (
                 <div key={event.id} style={itemCard}>
                   <div style={itemImage(event.images?.[0])}>
                     <div style={cardQuickActions}>
@@ -293,16 +296,14 @@ export default function OrganizerDashboard() {
                     <h3 style={itemTitle}>{event.title}</h3>
                     <div style={itemMeta}>
                       <span style={metaLine}><Calendar size={14}/> {new Date(event.date).toLocaleDateString()}</span>
-                      <span style={metaLine}><MapPin size={14}/> {event.location || 'Not Set'}</span>
+                      <span style={metaLine}><MapPin size={14}/> {event.location || 'Accra'}</span>
                     </div>
                     <button style={fullWidthBtn} onClick={() => { setSelectedEventFilter(event.id); setActiveTab('sales'); }}>
-                      VIEW PERFORMANCE <ChevronRight size={16}/>
+                      VIEW SALES <ChevronRight size={16}/>
                     </button>
                   </div>
                 </div>
-              )) : (
-                <p style={emptyText}>No events created yet.</p>
-              )}
+              ))}
             </div>
           </div>
         )}
@@ -310,19 +311,14 @@ export default function OrganizerDashboard() {
         {activeTab === 'sales' && (
           <div style={fadeAnim}>
              <div style={viewHeader}>
-              <h2 style={viewTitle}>Live Sales Ledger</h2>
+              <h2 style={viewTitle}>Sales Breakdown</h2>
               <div style={filterGroup}>
                 <div style={searchBox}>
                   <Search size={18} color="#94a3b8"/>
-                  <input 
-                    style={searchInputField} 
-                    placeholder="Search guests..." 
-                    value={ticketSearch}
-                    onChange={(e) => setTicketSearch(e.target.value)}
-                  />
+                  <input style={searchInputField} placeholder="Guest name..." value={ticketSearch} onChange={(e) => setTicketSearch(e.target.value)}/>
                 </div>
                 <select style={eventDropdown} value={selectedEventFilter} onChange={(e) => setSelectedEventFilter(e.target.value)}>
-                  <option value="all">Filter by Event</option>
+                  <option value="all">All Events</option>
                   {data.events.map(e => <option key={e.id} value={e.id}>{e.title}</option>)}
                 </select>
               </div>
@@ -332,35 +328,30 @@ export default function OrganizerDashboard() {
               <table style={dataTable}>
                 <thead>
                   <tr>
-                    <th style={tableTh}>ATTENDEE</th>
-                    <th style={tableTh}>EVENT / REF</th>
-                    <th style={tableTh}>PAID (100%)</th>
+                    <th style={tableTh}>GUEST</th>
+                    <th style={tableTh}>EVENT</th>
+                    <th style={tableTh}>GROSS</th>
                     <th style={tableTh}>YOUR 95%</th>
                     <th style={tableTh}>STATUS</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredTickets.length > 0 ? filteredTickets.map((t) => (
+                  {filteredTickets.map((t) => (
                     <tr key={t.id} style={tableTr}>
                       <td style={tableTd}>
-                        <p style={guestBold}>{t.guest_name || 'Guest'}</p>
+                        <p style={guestBold}>{t.guest_name}</p>
                         <p style={guestMuted}>{t.guest_email}</p>
                       </td>
-                      <td style={tableTd}>
-                        <p style={{margin:0, fontWeight:600}}>{t.events?.title}</p>
-                        <p style={{margin:0, fontSize: '11px', color:'#94a3b8'}}>{t.reference}</p>
-                      </td>
-                      <td style={tableTd}>GHS {(t.amount || 0).toLocaleString()}</td>
-                      <td style={tableTd} style={{fontWeight: 800, color: '#16a34a'}}>
-                        GHS {((t.amount || 0) * 0.95).toLocaleString()}
+                      <td style={tableTd}>{t.events?.title}</td>
+                      <td style={tableTd}>GHS {t.amount}</td>
+                      <td style={tableTd} style={{fontWeight: 700, color: '#16a34a'}}>
+                        GHS {(t.amount * 0.95).toFixed(2)}
                       </td>
                       <td style={tableTd}>
-                        {t.is_scanned ? <span style={scannedPill}>CHECKED IN</span> : <span style={activePill}>VALID</span>}
+                        {t.is_scanned ? <span style={scannedPill}>USED</span> : <span style={activePill}>ACTIVE</span>}
                       </td>
                     </tr>
-                  )) : (
-                    <tr><td colSpan="5" style={{padding: '40px', textAlign: 'center', color: '#94a3b8'}}>No sales data found.</td></tr>
-                  )}
+                  ))}
                 </tbody>
               </table>
             </div>
@@ -368,80 +359,50 @@ export default function OrganizerDashboard() {
         )}
       </div>
 
-      {/* SETTINGS / ONBOARDING MODAL */}
+      {/* MODALS */}
       {showSettingsModal && (
         <div style={overlay} onClick={() => setShowSettingsModal(false)}>
           <div style={modal} onClick={e => e.stopPropagation()}>
             <div style={modalHead}>
-              <div>
-                <h2 style={modalTitle}>Payout Configuration</h2>
-                <p style={{margin: '5px 0 0', fontSize: '12px', color: '#64748b'}}>Set up your bank for instant 95% splits</p>
-              </div>
+              <div><h2 style={modalTitle}>Payout Settings</h2></div>
               <button style={closeBtn} onClick={() => setShowSettingsModal(false)}><X size={20}/></button>
             </div>
-
             <div style={onboardingPromo}>
               <Zap size={24} color="#0ea5e9"/>
-              <p style={{margin: 0, fontSize: '13px', lineHeight: '1.4'}}>
-                Once configured, <b>95% of every sale</b> is sent to your account automatically. The platform retains 5%.
-              </p>
+              <p style={{margin: 0, fontSize: '13px'}}>Funds are split 95/5 automatically at point of sale.</p>
             </div>
-
             <div style={{margin: '25px 0'}}>
               <div style={inputStack}>
                 <label style={fieldLabel}>BUSINESS NAME</label>
-                <input 
-                  style={modalInput} 
-                  value={paystackConfig.businessName}
-                  onChange={(e) => setPaystackConfig({...paystackConfig, businessName: e.target.value})}
-                  placeholder="e.g. Ousted Luxury Events"
-                />
+                <input style={modalInput} value={paystackConfig.businessName} onChange={(e) => setPaystackConfig({...paystackConfig, businessName: e.target.value})}/>
               </div>
               <div style={inputStack}>
-                <label style={fieldLabel}>SETTLEMENT BANK / NETWORK</label>
-                <select 
-                  style={modalInput}
-                  value={paystackConfig.bankCode}
-                  onChange={(e) => setPaystackConfig({...paystackConfig, bankCode: e.target.value})}
-                >
-                  <option value="">Select Option</option>
-                  <option value="MTN">MTN Mobile Money</option>
+                <label style={fieldLabel}>BANK / NETWORK</label>
+                <select style={modalInput} value={paystackConfig.bankCode} onChange={(e) => setPaystackConfig({...paystackConfig, bankCode: e.target.value})}>
+                  <option value="">Select Bank</option>
+                  <option value="MTN">MTN MoMo</option>
                   <option value="VOD">Vodafone Cash</option>
-                  <option value="058">Guaranty Trust Bank</option>
-                  <option value="057">Zenith Bank</option>
+                  <option value="058">GT Bank</option>
                 </select>
               </div>
               <div style={inputStack}>
                 <label style={fieldLabel}>ACCOUNT NUMBER</label>
-                <input 
-                  style={modalInput} 
-                  value={paystackConfig.accountNumber}
-                  onChange={(e) => setPaystackConfig({...paystackConfig, accountNumber: e.target.value})}
-                  placeholder="Wallet or Bank Number"
-                />
+                <input style={modalInput} value={paystackConfig.accountNumber} onChange={(e) => setPaystackConfig({...paystackConfig, accountNumber: e.target.value})}/>
               </div>
             </div>
-
-            <button 
-              style={actionSubmitBtn(isProcessing)} 
-              onClick={saveOnboardingDetails}
-              disabled={isProcessing}
-            >
-              {isProcessing ? <Loader2 className="animate-spin"/> : 'CONFIRM PAYOUT ACCOUNT'}
+            <button style={actionSubmitBtn(isProcessing)} onClick={saveOnboardingDetails} disabled={isProcessing}>
+              {isProcessing ? <Loader2 className="animate-spin"/> : 'SAVE PAYOUT DETAILS'}
             </button>
           </div>
         </div>
       )}
 
-      {/* QR MODAL */}
       {showQR && (
         <div style={overlay} onClick={() => setShowQR(null)}>
           <div style={qrContent} onClick={e => e.stopPropagation()}>
-            <h3 style={{marginBottom: '20px', fontWeight: 900}}>Event Portal QR</h3>
+            <h3 style={{marginBottom: '20px', fontWeight: 900}}>Share QR Code</h3>
             <div style={qrBorder}><img src={showQR} style={{width: '100%'}} alt="QR"/></div>
-            <button style={downloadBtn} onClick={() => window.open(showQR)}>
-              <Download size={18}/> DOWNLOAD QR
-            </button>
+            <button style={downloadBtn} onClick={() => window.open(showQR)}>DOWNLOAD</button>
           </div>
         </div>
       )}
@@ -449,75 +410,74 @@ export default function OrganizerDashboard() {
   );
 }
 
-// --- LUXURY STYLES ---
-const mainWrapper = { padding: '40px 20px 100px', maxWidth: '1280px', margin: '0 auto', background: '#fcfdfe', minHeight: '100vh', fontFamily: 'inherit' };
+// --- STYLES ---
+const mainWrapper = { padding: '40px 20px', maxWidth: '1200px', margin: '0 auto', background: '#fcfdfe', minHeight: '100vh' };
 const fullPageCenter = { height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' };
-const topNav = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '50px' };
+const topNav = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '40px' };
 const logoText = { fontSize: '24px', fontWeight: 950, letterSpacing: '-1.5px', margin: 0 };
-const badgePro = { background: '#000', color: '#fff', fontSize: '10px', padding: '4px 8px', borderRadius: '6px', verticalAlign: 'middle', marginLeft: '10px' };
+const badgePro = { background: '#000', color: '#fff', fontSize: '10px', padding: '4px 8px', borderRadius: '6px', marginLeft: '10px' };
 const headerActions = { display: 'flex', gap: '15px', alignItems: 'center' };
 const userBrief = { textAlign: 'right' };
 const userEmail = { margin: 0, fontSize: '14px', fontWeight: 700 };
-const circleAction = { width: '45px', height: '45px', borderRadius: '15px', border: '1px solid #e2e8f0', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#64748b' };
-const logoutCircle = { width: '45px', height: '45px', borderRadius: '15px', border: 'none', background: '#fff1f2', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#e11d48' };
-const onboardingBadge = (onboarded) => ({ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '10px', fontWeight: 800, color: onboarded ? '#16a34a' : '#e11d48', marginTop: '2px' });
-const financeGrid = { display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '25px', marginBottom: '50px' };
-const balanceCard = { background: '#000', borderRadius: '35px', padding: '40px', color: '#fff', boxShadow: '0 20px 40px rgba(0,0,0,0.1)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' };
-const financeLabel = { fontSize: '11px', fontWeight: 800, color: '#666', letterSpacing: '1px', margin: '0 0 10px' };
-const balanceValue = { fontSize: '48px', fontWeight: 950, margin: 0, letterSpacing: '-2px' };
-const autoPayoutTag = { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#0ea5e9', marginTop: '15px', fontWeight: 600 };
-const iconCircleLarge = { width: '70px', height: '70px', borderRadius: '25px', background: 'rgba(14, 165, 233, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' };
-const financeActionRow = { display: 'flex', gap: '20px', marginTop: '30px', alignItems: 'center' };
-const miniStatSplit = { display: 'flex', flexDirection: 'column', gap: '2px' };
+const circleAction = { width: '40px', height: '40px', borderRadius: '12px', border: '1px solid #e2e8f0', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
+const logoutCircle = { width: '40px', height: '40px', borderRadius: '12px', border: 'none', background: '#fff1f2', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#e11d48' };
+const onboardingBadge = (onboarded) => ({ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '10px', fontWeight: 800, color: onboarded ? '#16a34a' : '#e11d48' });
+const financeGrid = { display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '20px', marginBottom: '40px' };
+const balanceCard = { background: '#000', borderRadius: '25px', padding: '30px', color: '#fff' };
+const financeLabel = { fontSize: '11px', fontWeight: 800, color: '#666' };
+const balanceValue = { fontSize: '40px', fontWeight: 950, margin: '10px 0' };
+const autoPayoutTag = { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#0ea5e9', fontWeight: 600 };
+const iconCircleLarge = { width: '60px', height: '60px', borderRadius: '20px', background: 'rgba(14, 165, 233, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' };
+const financeActionRow = { display: 'flex', gap: '20px', marginTop: '25px', alignItems: 'center' };
+const miniStatSplit = { display: 'flex', flexDirection: 'column' };
 const miniLabel = { fontSize: '9px', fontWeight: 800, color: '#666' };
 const miniValue = { fontSize: '13px', fontWeight: 700 };
-const settingsIconBtn = { marginLeft: 'auto', width: '50px', height: '50px', background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '18px', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' };
-const statsOverview = { display: 'grid', gridTemplateColumns: 'repeat(1, 1fr)', gap: '12px' };
-const statBox = { background: '#fff', padding: '18px 25px', borderRadius: '22px', border: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' };
+const settingsIconBtn = { marginLeft: 'auto', width: '45px', height: '45px', background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '12px', color: '#fff', cursor: 'pointer' };
+const statsOverview = { display: 'grid', gap: '10px' };
+const statBox = { background: '#fff', padding: '15px 20px', borderRadius: '20px', border: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' };
 const statLabel = { margin: 0, fontSize: '11px', fontWeight: 800, color: '#94a3b8' };
 const statNumber = { margin: '5px 0 0', fontSize: '20px', fontWeight: 900 };
-const alertBox = { background: '#fff1f2', padding: '15px 20px', borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '12px', fontSize: '12px', fontWeight: 700, color: '#e11d48', cursor: 'pointer' };
-const tabBar = { display: 'flex', gap: '30px', borderBottom: '1px solid #e2e8f0', marginBottom: '40px' };
-const tabItem = (active) => ({ padding: '15px 5px', background: 'none', border: 'none', color: active ? '#000' : '#94a3b8', fontSize: '13px', fontWeight: 800, cursor: 'pointer', borderBottom: active ? '3px solid #0ea5e9' : '3px solid transparent', display: 'flex', alignItems: 'center', gap: '10px' });
+const alertBox = { background: '#fff1f2', padding: '15px', borderRadius: '15px', display: 'flex', alignItems: 'center', gap: '10px', fontSize: '12px', fontWeight: 700, color: '#e11d48', cursor: 'pointer' };
+const tabBar = { display: 'flex', gap: '25px', borderBottom: '1px solid #e2e8f0', marginBottom: '30px' };
+const tabItem = (active) => ({ padding: '12px 0', background: 'none', border: 'none', color: active ? '#000' : '#94a3b8', fontSize: '13px', fontWeight: 800, cursor: 'pointer', borderBottom: active ? '3px solid #0ea5e9' : '3px solid transparent', display: 'flex', alignItems: 'center', gap: '8px' });
 const viewPort = { minHeight: '400px' };
-const fadeAnim = { animation: 'fadeIn 0.4s ease-out' };
-const viewHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px', flexWrap: 'wrap', gap: '20px' };
-const viewTitle = { margin: 0, fontSize: '24px', fontWeight: 900 };
-const addBtn = { background: '#0ea5e9', color: '#fff', border: 'none', padding: '14px 24px', borderRadius: '15px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px' };
-const cardGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '25px' };
-const itemCard = { background: '#fff', borderRadius: '30px', border: '1px solid #f1f5f9', overflow: 'hidden' };
-const itemImage = (url) => ({ height: '180px', background: url ? `url(${url}) center/cover` : '#f8fafc', position: 'relative', backgroundColor: '#f1f5f9' });
-const cardQuickActions = { position: 'absolute', top: '15px', right: '15px', display: 'flex', gap: '8px' };
-const miniAction = { width: '35px', height: '35px', borderRadius: '10px', background: 'rgba(255,255,255,0.9)', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#000' };
-const itemBody = { padding: '25px' };
-const itemTitle = { margin: '0 0 10px', fontSize: '18px', fontWeight: 900 };
-const itemMeta = { display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' };
-const metaLine = { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#64748b', fontWeight: 500 };
-const fullWidthBtn = { width: '100%', background: '#f8fafc', border: '1px solid #e2e8f0', padding: '12px', borderRadius: '12px', fontWeight: 700, fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px' };
+const fadeAnim = { animation: 'fadeIn 0.3s ease-in' };
+const viewHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px' };
+const viewTitle = { margin: 0, fontSize: '22px', fontWeight: 900 };
+const addBtn = { background: '#0ea5e9', color: '#fff', border: 'none', padding: '12px 20px', borderRadius: '12px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' };
+const cardGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' };
+const itemCard = { background: '#fff', borderRadius: '20px', border: '1px solid #f1f5f9', overflow: 'hidden' };
+const itemImage = (url) => ({ height: '160px', background: url ? `url(${url}) center/cover` : '#f1f5f9', position: 'relative' });
+const cardQuickActions = { position: 'absolute', top: '10px', right: '10px', display: 'flex', gap: '5px' };
+const miniAction = { width: '32px', height: '32px', borderRadius: '8px', background: 'rgba(255,255,255,0.9)', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
+const itemBody = { padding: '20px' };
+const itemTitle = { margin: '0 0 10px', fontSize: '16px', fontWeight: 900 };
+const itemMeta = { display: 'flex', flexDirection: 'column', gap: '5px', marginBottom: '15px' };
+const metaLine = { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#64748b' };
+const fullWidthBtn = { width: '100%', background: '#f8fafc', border: '1px solid #e2e8f0', padding: '10px', borderRadius: '10px', fontWeight: 700, fontSize: '11px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' };
 const filterGroup = { display: 'flex', gap: '10px' };
-const searchBox = { display: 'flex', alignItems: 'center', background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '0 15px', width: '250px' };
-const searchInputField = { border: 'none', padding: '12px', outline: 'none', fontSize: '13px', width: '100%' };
-const eventDropdown = { border: '1px solid #e2e8f0', borderRadius: '12px', padding: '0 10px', fontSize: '13px', fontWeight: 600, outline: 'none' };
-const tableWrapper = { background: '#fff', borderRadius: '25px', border: '1px solid #f1f5f9', overflow: 'hidden' };
+const searchBox = { display: 'flex', alignItems: 'center', background: '#fff', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '0 10px' };
+const searchInputField = { border: 'none', padding: '10px', outline: 'none', fontSize: '12px' };
+const eventDropdown = { border: '1px solid #e2e8f0', borderRadius: '10px', padding: '0 10px', fontSize: '12px', fontWeight: 600 };
+const tableWrapper = { background: '#fff', borderRadius: '20px', border: '1px solid #f1f5f9', overflow: 'hidden' };
 const dataTable = { width: '100%', borderCollapse: 'collapse' };
-const tableTh = { textAlign: 'left', padding: '20px', background: '#f8fafc', fontSize: '11px', fontWeight: 800, color: '#94a3b8' };
+const tableTh = { textAlign: 'left', padding: '15px', background: '#f8fafc', fontSize: '10px', fontWeight: 800, color: '#94a3b8' };
 const tableTr = { borderBottom: '1px solid #f1f5f9' };
-const tableTd = { padding: '20px', fontSize: '14px' };
+const tableTd = { padding: '15px', fontSize: '13px' };
 const guestBold = { margin: 0, fontWeight: 700 };
-const guestMuted = { margin: 0, fontSize: '12px', color: '#94a3b8' };
-const scannedPill = { background: '#f0fdf4', color: '#16a34a', padding: '6px 12px', borderRadius: '10px', fontSize: '11px', fontWeight: 800 };
-const activePill = { background: '#eff6ff', color: '#2563eb', padding: '6px 12px', borderRadius: '10px', fontSize: '11px', fontWeight: 800 };
-const overlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(5px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' };
-const modal = { background: '#fff', width: '100%', maxWidth: '450px', borderRadius: '35px', padding: '40px' };
-const modalHead = { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' };
-const modalTitle = { margin: 0, fontSize: '20px', fontWeight: 900 };
-const closeBtn = { background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' };
-const onboardingPromo = { background: '#f0f9ff', padding: '20px', borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '15px', border: '1px solid #e0f2fe' };
-const inputStack = { marginBottom: '20px' };
-const fieldLabel = { display: 'block', fontSize: '11px', fontWeight: 800, marginBottom: '10px', color: '#64748b' };
-const modalInput = { width: '100%', padding: '15px', borderRadius: '15px', border: '1px solid #e2e8f0', fontSize: '14px', outline: 'none' };
-const actionSubmitBtn = (disabled) => ({ width: '100%', background: disabled ? '#f1f5f9' : '#000', color: disabled ? '#94a3b8' : '#fff', border: 'none', padding: '18px', borderRadius: '20px', fontWeight: 900, cursor: disabled ? 'not-allowed' : 'pointer' });
-const qrContent = { background: '#fff', padding: '40px', borderRadius: '35px', textAlign: 'center', maxWidth: '400px', width: '100%' };
-const qrBorder = { border: '1px solid #f1f5f9', padding: '20px', borderRadius: '25px', marginBottom: '20px' };
-const downloadBtn = { width: '100%', background: '#000', color: '#fff', border: 'none', padding: '15px', borderRadius: '15px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' };
-const emptyText = { textAlign: 'center', color: '#94a3b8', padding: '40px', width: '100%', gridColumn: '1/-1' };
+const guestMuted = { margin: 0, fontSize: '11px', color: '#94a3b8' };
+const scannedPill = { background: '#f0fdf4', color: '#16a34a', padding: '4px 10px', borderRadius: '8px', fontSize: '10px', fontWeight: 800 };
+const activePill = { background: '#eff6ff', color: '#2563eb', padding: '4px 10px', borderRadius: '8px', fontSize: '10px', fontWeight: 800 };
+const overlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 };
+const modal = { background: '#fff', width: '90%', maxWidth: '400px', borderRadius: '25px', padding: '30px' };
+const modalHead = { display: 'flex', justifyContent: 'space-between', marginBottom: '20px' };
+const modalTitle = { margin: 0, fontSize: '18px', fontWeight: 900 };
+const closeBtn = { background: 'none', border: 'none', cursor: 'pointer' };
+const onboardingPromo = { background: '#f0f9ff', padding: '15px', borderRadius: '15px', display: 'flex', alignItems: 'center', gap: '10px' };
+const inputStack = { marginBottom: '15px' };
+const fieldLabel = { display: 'block', fontSize: '10px', fontWeight: 800, marginBottom: '5px', color: '#64748b' };
+const modalInput = { width: '100%', padding: '12px', borderRadius: '10px', border: '1px solid #e2e8f0', fontSize: '13px' };
+const actionSubmitBtn = (disabled) => ({ width: '100%', background: disabled ? '#f1f5f9' : '#000', color: '#fff', border: 'none', padding: '15px', borderRadius: '15px', fontWeight: 800, cursor: 'pointer' });
+const qrContent = { background: '#fff', padding: '30px', borderRadius: '25px', textAlign: 'center' };
+const qrBorder = { border: '1px solid #f1f5f9', padding: '15px', borderRadius: '15px', marginBottom: '15px' };
+const downloadBtn = { width: '100%', background: '#000', color: '#fff', border: 'none', padding: '12px', borderRadius: '10px', fontWeight: 800 };
