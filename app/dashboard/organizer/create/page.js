@@ -9,7 +9,7 @@ import {
   CheckCircle2, Loader2, ChevronLeft, Info,
   Layers, CreditCard, Sparkles, Upload, CloudLightning,
   Eye, Settings, HelpCircle, ShieldCheck, Zap,
-  FileText, Tag, Globe, Lock, User
+  FileText, Tag, Globe, Lock, User, ChevronUp, ChevronDown
 } from 'lucide-react';
 
 export default function CreateEvent() {
@@ -29,13 +29,13 @@ export default function CreateEvent() {
     title: '',
     description: '',
     date: '',
-    time: '',
+    hour: '12',
+    minute: '00',
+    period: 'PM',
     location: '',
     category: 'Entertainment',
-    image_url: '',
+    image_urls: [], // Array for multiple images
     is_published: true,
-    capacity_total: 0,
-    tags: []
   });
 
   // Ticket Tiers Data
@@ -45,7 +45,7 @@ export default function CreateEvent() {
       name: 'Regular', 
       price: '', 
       capacity: '', 
-      description: 'Standard entry to the event' 
+      description: 'Standard entry to the experience' 
     }
   ]);
 
@@ -54,7 +54,6 @@ export default function CreateEvent() {
     const checkUser = async () => {
       const { data: { user }, error } = await supabase.auth.getUser();
       if (error || !user) {
-        console.error("Unauthorized access attempt.");
         router.push('/login');
       } else {
         setUser(user);
@@ -63,53 +62,54 @@ export default function CreateEvent() {
     checkUser();
   }, [router]);
 
-  // --- 3. ADVANCED IMAGE HANDLING & STORAGE LOGIC ---
-  
-  const handleFileUpload = async (file) => {
-    if (!file) return;
+  // --- 3. MULTI-IMAGE STORAGE LOGIC ---
+  const handleFileUpload = async (files) => {
+    if (!files || files.length === 0) return;
     
-    // File Validation
-    if (!file.type.startsWith('image/')) {
-      setFormError("Invalid file type. Please upload an image (JPG, PNG, WEBP).");
-      return;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      setFormError("File too large. Maximum size is 5MB.");
-      return;
-    }
+    const validFiles = Array.from(files).filter(file => {
+      if (!file.type.startsWith('image/')) {
+        setFormError("One or more files are not valid images.");
+        return false;
+      }
+      if (file.size > 5 * 1024 * 1024) {
+        setFormError("One or more files exceed the 5MB limit.");
+        return false;
+      }
+      return true;
+    });
+
+    if (validFiles.length === 0) return;
 
     setUploading(true);
-    setUploadProgress(10);
     setFormError(null);
+    let newUrls = [...eventData.image_urls];
 
     try {
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${crypto.randomUUID()}.${fileExt}`;
-      const filePath = `${user.id}/${fileName}`;
+      for (let i = 0; i < validFiles.length; i++) {
+        const file = validFiles[i];
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${crypto.randomUUID()}.${fileExt}`;
+        const filePath = `${user.id}/${fileName}`;
 
-      setUploadProgress(30);
+        setUploadProgress(Math.round(((i + 1) / validFiles.length) * 100));
 
-      const { error: uploadError } = await supabase.storage
-        .from('event-images')
-        .upload(filePath, file, {
-          cacheControl: '3600',
-          upsert: false
-        });
+        const { error: uploadError } = await supabase.storage
+          .from('event-images')
+          .upload(filePath, file);
 
-      if (uploadError) throw uploadError;
+        if (uploadError) throw uploadError;
 
-      setUploadProgress(70);
+        const { data: { publicUrl } } = supabase.storage
+          .from('event-images')
+          .getPublicUrl(filePath);
 
-      const { data: { publicUrl } } = supabase.storage
-        .from('event-images')
-        .getPublicUrl(filePath);
+        newUrls.push(publicUrl);
+      }
 
-      setEventData(prev => ({ ...prev, image_url: publicUrl }));
+      setEventData(prev => ({ ...prev, image_urls: newUrls }));
       setUploadProgress(100);
-      
       setTimeout(() => setUploadProgress(0), 1000);
     } catch (err) {
-      console.error("Storage Error:", err);
       setFormError("Upload failed: " + err.message);
     } finally {
       setUploading(false);
@@ -119,75 +119,51 @@ export default function CreateEvent() {
   const handleDrag = (e) => {
     e.preventDefault();
     e.stopPropagation();
-    if (e.type === "dragenter" || e.type === "dragover") {
-      setDragActive(true);
-    } else if (e.type === "dragleave") {
-      setDragActive(false);
-    }
+    if (e.type === "dragenter" || e.type === "dragover") setDragActive(true);
+    else if (e.type === "dragleave") setDragActive(false);
   };
 
   const handleDrop = (e) => {
     e.preventDefault();
     e.stopPropagation();
     setDragActive(false);
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleFileUpload(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files) {
+      handleFileUpload(e.dataTransfer.files);
     }
+  };
+
+  const removeImage = (index) => {
+    const filtered = eventData.image_urls.filter((_, i) => i !== index);
+    setEventData({ ...eventData, image_urls: filtered });
   };
 
   // --- 4. TIER DYNAMICS ---
   const addTier = () => {
-    const newTier = {
-      id: crypto.randomUUID(),
-      name: '',
-      price: '',
-      capacity: '',
-      description: ''
-    };
-    setTiers([...tiers, newTier]);
+    setTiers([...tiers, { id: crypto.randomUUID(), name: '', price: '', capacity: '', description: '' }]);
   };
 
   const removeTier = (id) => {
-    if (tiers.length > 1) {
-      setTiers(tiers.filter(t => t.id !== id));
-    } else {
-      setFormError("An event must have at least one ticket tier.");
-    }
+    if (tiers.length > 1) setTiers(tiers.filter(t => t.id !== id));
+    else setFormError("At least one ticket tier is required.");
   };
 
   const updateTier = (id, field, value) => {
     setTiers(tiers.map(t => t.id === id ? { ...t, [field]: value } : t));
   };
 
-  // --- 5. FINAL SUBMISSION ENGINE ---
-  const validateForm = () => {
-    if (!eventData.title.trim()) return "Event title is required.";
-    if (!eventData.date) return "Event date is required.";
-    if (!eventData.location.trim()) return "Location is required.";
-    if (!eventData.image_url) return "Please upload an event poster.";
-    
-    for (let tier of tiers) {
-      if (!tier.name || !tier.price || !tier.capacity) {
-        return `Please complete all fields for the ${tier.name || 'unnamed'} tier.`;
-      }
-    }
-    return null;
-  };
-
+  // --- 5. SUBMISSION ENGINE ---
   const handleSubmit = async (e) => {
     e.preventDefault();
-    const error = validateForm();
-    if (error) {
-      setFormError(error);
+    if (!eventData.title.trim() || !eventData.date || eventData.image_urls.length === 0) {
+      setFormError("Missing required fields or images.");
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
 
     setLoading(true);
-    setFormError(null);
+    const formattedTime = `${eventData.hour}:${eventData.minute} ${eventData.period}`;
 
     try {
-      // 1. Insert Event
       const { data: event, error: eventError } = await supabase
         .from('events')
         .insert([{
@@ -195,18 +171,16 @@ export default function CreateEvent() {
           title: eventData.title,
           description: eventData.description,
           date: eventData.date,
-          time: eventData.time,
+          time: formattedTime,
           location: eventData.location,
           category: eventData.category,
-          images: [eventData.image_url],
+          images: eventData.image_urls,
           is_published: eventData.is_published
         }])
-        .select()
-        .single();
+        .select().single();
 
       if (eventError) throw eventError;
 
-      // 2. Insert Tiers
       const tiersPayload = tiers.map(t => ({
         event_id: event.id,
         name: t.name,
@@ -215,569 +189,206 @@ export default function CreateEvent() {
         description: t.description
       }));
 
-      const { error: tiersError } = await supabase
-        .from('ticket_tiers')
-        .insert(tiersPayload);
-
+      const { error: tiersError } = await supabase.from('ticket_tiers').insert(tiersPayload);
       if (tiersError) throw tiersError;
 
-      // Success Redirect
       router.push('/dashboard/organizer');
     } catch (err) {
-      setFormError("Database Error: " + err.message);
+      setFormError(err.message);
     } finally {
       setLoading(false);
     }
   };
 
-  // --- 6. FULL-SCALE STYLING OBJECTS ---
+  // --- 6. LUXURY STYLING ---
   const styles = {
-    pageContainer: {
-      padding: '40px 24px 100px',
-      maxWidth: '1280px',
-      margin: '0 auto',
-      minHeight: '100vh',
-      backgroundColor: '#fcfdfe',
-      color: '#0f172a',
-      fontFamily: '"Inter", sans-serif'
-    },
-    topHeader: {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '12px',
-      marginBottom: '48px'
-    },
-    backBtn: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '8px',
-      background: 'none',
-      border: 'none',
-      color: '#64748b',
-      fontSize: '14px',
-      fontWeight: '700',
-      cursor: 'pointer',
-      width: 'fit-content',
-      padding: '0',
-      transition: 'color 0.2s'
-    },
-    mainTitle: {
-      fontSize: '40px',
-      fontWeight: '950',
-      letterSpacing: '-0.04em',
-      margin: '0',
-      color: '#000'
-    },
-    errorBanner: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '12px',
-      padding: '16px 20px',
-      backgroundColor: '#fef2f2',
-      border: '1px solid #fee2e2',
-      borderRadius: '16px',
-      color: '#991b1b',
-      fontSize: '14px',
-      fontWeight: '600',
-      marginBottom: '32px',
-      animation: 'slideIn 0.3s ease-out'
-    },
-    formLayout: {
-      display: 'grid',
-      gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr)',
-      gap: '40px',
-      alignItems: 'start'
-    },
-    formColumn: {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '32px'
-    },
-    formSection: {
-      backgroundColor: '#ffffff',
-      borderRadius: '32px',
-      padding: '40px',
-      border: '1px solid #f1f5f9',
-      boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05)'
-    },
-    sectionTitleRow: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '16px',
-      marginBottom: '32px'
-    },
-    iconBox: (color) => ({
-      width: '44px',
-      height: '44px',
-      borderRadius: '14px',
-      backgroundColor: `${color}10`,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      color: color
-    }),
-    sectionHeading: {
-      fontSize: '20px',
-      fontWeight: '800',
-      margin: '0',
-      letterSpacing: '-0.02em'
-    },
-    // Dropzone specific
-    dropZone: (active, hasImage) => ({
+    pageContainer: { padding: '40px 24px 100px', maxWidth: '1280px', margin: '0 auto', minHeight: '100vh', backgroundColor: '#fcfdfe', fontFamily: '"Inter", sans-serif' },
+    topHeader: { display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '48px' },
+    backBtn: { background: 'none', border: 'none', color: '#64748b', fontSize: '14px', fontWeight: '700', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' },
+    mainTitle: { fontSize: '40px', fontWeight: '950', letterSpacing: '-0.04em', margin: '0', color: '#000' },
+    errorBanner: { display: 'flex', alignItems: 'center', gap: '12px', padding: '16px 20px', backgroundColor: '#fef2f2', border: '1px solid #fee2e2', borderRadius: '16px', color: '#991b1b', fontSize: '14px', fontWeight: '600', marginBottom: '32px' },
+    formLayout: { display: 'grid', gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr)', gap: '40px' },
+    formColumn: { display: 'flex', flexDirection: 'column', gap: '32px' },
+    formSection: { backgroundColor: '#ffffff', borderRadius: '32px', padding: '40px', border: '1px solid #f1f5f9', boxShadow: '0 4px 12px rgba(0,0,0,0.03)' },
+    sectionTitleRow: { display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '32px' },
+    iconBox: (color) => ({ width: '44px', height: '44px', borderRadius: '14px', backgroundColor: `${color}10`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: color }),
+    sectionHeading: { fontSize: '20px', fontWeight: '800', margin: '0' },
+    
+    // Multi-Image Styles
+    dropZone: (active) => ({
       width: '100%',
-      minHeight: '300px',
+      minHeight: '220px',
       borderRadius: '24px',
       border: active ? '3px solid #0ea5e9' : '2px dashed #e2e8f0',
       backgroundColor: active ? '#f0f9ff' : '#f8fafc',
       display: 'flex',
+      flexDirection: 'column',
       alignItems: 'center',
       justifyContent: 'center',
       position: 'relative',
-      overflow: 'hidden',
-      transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
-      cursor: 'pointer'
-    }),
-    uploadStatus: {
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      gap: '16px',
-      color: '#0ea5e9',
-      fontWeight: '700'
-    },
-    progressBarContainer: {
-      width: '200px',
-      height: '6px',
-      backgroundColor: '#e2e8f0',
-      borderRadius: '10px',
-      marginTop: '8px',
-      overflow: 'hidden'
-    },
-    progressBar: (progress) => ({
-      width: `${progress}%`,
-      height: '100%',
-      backgroundColor: '#0ea5e9',
-      transition: 'width 0.3s ease'
-    }),
-    previewWrapper: {
-      width: '100%',
-      height: '100%',
-      position: 'relative'
-    },
-    previewImg: {
-      width: '100%',
-      height: '300px',
-      objectFit: 'cover',
-      borderRadius: '20px'
-    },
-    removeImgBtn: {
-      position: 'absolute',
-      top: '16px',
-      right: '16px',
-      backgroundColor: 'rgba(15, 23, 42, 0.8)',
-      backdropFilter: 'blur(4px)',
-      border: 'none',
-      color: '#fff',
-      width: '36px',
-      height: '36px',
-      borderRadius: '10px',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
       cursor: 'pointer',
-      transition: 'transform 0.2s'
-    },
-    dropLabel: {
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      textAlign: 'center',
-      padding: '20px'
-    },
-    fileInputHidden: {
-      position: 'absolute',
-      inset: '0',
-      opacity: '0',
-      cursor: 'pointer'
-    },
-    // Input elements
-    inputGroup: {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '8px',
-      marginBottom: '24px'
-    },
-    label: {
-      fontSize: '12px',
-      fontWeight: '800',
-      color: '#94a3b8',
-      textTransform: 'uppercase',
-      letterSpacing: '0.05em',
-      marginLeft: '4px'
-    },
-    input: {
-      width: '100%',
-      backgroundColor: '#f8fafc',
-      border: '2px solid #f1f5f9',
-      borderRadius: '16px',
-      padding: '16px 20px',
-      fontSize: '16px',
-      fontWeight: '600',
-      color: '#1e293b',
-      outline: 'none',
-      transition: 'border-color 0.2s, background-color 0.2s'
-    },
-    textarea: {
-      width: '100%',
-      backgroundColor: '#f8fafc',
-      border: '2px solid #f1f5f9',
-      borderRadius: '16px',
-      padding: '16px 20px',
-      fontSize: '16px',
-      fontWeight: '600',
-      color: '#1e293b',
-      outline: 'none',
-      minHeight: '120px',
-      resize: 'vertical',
-      fontFamily: 'inherit'
-    },
-    inputRow: {
-      display: 'grid',
-      gridTemplateColumns: '1fr 1fr',
-      gap: '20px'
-    },
-    // Tier cards
-    tierCard: {
-      backgroundColor: '#f8fafc',
-      borderRadius: '24px',
-      padding: '24px',
-      border: '1px solid #f1f5f9',
-      marginBottom: '16px',
-      position: 'relative'
-    },
-    tierHeader: {
-      display: 'flex',
-      justifyContent: 'space-between',
-      alignItems: 'center',
+      transition: '0.3s',
       marginBottom: '20px'
-    },
-    tierTitleInput: {
-      background: 'none',
-      border: 'none',
-      borderBottom: '2px solid #e2e8f0',
-      fontSize: '18px',
-      fontWeight: '900',
-      color: '#0f172a',
-      padding: '4px 0',
-      outline: 'none',
-      width: '70%',
-      transition: 'border-color 0.2s'
-    },
-    removeTierBtn: {
-      width: '32px',
-      height: '32px',
-      borderRadius: '8px',
-      backgroundColor: '#fff1f2',
-      color: '#e11d48',
-      border: 'none',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      cursor: 'pointer'
-    },
-    addTierBtn: {
-      width: '100%',
-      padding: '16px',
-      borderRadius: '16px',
-      border: '2px dashed #cbd5e1',
-      backgroundColor: 'transparent',
-      color: '#64748b',
-      fontSize: '14px',
-      fontWeight: '800',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: '10px',
-      cursor: 'pointer',
-      transition: 'all 0.2s'
-    },
-    // Sticky Publish Card
-    publishCard: {
-      position: 'sticky',
-      top: '40px',
-      backgroundColor: '#0f172a',
-      borderRadius: '32px',
-      padding: '40px',
-      color: '#ffffff',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '32px',
-      boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)'
-    },
-    publishHeader: {
-      display: 'flex',
-      gap: '20px',
-      alignItems: 'center'
-    },
-    publishTitle: {
-      fontSize: '20px',
-      fontWeight: '800',
-      margin: '0 0 4px 0'
-    },
-    publishSub: {
-      fontSize: '14px',
-      color: '#94a3b8',
-      margin: '0',
-      lineHeight: '1.5'
-    },
-    submitBtn: {
-      width: '100%',
-      backgroundColor: '#ffffff',
-      color: '#0f172a',
-      border: 'none',
-      padding: '20px',
-      borderRadius: '20px',
-      fontSize: '16px',
-      fontWeight: '900',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: '12px',
-      cursor: 'pointer',
-      transition: 'transform 0.2s, background-color 0.2s'
-    },
-    securityBadge: {
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: '8px',
-      fontSize: '12px',
-      fontWeight: '700',
-      color: '#4ade80'
-    }
+    }),
+    imageGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: '15px', marginTop: '20px' },
+    imageThumb: { position: 'relative', height: '120px', borderRadius: '15px', overflow: 'hidden', border: '1px solid #e2e8f0' },
+    thumbImg: { width: '100%', height: '100%', objectFit: 'cover' },
+    removeBtnSmall: { position: 'absolute', top: '5px', right: '5px', background: 'rgba(0,0,0,0.6)', color: '#fff', border: 'none', borderRadius: '5px', padding: '4px', cursor: 'pointer' },
+
+    // Custom Time Picker Styles
+    timePickerContainer: { display: 'flex', gap: '12px', alignItems: 'center' },
+    timeSelectBox: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' },
+    timeInput: { width: '60px', textAlign: 'center', padding: '12px', borderRadius: '12px', border: '2px solid #f1f5f9', fontSize: '18px', fontWeight: '800', backgroundColor: '#f8fafc', outline: 'none' },
+    periodToggle: (active) => ({ padding: '12px 16px', borderRadius: '12px', border: 'none', backgroundColor: active ? '#000' : '#f1f5f9', color: active ? '#fff' : '#64748b', fontWeight: '800', cursor: 'pointer', transition: '0.2s' }),
+
+    // Inputs
+    inputGroup: { display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '24px' },
+    label: { fontSize: '12px', fontWeight: '800', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' },
+    input: { width: '100%', backgroundColor: '#f8fafc', border: '2px solid #f1f5f9', borderRadius: '16px', padding: '16px', fontSize: '16px', fontWeight: '600', outline: 'none' },
+    textarea: { width: '100%', backgroundColor: '#f8fafc', border: '2px solid #f1f5f9', borderRadius: '16px', padding: '16px', fontSize: '16px', fontWeight: '600', outline: 'none', minHeight: '100px' },
+    
+    // Tier cards
+    tierCard: { backgroundColor: '#f8fafc', borderRadius: '24px', padding: '24px', border: '1px solid #f1f5f9', marginBottom: '16px' },
+    tierInput: { background: 'none', border: 'none', borderBottom: '2px solid #e2e8f0', fontSize: '18px', fontWeight: '900', padding: '4px 0', outline: 'none', width: '100%', marginBottom: '15px' },
+    
+    // Publish Card
+    publishCard: { position: 'sticky', top: '40px', backgroundColor: '#0f172a', borderRadius: '32px', padding: '40px', color: '#fff' },
+    submitBtn: { width: '100%', backgroundColor: '#fff', color: '#0f172a', border: 'none', padding: '20px', borderRadius: '20px', fontSize: '16px', fontWeight: '900', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', cursor: 'pointer' }
   };
 
   return (
     <div style={styles.pageContainer}>
-      {/* 1. Header Section */}
       <div style={styles.topHeader}>
-        <button style={styles.backBtn} onClick={() => router.back()}>
-          <ChevronLeft size={18} /> BACK TO OVERVIEW
-        </button>
-        <h1 style={styles.mainTitle}>Launch Experience</h1>
+        <button style={styles.backBtn} onClick={() => router.back()}><ChevronLeft size={18} /> BACK</button>
+        <h1 style={styles.mainTitle}>New Experience</h1>
       </div>
 
-      {/* 2. Error Display */}
-      {formError && (
-        <div style={styles.errorBanner}>
-          <AlertCircle size={20} />
-          <span>{formError}</span>
-        </div>
-      )}
+      {formError && <div style={styles.errorBanner}><AlertCircle size={20} />{formError}</div>}
 
       <form onSubmit={handleSubmit} style={styles.formLayout}>
-        {/* LEFT COLUMN: PRIMARY DATA */}
         <div style={styles.formColumn}>
           
-          {/* POSTER UPLOAD SECTION */}
+          {/* MEDIA SECTION */}
           <div style={styles.formSection}>
             <div style={styles.sectionTitleRow}>
               <div style={styles.iconBox('#8b5cf6')}><ImageIcon size={22} /></div>
-              <h2 style={styles.sectionHeading}>Event Media</h2>
+              <h2 style={styles.sectionHeading}>Gallery & Posters</h2>
             </div>
-
             <div 
-              style={styles.dropZone(dragActive, !!eventData.image_url)}
-              onDragEnter={handleDrag}
-              onDragLeave={handleDrag}
-              onDragOver={handleDrag}
-              onDrop={handleDrop}
+              style={styles.dropZone(dragActive)} 
+              onDragOver={handleDrag} onDragLeave={handleDrag} onDrop={handleDrop}
               onClick={() => fileInputRef.current.click()}
             >
               {uploading ? (
-                <div style={styles.uploadStatus}>
-                  <Loader2 className="animate-spin" size={40} />
-                  <p>Processing High-Res Image...</p>
-                  <div style={styles.progressBarContainer}>
-                    <div style={styles.progressBar(uploadProgress)} />
-                  </div>
-                </div>
-              ) : eventData.image_url ? (
-                <div style={styles.previewWrapper}>
-                  <img src={eventData.image_url} style={styles.previewImg} alt="Poster Preview" />
-                  <button 
-                    type="button" 
-                    style={styles.removeImgBtn} 
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setEventData({...eventData, image_url: ''});
-                    }}
-                  >
-                    <X size={20} />
-                  </button>
-                </div>
+                <div style={styles.uploadStatus}><Loader2 className="animate-spin" size={32} /> <p>Syncing Media... {uploadProgress}%</p></div>
               ) : (
-                <div style={styles.dropLabel}>
-                  <div style={{...styles.iconBox('#94a3b8'), width: '60px', height: '60px', marginBottom: '20px'}}>
-                    <Upload size={30} />
-                  </div>
-                  <p style={{margin: '0 0 8px', fontSize: '18px', fontWeight: '800'}}>Drag and drop poster</p>
-                  <p style={{margin: 0, fontSize: '14px', color: '#94a3b8', fontWeight: '500'}}>
-                    PNG, JPG or WEBP up to 5MB. 16:9 recommended.
-                  </p>
+                <div style={{textAlign: 'center'}}>
+                  <Upload size={30} color="#94a3b8" style={{marginBottom: '10px'}}/>
+                  <p style={{fontWeight: 800, margin: 0}}>Add Multiple Images</p>
+                  <p style={{fontSize: '12px', color: '#94a3b8'}}>Drag and drop or click to upload</p>
                 </div>
               )}
-              <input 
-                type="file" 
-                ref={fileInputRef}
-                style={{display: 'none'}} 
-                accept="image/*" 
-                onChange={(e) => handleFileUpload(e.target.files[0])}
-              />
+              <input type="file" multiple ref={fileInputRef} style={{display:'none'}} accept="image/*" onChange={(e) => handleFileUpload(e.target.files)} />
+            </div>
+
+            <div style={styles.imageGrid}>
+              {eventData.image_urls.map((url, idx) => (
+                <div key={idx} style={styles.imageThumb}>
+                  <img src={url} style={styles.thumbImg} alt="Preview" />
+                  <button type="button" style={styles.removeBtnSmall} onClick={() => removeImage(idx)}><X size={12}/></button>
+                </div>
+              ))}
             </div>
           </div>
 
-          {/* CORE DETAILS SECTION */}
+          {/* INFO SECTION */}
           <div style={styles.formSection}>
             <div style={styles.sectionTitleRow}>
               <div style={styles.iconBox('#0ea5e9')}><FileText size={22} /></div>
-              <h2 style={styles.sectionHeading}>Experience Details</h2>
+              <h2 style={styles.sectionHeading}>Event Information</h2>
             </div>
             
             <div style={styles.inputGroup}>
-              <label style={styles.label}>Event Title</label>
-              <input 
-                style={styles.input} 
-                placeholder="Name your experience..." 
-                value={eventData.title}
-                onChange={(e) => setEventData({...eventData, title: e.target.value})}
-              />
+              <label style={styles.label}>Title</label>
+              <input style={styles.input} placeholder="Epic Night Accra..." value={eventData.title} onChange={(e) => setEventData({...eventData, title: e.target.value})} />
             </div>
 
-            <div style={styles.inputRow}>
+            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'25px'}}>
               <div style={styles.inputGroup}>
                 <label style={styles.label}>Date</label>
-                <input 
-                  type="date" 
-                  style={styles.input} 
-                  value={eventData.date}
-                  onChange={(e) => setEventData({...eventData, date: e.target.value})}
-                />
+                <input type="date" style={styles.input} value={eventData.date} onChange={(e) => setEventData({...eventData, date: e.target.value})} />
               </div>
+
+              {/* ADVANCED TIME PICKER UI */}
               <div style={styles.inputGroup}>
                 <label style={styles.label}>Start Time</label>
-                <input 
-                  type="time" 
-                  style={styles.input} 
-                  value={eventData.time}
-                  onChange={(e) => setEventData({...eventData, time: e.target.value})}
-                />
+                <div style={styles.timePickerContainer}>
+                  <div style={styles.timeSelectBox}>
+                    <input style={styles.timeInput} maxLength="2" value={eventData.hour} onChange={(e) => setEventData({...eventData, hour: e.target.value})} />
+                  </div>
+                  <span style={{fontWeight:900, fontSize:'20px'}}>:</span>
+                  <div style={styles.timeSelectBox}>
+                    <input style={styles.timeInput} maxLength="2" value={eventData.minute} onChange={(e) => setEventData({...eventData, minute: e.target.value})} />
+                  </div>
+                  <div style={{display:'flex', gap:'5px', marginLeft:'10px'}}>
+                    <button type="button" style={styles.periodToggle(eventData.period === 'AM')} onClick={() => setEventData({...eventData, period: 'AM'})}>AM</button>
+                    <button type="button" style={styles.periodToggle(eventData.period === 'PM')} onClick={() => setEventData({...eventData, period: 'PM'})}>PM</button>
+                  </div>
+                </div>
               </div>
             </div>
 
             <div style={styles.inputGroup}>
-              <label style={styles.label}>Venue / Location</label>
-              <input 
-                style={styles.input} 
-                placeholder="Where is the magic happening?" 
-                value={eventData.location}
-                onChange={(e) => setEventData({...eventData, location: e.target.value})}
-              />
+              <label style={styles.label}>Location</label>
+              <div style={{position:'relative'}}>
+                <MapPin size={18} style={{position:'absolute', left:'15px', top:'50%', transform:'translateY(-50%)', color:'#94a3b8'}}/>
+                <input style={{...styles.input, paddingLeft:'45px'}} placeholder="Venue Name" value={eventData.location} onChange={(e) => setEventData({...eventData, location: e.target.value})} />
+              </div>
             </div>
 
             <div style={styles.inputGroup}>
-              <label style={styles.label}>Experience Description</label>
-              <textarea 
-                style={styles.textarea} 
-                placeholder="Tell the world why they can't miss this..."
-                value={eventData.description}
-                onChange={(e) => setEventData({...eventData, description: e.target.value})}
-              />
+              <label style={styles.label}>Description</label>
+              <textarea style={styles.textarea} value={eventData.description} onChange={(e) => setEventData({...eventData, description: e.target.value})} />
             </div>
           </div>
         </div>
 
-        {/* RIGHT COLUMN: TICKETING & PUBLISH */}
+        {/* TICKETING & SUBMIT */}
         <div style={styles.formColumn}>
-          
           <div style={styles.formSection}>
             <div style={styles.sectionTitleRow}>
               <div style={styles.iconBox('#f59e0b')}><Ticket size={22} /></div>
-              <h2 style={styles.sectionHeading}>Ticketing Strategy</h2>
+              <h2 style={styles.sectionHeading}>Ticket Tiers</h2>
             </div>
-
             {tiers.map((tier) => (
               <div key={tier.id} style={styles.tierCard}>
-                <div style={styles.tierHeader}>
-                  <input 
-                    style={styles.tierTitleInput} 
-                    placeholder="Tier Name (e.g. VIP)" 
-                    value={tier.name}
-                    onChange={(e) => updateTier(tier.id, 'name', e.target.value)}
-                  />
-                  <button type="button" style={styles.removeTierBtn} onClick={() => removeTier(tier.id)}>
-                    <Trash2 size={16} />
-                  </button>
+                <div style={{display:'flex', justifyContent:'space-between', alignItems:'center'}}>
+                   <input style={styles.tierInput} placeholder="Tier Name (e.g. VIP)" value={tier.name} onChange={(e) => updateTier(tier.id, 'name', e.target.value)} />
+                   <button type="button" onClick={() => removeTier(tier.id)} style={{background:'none', border:'none', color:'#fca5a5', cursor:'pointer'}}><Trash2 size={18}/></button>
                 </div>
-
-                <div style={styles.inputRow}>
-                  <div style={styles.inputGroup}>
-                    <label style={styles.label}>Price (GHS)</label>
-                    <input 
-                      type="number" 
-                      style={styles.input} 
-                      placeholder="0.00"
-                      value={tier.price}
-                      onChange={(e) => updateTier(tier.id, 'price', e.target.value)}
-                    />
-                  </div>
-                  <div style={styles.inputGroup}>
-                    <label style={styles.label}>Inventory</label>
-                    <input 
-                      type="number" 
-                      style={styles.input} 
-                      placeholder="Qty"
-                      value={tier.capacity}
-                      onChange={(e) => updateTier(tier.id, 'capacity', e.target.value)}
-                    />
-                  </div>
+                <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'15px'}}>
+                   <div style={styles.inputGroup}><label style={styles.label}>Price (GHS)</label><input type="number" style={styles.input} value={tier.price} onChange={(e) => updateTier(tier.id, 'price', e.target.value)} /></div>
+                   <div style={styles.inputGroup}><label style={styles.label}>Qty</label><input type="number" style={styles.input} value={tier.capacity} onChange={(e) => updateTier(tier.id, 'capacity', e.target.value)} /></div>
                 </div>
               </div>
             ))}
-
-            <button type="button" onClick={addTier} style={styles.addTierBtn}>
-              <Plus size={18} /> ADD NEW TICKET TYPE
-            </button>
+            <button type="button" onClick={addTier} style={styles.addTierBtn}><Plus size={16}/> ADD TICKET TYPE</button>
           </div>
 
-          {/* STICKY CTA CARD */}
           <div style={styles.publishCard}>
-            <div style={styles.publishHeader}>
-              <div style={{...styles.iconBox('#4ade80'), backgroundColor: 'rgba(74, 222, 128, 0.1)'}}>
-                <Zap size={24} />
-              </div>
-              <div>
-                <h3 style={styles.publishTitle}>Ready to Go Live?</h3>
-                <p style={styles.publishSub}>Your event will be instantly discoverable once you hit publish.</p>
-              </div>
-            </div>
-
-            <div style={{display: 'flex', flexDirection: 'column', gap: '16px'}}>
-              <button 
-                type="submit" 
-                style={styles.submitBtn} 
-                disabled={loading || uploading}
-              >
-                {loading ? <Loader2 className="animate-spin" size={24} /> : (
-                  <><CheckCircle2 size={22} /> PUBLISH EXPERIENCE</>
-                )}
-              </button>
-              
-              <div style={styles.securityBadge}>
-                <ShieldCheck size={16} />
-                <span>SECURED BY OUSTED PAYMENTS</span>
-              </div>
-            </div>
+             <div style={{display:'flex', gap:'20px', marginBottom:'30px'}}>
+                <div style={styles.iconBox('#4ade80')}><Zap size={24}/></div>
+                <div>
+                   <h3 style={{margin:0, fontWeight:900}}>Ready to launch?</h3>
+                   <p style={{margin:0, color:'#94a3b8', fontSize:'14px'}}>Posters, details, and tickets are set.</p>
+                </div>
+             </div>
+             <button type="submit" style={styles.submitBtn} disabled={loading || uploading}>
+                {loading ? <Loader2 className="animate-spin" size={24}/> : <><CheckCircle2 size={24}/> PUBLISH NOW</>}
+             </button>
+             <div style={{display:'flex', justifyContent:'center', marginTop:'20px', color:'#4ade80', fontSize:'12px', fontWeight:800, gap:'5px'}}>
+                <ShieldCheck size={14}/> SECURE CONNECTION
+             </div>
           </div>
         </div>
       </form>
