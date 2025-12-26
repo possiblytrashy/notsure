@@ -1,220 +1,226 @@
 "use client";
-
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import { 
-  Plus, Ticket, Trophy, Settings, Link as LinkIcon, Check, 
-  QrCode, Loader2, LogOut, Search, RefreshCcw, MapPin, 
-  ShieldCheck, Zap, TrendingUp, BarChart3, DownloadCloud,
-  Activity, UserPlus, CreditCard, Layout, Trash, ChevronRight, 
-  DollarSign, UserCheck, Landmark, Bell, Mail, Smartphone,
-  Info, AlertCircle, CheckCircle2, ArrowRight, X, HelpCircle
+  Plus, Ticket, Trophy, Wallet, RefreshCcw, 
+  MapPin, Zap, Trash2, Edit3, X, UserPlus, 
+  Save, Activity, Loader2, LogOut, Search,
+  ArrowUpRight, BarChart3, Star, Layers, Settings,
+  ChevronRight, Info, AlertCircle, CheckCircle2,
+  ImageIcon, MoreVertical, ExternalLink, Calendar,
+  CreditCard, Layout, Users, Mail, QrCode, TrendingUp,
+  Image as ImageIconLucide
 } from 'lucide-react';
-
-/**
- * OUSTED CORE v10.0 - LUXURY EVENT ENGINE
- * FEATURES: 
- * - Skeleton Loading States
- * - Interactive Paystack Onboarding Flow
- * - Sidebar-less Top Navigation
- * - Real-time Financial Split Logic (5%)
- */
 
 export default function OrganizerDashboard() {
   const router = useRouter();
 
-  // --- ENGINE STATE ---
+  // --- 1. CORE DATA STATE ---
+  const [activeTab, setActiveTab] = useState('events'); 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState('events'); 
-  const [showOnboarding, setShowOnboarding] = useState(false);
-  
-  // --- DATA REPOSITORIES ---
   const [data, setData] = useState({ 
     events: [], 
     competitions: [], 
     tickets: [], 
-    profile: null,
-    scans: []
+    profile: null 
   });
 
-  // --- UI CONTROLS ---
-  const [copying, setCopying] = useState(null);
-  const [showQR, setShowQR] = useState(null);
-  const [ticketSearch, setTicketSearch] = useState('');
-  const [onboardingStep, setOnboardingStep] = useState(1);
+  // --- 2. MODAL & UI STATE ---
+  const [showAddCompModal, setShowAddCompModal] = useState(false);
+  const [showAddContestModal, setShowAddContestModal] = useState(null); // stores compId
+  const [showAddCandidateModal, setShowAddCandidateModal] = useState(null); // stores contestId
+  const [editingItem, setEditingItem] = useState(null); 
+  const [isProcessing, setIsProcessing] = useState(false);
 
-  // --- PAYSTACK ONBOARDING STATE ---
-  const [formData, setFormData] = useState({
-    business_name: '',
-    bank_code: '',
-    account_number: '',
-    phone: ''
-  });
+  // --- 3. FORM STATES ---
+  const [compForm, setCompForm] = useState({ title: '', description: '' });
+  const [contestForm, setContestForm] = useState({ title: '', vote_price: 1.00 });
+  const [candidateForm, setCandidateForm] = useState({ name: '', image_url: '' });
 
-  // --- DATA SYNC ENGINE ---
-  const initSync = useCallback(async (silent = false) => {
+  // --- 4. DATA ENGINE ---
+  const loadDashboardData = useCallback(async (isSilent = false) => {
     try {
-      if (!silent) setLoading(true);
+      if (!isSilent) setLoading(true);
       else setRefreshing(true);
 
-      const { data: { user }, error: authErr } = await supabase.auth.getUser();
-      if (authErr || !user) return router.push('/login');
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        router.push('/login');
+        return;
+      }
 
-      // Fetch Profile & Events
-      const [profileRes, eventsRes] = await Promise.all([
+      // Parallel fetching for high performance
+      const [profileRes, eventsRes, compsRes, ticketsRes] = await Promise.all([
         supabase.from('profiles').select('*').eq('id', user.id).single(),
-        supabase.from('events').select('*, ticket_tiers(*)').eq('organizer_id', user.id).order('created_at', { ascending: false })
+        supabase.from('events').select('*, ticket_tiers(*)').eq('organizer_id', user.id).order('created_at', { ascending: false }),
+        supabase.from('competitions').select(`
+            *,
+            contests (
+              *,
+              candidates (*)
+            )
+        `).eq('organizer_id', user.id).order('created_at', { ascending: false }),
+        supabase.from('tickets').select('*, events(title, organizer_id)').order('created_at', { ascending: false }),
       ]);
 
-      const eventIds = eventsRes.data?.map(e => e.id) || [];
-
-      // Fetch Tickets & Contests based on found events
-      const [ticketsRes, compRes] = await Promise.all([
-        eventIds.length > 0 
-          ? supabase.from('tickets').select('*, ticket_tiers(name, price), events(title)').in('event_id', eventIds).order('created_at', { ascending: false })
-          : { data: [] },
-        supabase.from('competitions').select('*, contests(*, candidates(*))').eq('organizer_id', user.id)
-      ]);
+      // Filter tickets where nested event belongs to organizer (Security Layer)
+      const organizerTickets = ticketsRes.data?.filter(t => t.events?.organizer_id === user.id) || [];
 
       setData({
         profile: profileRes.data,
         events: eventsRes.data || [],
-        competitions: compRes.data || [],
-        tickets: ticketsRes.data || [],
-        scans: (ticketsRes.data || []).filter(t => t.is_scanned)
+        competitions: compsRes.data || [],
+        tickets: organizerTickets
       });
 
-      // Auto-trigger onboarding if subaccount is missing
-      if (!profileRes.data?.paystack_subaccount_code) {
-        setShowOnboarding(true);
-      }
-
-    } catch (error) {
-      console.error("SYNC_ERROR", error);
+    } catch (err) {
+      console.error("DASHBOARD_SYNC_ERROR:", err);
     } finally {
-      setTimeout(() => { setLoading(false); setRefreshing(false); }, 800);
+      setLoading(false);
+      setRefreshing(false);
     }
   }, [router]);
 
-  useEffect(() => { initSync(); }, [initSync]);
+  useEffect(() => { loadDashboardData(); }, [loadDashboardData]);
 
-  // --- FINANCIAL CALCULATION (5% SPLIT) ---
+  // --- 5. CALCULATED ANALYTICS ---
   const stats = useMemo(() => {
-    const gross = data.tickets.reduce((s, t) => s + (Number(t.amount) || 0), 0);
-    const fee = gross * 0.05;
-    const net = gross - fee;
-    const checkInRate = data.tickets.length > 0 ? (data.scans.length / data.tickets.length) * 100 : 0;
-    return { gross, fee, net, checkInRate };
-  }, [data.tickets, data.scans]);
+    const revenue = data.tickets.reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+    const platformFee = revenue * 0.05;
+    const netPayout = revenue - platformFee;
+    return {
+      gross: revenue,
+      net: netPayout,
+      totalSales: data.tickets.length,
+      scanned: data.tickets.filter(t => t.is_scanned).length
+    };
+  }, [data.tickets]);
 
-  // --- HANDLERS ---
-  const handleOnboarding = async () => {
-    setRefreshing(true);
-    // Logic for creating Paystack Subaccount via your backend/edge function would go here
-    const { error } = await supabase.from('profiles').update({
-      business_name: formData.business_name,
-      onboarding_completed: true,
-      paystack_subaccount_code: 'pending_verification' // Example placeholder
-    }).eq('id', data.profile.id);
-
+  // --- 6. HANDLERS (CRUD) ---
+  const handleAddCompetition = async () => {
+    setIsProcessing(true);
+    const { data: { user } } = await supabase.auth.getUser();
+    const { error } = await supabase.from('competitions').insert([{
+      ...compForm,
+      organizer_id: user.id
+    }]);
     if (!error) {
-      setShowOnboarding(false);
-      initSync(true);
+      setShowAddCompModal(false);
+      setCompForm({ title: '', description: '' });
+      loadDashboardData(true);
     }
+    setIsProcessing(false);
   };
 
-  const copyLink = (id) => {
-    navigator.clipboard.writeText(`${window.location.origin}/events/${id}`);
-    setCopying(id);
-    setTimeout(() => setCopying(null), 2000);
+  const handleAddContest = async (compId) => {
+    setIsProcessing(true);
+    const { error } = await supabase.from('contests').insert([{
+      ...contestForm,
+      competition_id: compId
+    }]);
+    if (!error) {
+      setShowAddContestModal(null);
+      setContestForm({ title: '', vote_price: 1.00 });
+      loadDashboardData(true);
+    }
+    setIsProcessing(false);
   };
 
-  // --- UI RENDER: SKELETON LOADER ---
-  if (loading) return <DashboardSkeleton />;
+  const handleAddCandidate = async (contestId) => {
+    setIsProcessing(true);
+    const { error } = await supabase.from('candidates').insert([{
+      ...candidateForm,
+      contest_id: contestId
+    }]);
+    if (!error) {
+      setShowAddCandidateModal(null);
+      setCandidateForm({ name: '', image_url: '' });
+      loadDashboardData(true);
+    }
+    setIsProcessing(false);
+  };
+
+  // --- 7. UI COMPONENTS ---
+  if (loading) return (
+    <div style={skeletonCanvas}>
+      <Loader2 className="animate-spin" size={40} color="#000"/>
+      <p style={{marginTop: 20, fontWeight: 700}}>Initializing Ousted Systems...</p>
+    </div>
+  );
 
   return (
-    <div style={appWrapper}>
-      
-      {/* HEADER NAVIGATION */}
-      <header style={headerStyle}>
-        <div style={headerContainer}>
-          <div style={logoSection}>
-            <div style={logoIcon}><Activity size={22} color="#fff"/></div>
-            <span style={logoText}>OUSTED <span style={logoSub}>CORE</span></span>
-          </div>
+    <div style={canvas}>
+      {/* SIDEBAR NAVIGATION */}
+      <aside style={sidebar}>
+        <div style={sidebarLogo}>OUSTED</div>
+        <nav style={sideNav}>
+          <button style={navItem(activeTab === 'events')} onClick={() => setActiveTab('events')}><Layout size={20}/> Events</button>
+          <button style={navItem(activeTab === 'tickets')} onClick={() => setActiveTab('tickets')}><Ticket size={20}/> Tickets</button>
+          <button style={navItem(activeTab === 'competitions')} onClick={() => setActiveTab('competitions')}><Trophy size={20}/> Competitions</button>
+          <button style={navItem(activeTab === 'profile')} onClick={() => setActiveTab('profile')}><Settings size={20}/> Profile</button>
+        </nav>
+        <button style={logoutBtn} onClick={() => router.push('/logout')}><LogOut size={18}/> Logout</button>
+      </aside>
 
-          <div style={navLinks}>
-            <button onClick={() => setActiveTab('events')} style={navBtn(activeTab === 'events')}>Events</button>
-            <button onClick={() => setActiveTab('sales')} style={navBtn(activeTab === 'sales')}>Finance</button>
-            <button onClick={() => setActiveTab('contests')} style={navBtn(activeTab === 'contests')}>Contests</button>
+      {/* MAIN VIEWPORT */}
+      <main style={viewport}>
+        <header style={header}>
+          <div>
+            <h1 style={greeting}>Dashboard</h1>
+            <p style={subGreeting}>Managing {data.profile?.business_name || 'Organizer Account'}</p>
           </div>
-
-          <div style={actionSection}>
-            <button style={utilBtn} onClick={() => initSync(true)}>
+          <div style={headerActions}>
+            <button style={refreshBtn} onClick={() => loadDashboardData(true)}>
               <RefreshCcw size={18} className={refreshing ? 'animate-spin' : ''}/>
             </button>
-            <div style={profilePill}>
-              <div style={avatar}>{data.profile?.business_name?.[0] || 'U'}</div>
-              <span style={profileName}>{data.profile?.business_name || 'Organizer'}</span>
+            <div style={userBadge}>
+              <div style={avatar}>{data.profile?.business_name?.[0]}</div>
             </div>
-            <button style={logout} onClick={() => router.push('/logout')}><LogOut size={18}/></button>
           </div>
-        </div>
-      </header>
+        </header>
 
-      <main style={mainContent}>
-        
-        {/* TOP METRICS BAR */}
-        <section style={metricsRow}>
-          <div style={mainMetricCard}>
-            <p style={metricLabel}>SETTLEMENT BALANCE</p>
-            <h2 style={metricValue}>GHS {stats.net.toLocaleString(undefined, {minimumFractionDigits: 2})}</h2>
-            <div style={metricFooter}>
-              <span style={tag}><ShieldCheck size={14}/> 95% Organizer Split</span>
-              <span style={tag}><Zap size={14}/> Instant Settlement</span>
-            </div>
+        {/* ANALYTICS RIBBON */}
+        <section style={statGrid}>
+          <div style={statCard}>
+            <p style={statLabel}>GROSS REVENUE</p>
+            <h2 style={statValue}>GHS {stats.gross.toLocaleString()}</h2>
+            <div style={statTrend}><TrendingUp size={12}/> 5% Split Active</div>
           </div>
-          <div style={subMetricGrid}>
-            <div style={subCard}>
-              <p style={subLabel}>Active Tickets</p>
-              <h3 style={subValue}>{data.tickets.length}</h3>
-            </div>
-            <div style={subCard}>
-              <p style={subLabel}>Check-in Rate</p>
-              <h3 style={subValue}>{stats.checkInRate.toFixed(1)}%</h3>
-            </div>
+          <div style={statCard}>
+            <p style={statLabel}>NET PAYOUT</p>
+            <h2 style={statValue} sx={{color: '#22c55e'}}>GHS {stats.net.toLocaleString()}</h2>
+          </div>
+          <div style={statCard}>
+            <p style={statLabel}>TICKET SALES</p>
+            <h2 style={statValue}>{stats.totalSales}</h2>
+          </div>
+          <div style={statCard}>
+            <p style={statLabel}>CHECK-IN RATE</p>
+            <h2 style={statValue}>{((stats.scanned / (stats.totalSales || 1)) * 100).toFixed(0)}%</h2>
           </div>
         </section>
 
-        {/* DYNAMIC CONTENT */}
-        <div style={viewWrapper}>
+        {/* DYNAMIC TAB CONTENT */}
+        <div style={contentBlock}>
           {activeTab === 'events' && (
-            <div style={animateIn}>
+            <div style={viewContainer}>
               <div style={viewHeader}>
-                <h2 style={viewTitle}>Event Manager</h2>
-                <button style={primaryBtn} onClick={() => router.push('/dashboard/create')}>
-                  <Plus size={18}/> NEW EVENT
-                </button>
+                <h3 style={viewTitle}>Your Events</h3>
+                <button style={primaryBtn} onClick={() => router.push('/dashboard/create')}><Plus size={18}/> Create Event</button>
               </div>
-              
-              <div style={eventGrid}>
+              <div style={grid}>
                 {data.events.map(event => (
                   <div key={event.id} style={eventCard}>
-                    <div style={eventImage(event.images?.[0])}>
-                      <div style={eventBadge}>ACTIVE</div>
-                    </div>
-                    <div style={eventInfo}>
-                      <h4 style={eventTitleText}>{event.title}</h4>
-                      <p style={eventLoc}><MapPin size={14}/> {event.location || 'Accra, Ghana'}</p>
-                      
-                      <div style={eventActions}>
-                        <button style={actionIconBtn} onClick={() => copyLink(event.id)}>
-                          {copying === event.id ? <Check size={16} color="#22c55e"/> : <LinkIcon size={16}/>}
-                        </button>
-                        <button style={actionIconBtn} onClick={() => setShowQR(event.id)}><QrCode size={16}/></button>
-                        <button style={manageBtn}>DASHBOARD <ArrowRight size={14}/></button>
+                    <div style={eventImage(event.images?.[0])}></div>
+                    <div style={eventBody}>
+                      <h4 style={eventTitle}>{event.title}</h4>
+                      <p style={eventMeta}><Calendar size={12}/> {new Date(event.date).toLocaleDateString()}</p>
+                      <p style={eventMeta}><MapPin size={12}/> {event.location}</p>
+                      <div style={cardFooter}>
+                        <button style={manageBtn} onClick={() => router.push(`/dashboard/events/${event.id}`)}>Manage</button>
+                        <div style={salesBadge}>{data.tickets.filter(t => t.event_id === event.id).length} Sold</div>
                       </div>
                     </div>
                   </div>
@@ -223,98 +229,127 @@ export default function OrganizerDashboard() {
             </div>
           )}
 
-          {activeTab === 'sales' && (
-            <div style={animateIn}>
+          {activeTab === 'competitions' && (
+            <div style={viewContainer}>
               <div style={viewHeader}>
-                <h2 style={viewTitle}>Financial Ledger</h2>
-                <div style={searchWrapper}>
-                  <Search size={18} color="#94a3b8"/>
-                  <input 
-                    style={searchInput} 
-                    placeholder="Filter by guest name..." 
-                    value={ticketSearch}
-                    onChange={(e) => setTicketSearch(e.target.value)}
-                  />
-                </div>
+                <h3 style={viewTitle}>Competitions & Contests</h3>
+                <button style={primaryBtn} onClick={() => setShowAddCompModal(true)}><Plus size={18}/> New Competition</button>
               </div>
-              
-              <div style={tableCard}>
-                <table style={table}>
-                  <thead>
-                    <tr style={tableHeadRow}>
-                      <th style={th}>GUEST</th>
-                      <th style={th}>EVENT</th>
-                      <th style={th}>GROSS</th>
-                      <th style={th}>FEES (5%)</th>
-                      <th style={th}>NET</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.tickets.filter(t => t.guest_name?.toLowerCase().includes(ticketSearch.toLowerCase())).map(t => (
-                      <tr key={t.id} style={tableRow}>
-                        <td style={td}><b>{t.guest_name}</b><br/><small style={{color:'#94a3b8'}}>{t.reference}</small></td>
-                        <td style={td}>{t.events?.title}</td>
-                        <td style={td}>GHS {t.amount}</td>
-                        <td style={td} style={{color:'#ef4444'}}>- GHS {(t.amount * 0.05).toFixed(2)}</td>
-                        <td style={td} style={{color:'#22c55e', fontWeight: 800}}>GHS {(t.amount * 0.95).toFixed(2)}</td>
-                      </tr>
+              {data.competitions.map(comp => (
+                <div key={comp.id} style={compBox}>
+                  <div style={compHeader}>
+                    <div>
+                      <h4 style={compName}>{comp.title}</h4>
+                      <p style={compDesc}>{comp.description}</p>
+                    </div>
+                    <button style={secBtn} onClick={() => setShowAddContestModal(comp.id)}><Plus size={16}/> Add Category</button>
+                  </div>
+                  
+                  <div style={contestGrid}>
+                    {comp.contests?.map(contest => (
+                      <div key={contest.id} style={contestCard}>
+                        <div style={contestHead}>
+                          <h5 style={contestTitle}>{contest.title}</h5>
+                          <div style={priceTag}>GHS {contest.vote_price} / vote</div>
+                        </div>
+                        <div style={candidateList}>
+                          {contest.candidates?.map(cand => (
+                            <div key={cand.id} style={candRow}>
+                              <div style={candAvatar(cand.image_url)}></div>
+                              <span style={candName}>{cand.name}</span>
+                              <span style={voteCount}>{cand.vote_count || 0} Votes</span>
+                            </div>
+                          ))}
+                        </div>
+                        <button style={addCandBtn} onClick={() => setShowAddCandidateModal(contest.id)}>
+                          <UserPlus size={14}/> Add Candidate
+                        </button>
+                      </div>
                     ))}
-                  </tbody>
-                </table>
-              </div>
+                  </div>
+                </div>
+              ))}
             </div>
+          )}
+
+          {activeTab === 'tickets' && (
+             <div style={viewContainer}>
+                <h3 style={viewTitle}>Recent Ticket Activity</h3>
+                <div style={table}>
+                   <div style={tableHead}>
+                      <span>Guest</span>
+                      <span>Event</span>
+                      <span>Tier</span>
+                      <span>Amount</span>
+                      <span>Status</span>
+                   </div>
+                   {data.tickets.map(ticket => (
+                      <div key={ticket.id} style={tableRow}>
+                         <span style={bold}>{ticket.guest_name}</span>
+                         <span>{ticket.events?.title}</span>
+                         <span style={badge}>{ticket.ticket_tiers?.name || 'Standard'}</span>
+                         <span>GHS {ticket.amount}</span>
+                         <span style={ticket.is_scanned ? scanned : pending}>
+                            {ticket.is_scanned ? 'Scanned' : 'Valid'}
+                         </span>
+                      </div>
+                   ))}
+                </div>
+             </div>
           )}
         </div>
       </main>
 
-      {/* INTERACTIVE ONBOARDING OVERLAY */}
-      {showOnboarding && (
-        <div style={overlay}>
-          <div style={onboardingCard}>
-            <div style={onboardingHeader}>
-              <div style={onboardingIcon}><Landmark size={28} color="#000"/></div>
-              <h2 style={onboardingTitle}>Setup Payouts</h2>
-              <p style={onboardingSub}>Connect your bank to receive your 95% split automatically via Paystack.</p>
+      {/* --- MODAL REPOSITORY --- */}
+
+      {/* 1. Add Competition Modal */}
+      {showAddCompModal && (
+        <div style={modalOverlay}>
+          <div style={modal}>
+            <div style={modalHeader}><h3 style={modalTitle}>Create Competition</h3> <X onClick={() => setShowAddCompModal(false)} cursor="pointer"/></div>
+            <div style={modalBody}>
+              <label style={label}>Competition Title</label>
+              <input style={input} placeholder="e.g. Ghana Event Awards" onChange={e => setCompForm({...compForm, title: e.target.value})}/>
+              <label style={label}>Description</label>
+              <textarea style={textarea} placeholder="Describe the awards..." onChange={e => setCompForm({...compForm, description: e.target.value})}/>
+              <button style={submitBtn} onClick={handleAddCompetition} disabled={isProcessing}>
+                {isProcessing ? 'Creating...' : 'Launch Competition'}
+              </button>
             </div>
+          </div>
+        </div>
+      )}
 
-            <div style={onboardingBody}>
-              <div style={inputGroup}>
-                <label style={label}>Registered Business Name</label>
-                <input 
-                  style={input} 
-                  placeholder="e.g. Ousted Events Ltd"
-                  value={formData.business_name}
-                  onChange={e => setFormData({...formData, business_name: e.target.value})}
-                />
-              </div>
-              <div style={inputRow}>
-                <div style={inputGroup}>
-                  <label style={label}>Bank Name</label>
-                  <select style={input} onChange={e => setFormData({...formData, bank_code: e.target.value})}>
-                    <option value="">Select Bank</option>
-                    <option value="058">GT Bank</option>
-                    <option value="044">Access Bank</option>
-                    <option value="013">Ecobank</option>
-                  </select>
-                </div>
-                <div style={inputGroup}>
-                  <label style={label}>Account Number</label>
-                  <input 
-                    style={input} 
-                    placeholder="0012345678"
-                    value={formData.account_number}
-                    onChange={e => setFormData({...formData, account_number: e.target.value})}
-                  />
-                </div>
-              </div>
-              
-              <div style={onboardingInfo}>
-                <Info size={16}/>
-                <p>Funds are settled 24 hours after each successful ticket sale.</p>
-              </div>
+      {/* 2. Add Contest (Category) Modal */}
+      {showAddContestModal && (
+        <div style={modalOverlay}>
+          <div style={modal}>
+            <div style={modalHeader}><h3 style={modalTitle}>New Category</h3> <X onClick={() => setShowAddContestModal(null)} cursor="pointer"/></div>
+            <div style={modalBody}>
+              <label style={label}>Category Name</label>
+              <input style={input} placeholder="e.g. Best DJ" onChange={e => setContestForm({...contestForm, title: e.target.value})}/>
+              <label style={label}>Vote Price (GHS)</label>
+              <input style={input} type="number" step="0.5" defaultValue="1.00" onChange={e => setContestForm({...contestForm, vote_price: e.target.value})}/>
+              <button style={submitBtn} onClick={() => handleAddContest(showAddContestModal)} disabled={isProcessing}>
+                Add Category
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
-              <button style={onboardSubmit} onClick={handleOnboarding}>
-                COMPLETE SETUP <ChevronRight size={18}/>
+      {/* 3. Add Candidate Modal */}
+      {showAddCandidateModal && (
+        <div style={modalOverlay}>
+          <div style={modal}>
+            <div style={modalHeader}><h3 style={modalTitle}>Add Candidate</h3> <X onClick={() => setShowAddCandidateModal(null)} cursor="pointer"/></div>
+            <div style={modalBody}>
+              <label style={label}>Candidate Name</label>
+              <input style={input} placeholder="e.g. DJ Vyrusky" onChange={e => setCandidateForm({...candidateForm, name: e.target.value})}/>
+              <label style={label}>Image URL</label>
+              <input style={input} placeholder="https://..." onChange={e => setCandidateForm({...candidateForm, image_url: e.target.value})}/>
+              <button style={submitBtn} onClick={() => handleAddCandidate(showAddCandidateModal)} disabled={isProcessing}>
+                Add Candidate
               </button>
             </div>
           </div>
@@ -325,95 +360,81 @@ export default function OrganizerDashboard() {
   );
 }
 
-// --- STYLING: SKELETON LOADER ---
-const DashboardSkeleton = () => (
-  <div style={appWrapper}>
-    <div style={{...headerStyle, opacity: 0.5}}></div>
-    <div style={mainContent}>
-      <div style={{height: '200px', background: '#e2e8f0', borderRadius: '30px', marginBottom: '30px'}} className="animate-pulse"></div>
-      <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '20px'}}>
-        {[1,2,3].map(i => (
-          <div key={i} style={{height: '350px', background: '#e2e8f0', borderRadius: '24px'}} className="animate-pulse"></div>
-        ))}
-      </div>
-    </div>
-  </div>
-);
+// --- FULL STYLE ENGINE ---
 
-// --- STYLING: CORE ENGINE ---
-const appWrapper = { minHeight: '100vh', background: '#fcfcfd', color: '#1a1a1a', fontFamily: 'Inter, system-ui' };
-
-const headerStyle = { height: '80px', background: '#fff', borderBottom: '1px solid #f1f1f1', position: 'sticky', top: 0, zIndex: 100 };
-const headerContainer = { maxWidth: '1200px', margin: '0 auto', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px' };
-const logoSection = { display: 'flex', alignItems: 'center', gap: '12px' };
-const logoIcon = { width: '36px', height: '36px', background: '#000', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center' };
-const logoText = { fontWeight: 900, letterSpacing: '-0.5px', fontSize: '18px' };
-const logoSub = { color: '#94a3b8', fontWeight: 400 };
-
-const navLinks = { display: 'flex', gap: '8px', background: '#f8f9fa', padding: '4px', borderRadius: '12px' };
-const navBtn = (active) => ({
-  padding: '8px 16px', borderRadius: '8px', border: 'none', cursor: 'pointer', fontSize: '14px', fontWeight: 600,
-  background: active ? '#fff' : 'transparent', color: active ? '#000' : '#64748b', boxShadow: active ? '0 2px 4px rgba(0,0,0,0.05)' : 'none', transition: '0.2s'
+const canvas = { display: 'flex', minHeight: '100vh', background: '#F8F9FA', color: '#1A1D23', fontFamily: 'Inter, system-ui' };
+const sidebar = { width: '280px', background: '#FFF', borderRight: '1px solid #E9ECEF', padding: '40px 20px', display: 'flex', flexDirection: 'column' };
+const sidebarLogo = { fontSize: '24px', fontWeight: 900, letterSpacing: '-1px', marginBottom: '60px', paddingLeft: '20px' };
+const sideNav = { display: 'flex', flexDirection: 'column', gap: '8px', flex: 1 };
+const navItem = (active) => ({
+  display: 'flex', alignItems: 'center', gap: '12px', padding: '14px 20px', borderRadius: '12px', border: 'none',
+  background: active ? '#000' : 'transparent', color: active ? '#FFF' : '#6C757D', fontWeight: 600,
+  fontSize: '15px', cursor: 'pointer', textAlign: 'left', transition: '0.2s'
 });
+const logoutBtn = { display: 'flex', alignItems: 'center', gap: '12px', padding: '14px 20px', background: 'none', border: 'none', color: '#DC3545', fontWeight: 600, cursor: 'pointer' };
 
-const actionSection = { display: 'flex', alignItems: 'center', gap: '16px' };
-const utilBtn = { background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' };
-const profilePill = { display: 'flex', alignItems: 'center', gap: '10px', padding: '6px 12px', border: '1px solid #f1f1f1', borderRadius: '50px' };
-const avatar = { width: '24px', height: '24px', borderRadius: '50%', background: '#000', color: '#fff', fontSize: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800 };
-const profileName = { fontSize: '13px', fontWeight: 700 };
-const logout = { color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer' };
+const viewport = { flex: 1, padding: '40px 60px', overflowY: 'auto' };
+const header = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '40px' };
+const greeting = { fontSize: '32px', fontWeight: 800, margin: 0 };
+const subGreeting = { color: '#6C757D', margin: '5px 0 0' };
+const headerActions = { display: 'flex', alignItems: 'center', gap: '20px' };
+const refreshBtn = { background: '#FFF', border: '1px solid #E9ECEF', width: '45px', height: '45px', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
+const userBadge = { display: 'flex', alignItems: 'center', gap: '10px' };
+const avatar = { width: '45px', height: '45px', borderRadius: '12px', background: '#000', color: '#FFF', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700 };
 
-const mainContent = { maxWidth: '1200px', margin: '0 auto', padding: '40px 24px' };
-const metricsRow = { display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '24px', marginBottom: '48px' };
-const mainMetricCard = { background: '#000', color: '#fff', padding: '40px', borderRadius: '32px', boxShadow: '0 20px 40px rgba(0,0,0,0.08)' };
-const metricLabel = { fontSize: '11px', fontWeight: 800, color: '#64748b', letterSpacing: '1.5px' };
-const metricValue = { fontSize: '48px', fontWeight: 900, margin: '12px 0', letterSpacing: '-2px' };
-const metricFooter = { display: 'flex', gap: '16px' };
-const tag = { fontSize: '11px', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600 };
+const statGrid = { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '25px', marginBottom: '50px' };
+const statCard = { background: '#FFF', padding: '30px', borderRadius: '24px', border: '1px solid #E9ECEF', boxShadow: '0 4px 6px rgba(0,0,0,0.02)' };
+const statLabel = { fontSize: '11px', fontWeight: 800, color: '#ADB5BD', letterSpacing: '1px', marginBottom: '15px' };
+const statValue = { fontSize: '24px', fontWeight: 900, margin: 0 };
+const statTrend = { fontSize: '11px', color: '#6C757D', marginTop: '10px', display: 'flex', alignItems: 'center', gap: '4px' };
 
-const subMetricGrid = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' };
-const subCard = { background: '#fff', border: '1px solid #f1f1f1', borderRadius: '24px', padding: '24px', display: 'flex', flexDirection: 'column', justifyContent: 'center' };
-const subLabel = { fontSize: '13px', color: '#64748b', fontWeight: 600 };
-const subValue = { fontSize: '28px', fontWeight: 900, margin: '8px 0 0' };
+const viewContainer = { animation: 'fadeIn 0.3s ease' };
+const viewHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' };
+const viewTitle = { fontSize: '20px', fontWeight: 800 };
+const primaryBtn = { background: '#000', color: '#FFF', border: 'none', padding: '12px 24px', borderRadius: '12px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' };
+const secBtn = { background: '#F8F9FA', color: '#000', border: '1px solid #E9ECEF', padding: '8px 16px', borderRadius: '10px', fontWeight: 600, fontSize: '13px', display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' };
 
-const viewWrapper = { minHeight: '400px' };
-const viewHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' };
-const viewTitle = { fontSize: '22px', fontWeight: 800, letterSpacing: '-0.5px' };
-const primaryBtn = { background: '#000', color: '#fff', border: 'none', padding: '12px 24px', borderRadius: '12px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' };
+const grid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '30px' };
+const eventCard = { background: '#FFF', borderRadius: '24px', border: '1px solid #E9ECEF', overflow: 'hidden', transition: '0.3s transform' };
+const eventImage = (url) => ({ height: '180px', background: url ? `url(${url}) center/cover` : '#EEE', borderBottom: '1px solid #E9ECEF' });
+const eventBody = { padding: '25px' };
+const eventTitle = { fontSize: '18px', fontWeight: 800, margin: '0 0 15px' };
+const eventMeta = { fontSize: '13px', color: '#6C757D', display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' };
+const cardFooter = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '20px' };
+const manageBtn = { background: '#F8F9FA', border: '1px solid #E9ECEF', padding: '8px 20px', borderRadius: '10px', fontWeight: 700, fontSize: '13px', cursor: 'pointer' };
+const salesBadge = { background: '#E7F5FF', color: '#228BE6', padding: '4px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: 700 };
 
-const eventGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '24px' };
-const eventCard = { background: '#fff', border: '1px solid #f1f1f1', borderRadius: '24px', overflow: 'hidden', transition: 'transform 0.2s ease' };
-const eventImage = (u) => ({ height: '180px', background: u ? `url(${u}) center/cover` : '#f8f9fa', position: 'relative', padding: '16px' });
-const eventBadge = { background: '#22c55e', color: '#fff', padding: '4px 10px', borderRadius: '6px', fontSize: '10px', fontWeight: 800, display: 'inline-block' };
-const eventInfo = { padding: '20px' };
-const eventTitleText = { margin: '0 0 6px', fontSize: '17px', fontWeight: 800 };
-const eventLoc = { fontSize: '13px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '16px' };
-const eventActions = { display: 'flex', gap: '8px', alignItems: 'center' };
-const actionIconBtn = { width: '40px', height: '40px', borderRadius: '10px', border: '1px solid #f1f1f1', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
-const manageBtn = { flex: 1, padding: '10px', borderRadius: '10px', border: '1px solid #000', background: 'none', fontWeight: 700, fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' };
+const compBox = { background: '#FFF', padding: '40px', borderRadius: '30px', border: '1px solid #E9ECEF', marginBottom: '40px' };
+const compHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '40px', borderBottom: '1px solid #F1F3F5', paddingBottom: '30px' };
+const compName = { fontSize: '24px', fontWeight: 800, margin: 0 };
+const compDesc = { color: '#6C757D', marginTop: '8px' };
+const contestGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '25px' };
+const contestCard = { background: '#F8F9FA', padding: '25px', borderRadius: '20px' };
+const contestHead = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' };
+const contestTitle = { fontSize: '16px', fontWeight: 800, margin: 0 };
+const priceTag = { fontSize: '12px', fontWeight: 700, color: '#40C057' };
+const candidateList = { display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' };
+const candRow = { display: 'flex', alignItems: 'center', gap: '12px', background: '#FFF', padding: '12px', borderRadius: '12px' };
+const candAvatar = (url) => ({ width: '32px', height: '32px', borderRadius: '8px', background: url ? `url(${url}) center/cover` : '#EEE' });
+const candName = { flex: 1, fontSize: '13px', fontWeight: 600 };
+const voteCount = { fontSize: '12px', fontWeight: 700, color: '#6366f1' };
+const addCandBtn = { width: '100%', background: 'none', border: '1px dashed #CED4DA', padding: '10px', borderRadius: '10px', color: '#6C757D', fontSize: '13px', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', cursor: 'pointer' };
 
-const searchWrapper = { display: 'flex', alignItems: 'center', gap: '12px', background: '#fff', border: '1px solid #f1f1f1', padding: '0 16px', borderRadius: '12px', width: '300px' };
-const searchInput = { border: 'none', outline: 'none', height: '44px', fontSize: '14px', width: '100%', fontWeight: 600 };
+const table = { width: '100%', background: '#FFF', borderRadius: '24px', border: '1px solid #E9ECEF', overflow: 'hidden' };
+const tableHead = { display: 'grid', gridTemplateColumns: '2fr 2fr 1.5fr 1fr 1fr', padding: '20px 30px', background: '#F8F9FA', fontWeight: 700, color: '#495057', fontSize: '13px' };
+const tableRow = { display: 'grid', gridTemplateColumns: '2fr 2fr 1.5fr 1fr 1fr', padding: '20px 30px', borderBottom: '1px solid #F8F9FA', alignItems: 'center', fontSize: '14px' };
+const bold = { fontWeight: 700 };
+const badge = { background: '#F1F3F5', padding: '4px 10px', borderRadius: '6px', fontSize: '11px', fontWeight: 700 };
+const scanned = { color: '#40C057', fontWeight: 700 };
+const pending = { color: '#FAB005', fontWeight: 700 };
 
-const tableCard = { background: '#fff', border: '1px solid #f1f1f1', borderRadius: '24px', overflow: 'hidden' };
-const table = { width: '100%', borderCollapse: 'collapse', textAlign: 'left' };
-const tableHeadRow = { background: '#f8f9fa' };
-const th = { padding: '16px 24px', fontSize: '11px', fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px' };
-const td = { padding: '20px 24px', borderBottom: '1px solid #f8f9fa', fontSize: '14px' };
-const tableRow = { cursor: 'pointer' };
-
-const overlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' };
-const onboardingCard = { background: '#fff', width: '100%', maxWidth: '500px', borderRadius: '32px', overflow: 'hidden', boxShadow: '0 30px 60px rgba(0,0,0,0.2)' };
-const onboardingHeader = { padding: '40px 40px 20px', textAlign: 'center' };
-const onboardingIcon = { width: '64px', height: '64px', background: '#f1f1f1', borderRadius: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 24px' };
-const onboardingTitle = { fontSize: '24px', fontWeight: 800, margin: 0 };
-const onboardingSub = { fontSize: '15px', color: '#64748b', marginTop: '8px', lineHeight: 1.5 };
-const onboardingBody = { padding: '0 40px 40px' };
-const inputGroup = { display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px', flex: 1 };
-const inputRow = { display: 'flex', gap: '16px' };
-const label = { fontSize: '12px', fontWeight: 700, color: '#1a1a1a' };
-const input = { padding: '12px 16px', borderRadius: '12px', border: '1px solid #e2e8f0', fontSize: '14px', outline: 'none' };
-const onboardingInfo = { display: 'flex', gap: '12px', background: '#f8fafc', padding: '16px', borderRadius: '16px', marginBottom: '24px', fontSize: '13px', color: '#475569', lineHeight: 1.4 };
-const onboardSubmit = { width: '100%', padding: '16px', borderRadius: '16px', background: '#000', color: '#fff', border: 'none', fontWeight: 800, fontSize: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', cursor: 'pointer' };
-
-const animateIn = { animation: 'fadeIn 0.5s ease-out' };
+const modalOverlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 };
+const modal = { background: '#FFF', width: '480px', borderRadius: '30px', padding: '40px', boxShadow: '0 20px 40px rgba(0,0,0,0.1)' };
+const modalHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' };
+const modalTitle = { fontSize: '20px', fontWeight: 800, margin: 0 };
+const modalBody = { display: 'flex', flexDirection: 'column', gap: '20px' };
+const label = { fontSize: '13px', fontWeight: 700, color: '#495057' };
+const input = { padding: '14px', borderRadius: '12px', border: '1px solid #E9ECEF', background: '#F8F9FA', outline: 'none' };
+const textarea = { padding: '14px', borderRadius: '12px', border: '1px solid #E9ECEF', background: '#F8F9FA', outline: 'none', minHeight: '100px', resize: 'none' };
+const submitBtn = { background: '#000', color: '#FFF', border: 'none', padding: '16px', borderRadius: '14px', fontWeight: 700, cursor: 'pointer' };
+const skeletonCanvas = { height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' };
