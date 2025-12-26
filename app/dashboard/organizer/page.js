@@ -1,24 +1,33 @@
 "use client";
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { useRouter } from 'next/navigation';
 import { 
   Plus, BarChart3, Users, Ticket, Calendar, 
-  Trophy, Wallet, ArrowUpRight, Settings, Image as ImageIcon,
-  Link as LinkIcon, Share2, Check, Copy, QrCode, Download, X,
-  TrendingUp, Smartphone, Clock, CheckCircle2, XCircle, Loader2, Save, Trash2,
-  LogOut, Search, Filter, Eye, ChevronRight, RefreshCcw, MoreHorizontal,
-  ExternalLink, Mail, Phone, MapPin, UserPlus, Award, AlertCircle, Info,
-  Banknote, CreditCard, ShieldCheck, History
+  Trophy, Wallet, ArrowUpRight, Settings, 
+  Check, QrCode, Download, X,
+  TrendingUp, Clock, Loader2, Trash2,
+  LogOut, RefreshCcw, ChevronRight, 
+  Banknote, Award, ShieldCheck, History, Info, Sparkles, Building2,
+  Eye, MoreVertical, Search, Filter, MapPin, ExternalLink,
+  ChevronDown, ArrowDownRight, CreditCard, HelpCircle, Bell
 } from 'lucide-react';
 
 export default function OrganizerDashboard() {
   const router = useRouter();
 
-  // --- 1. CORE DATA STATE ---
+  // --- 1. STATE MANAGEMENT ---
   const [activeTab, setActiveTab] = useState('events');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [isOnboarded, setIsOnboarded] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  
+  // Modal States
+  const [selectedTicket, setSelectedTicket] = useState(null);
+  const [showPayoutModal, setShowPayoutModal] = useState(false);
+  
   const [data, setData] = useState({ 
     events: [], 
     contests: [], 
@@ -27,35 +36,18 @@ export default function OrganizerDashboard() {
     profile: null 
   });
 
-  // --- 2. FINANCIAL & ANALYTICS STATE ---
   const [stats, setStats] = useState({
-    totalRevenue: 0,
+    netRevenue: 0, 
+    grossRevenue: 0,
     totalVotes: 0,
     availableBalance: 0,
     pendingWithdrawals: 0,
     withdrawnToDate: 0,
     ticketCount: 0,
-    activeContests: 0
+    activeEvents: 0
   });
 
-  // --- 3. UI & MODAL STATE ---
-  const [copying, setCopying] = useState(null);
-  const [showQR, setShowQR] = useState(null);
-  const [showWithdrawModal, setShowWithdrawModal] = useState(false);
-  const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [withdrawAmount, setWithdrawAmount] = useState('');
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [ticketSearch, setTicketSearch] = useState('');
-  const [selectedEventFilter, setSelectedEventFilter] = useState('all');
-  
-  // Mobile Money Preferences
-  const [momoConfig, setMomoConfig] = useState({
-    number: "",
-    network: "MTN",
-    accountName: ""
-  });
-
-  // --- 4. THE DATA ENGINE (CRITICAL PAYMENT LOGIC) ---
+  // --- 2. DATA ENGINE ---
   const loadDashboardData = useCallback(async (isSilent = false) => {
     try {
       if (!isSilent) setLoading(true);
@@ -63,28 +55,28 @@ export default function OrganizerDashboard() {
 
       const { data: { user }, error: authError } = await supabase.auth.getUser();
       if (authError || !user) {
-        console.error("Auth session missing");
         router.push('/login');
         return;
       }
 
-      const [
-        eventsRes, 
-        contestsRes, 
-        payoutsRes, 
-        ticketsRes
-      ] = await Promise.all([
+      // Check for Paystack Subaccount in metadata
+      const hasSubaccount = !!user.user_metadata?.paystack_subaccount_code;
+      setIsOnboarded(hasSubaccount);
+
+      // Fetch all relevant data for the organizer
+      const [eventsRes, contestsRes, payoutsRes, ticketsRes] = await Promise.all([
         supabase.from('events').select('*').eq('organizer_id', user.id).order('created_at', { ascending: false }),
         supabase.from('contests').select('*, candidates(*)').eq('organizer_id', user.id).order('created_at', { ascending: false }),
         supabase.from('payouts').select('*').eq('organizer_id', user.id).order('created_at', { ascending: false }),
         supabase.from('tickets').select('*, events(title, organizer_id)').order('created_at', { ascending: false })
       ]);
 
-      if (eventsRes.error) console.warn("Events load error:", eventsRes.error);
-      if (payoutsRes.error) console.warn("Payouts load error:", payoutsRes.error);
-
+      // Filter tickets belonging to this organizer's events
       const myTickets = ticketsRes.data?.filter(t => t.events?.organizer_id === user.id) || [];
-      const grossRevenue = myTickets.reduce((acc, t) => acc + (parseFloat(t.amount) || 0), 0);
+      
+      // FINANCIAL LOGIC: Organizer gets 95% (Ousted service charge is 5%)
+      const grossRev = myTickets.reduce((acc, t) => acc + (parseFloat(t.amount) || 0), 0);
+      const netRev = grossRev * 0.95; 
       
       const successfulPayouts = payoutsRes.data
         ?.filter(p => p.status === 'success')
@@ -94,17 +86,15 @@ export default function OrganizerDashboard() {
         ?.filter(p => p.status === 'pending')
         .reduce((acc, p) => acc + (parseFloat(p.amount) || 0), 0) || 0;
 
-      const totalVotes = contestsRes.data?.reduce((acc, c) => 
-        acc + (c.candidates?.reduce((sum, cand) => sum + (parseInt(cand.vote_count) || 0), 0) || 0), 0) || 0;
-
       setStats({
-        totalRevenue: grossRevenue,
-        totalVotes: totalVotes,
-        availableBalance: Math.max(0, grossRevenue - successfulPayouts - pendingPayouts),
+        grossRevenue: grossRev,
+        netRevenue: netRev,
+        totalVotes: contestsRes.data?.reduce((acc, c) => acc + (c.candidates?.reduce((sum, cand) => sum + (parseInt(cand.vote_count) || 0), 0) || 0), 0) || 0,
+        availableBalance: Math.max(0, netRev - successfulPayouts - pendingPayouts),
         pendingWithdrawals: pendingPayouts,
         withdrawnToDate: successfulPayouts,
         ticketCount: myTickets.length,
-        activeContests: contestsRes.data?.length || 0
+        activeEvents: eventsRes.data?.filter(e => e.status === 'active').length || 0
       });
 
       setData({
@@ -115,16 +105,8 @@ export default function OrganizerDashboard() {
         profile: user
       });
 
-      if (user.user_metadata?.momo_number) {
-        setMomoConfig({
-          number: user.user_metadata.momo_number,
-          network: user.user_metadata.momo_network || "MTN",
-          accountName: user.user_metadata.account_name || ""
-        });
-      }
-
     } catch (err) {
-      console.error("Dashboard Engine Error:", err);
+      console.error("Dashboard Load Error:", err);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -135,576 +117,624 @@ export default function OrganizerDashboard() {
     loadDashboardData();
   }, [loadDashboardData]);
 
-  // --- 5. ACTION HANDLERS ---
+  // --- 3. FILTER LOGIC ---
+  const filteredEvents = useMemo(() => {
+    return data.events.filter(e => 
+      e.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      e.location.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+  }, [data.events, searchQuery]);
+
+  const filteredTickets = useMemo(() => {
+    return data.tickets.filter(t => 
+      t.customer_email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      t.id.includes(searchQuery)
+    );
+  }, [data.tickets, searchQuery]);
+
+  // --- 4. ACTIONS ---
+  const handleDeleteEvent = async (id) => {
+    const confirmed = window.confirm("Are you sure? This will remove the event and all associated data. This action cannot be undone.");
+    if (!confirmed) return;
+    
+    const { error } = await supabase.from('events').delete().eq('id', id);
+    if (error) {
+      alert("Error deleting event: " + error.message);
+    } else {
+      loadDashboardData(true);
+    }
+  };
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     router.push('/login');
   };
 
-  const deleteResource = async (table, id) => {
-    if (!confirm("Are you sure? This will delete all linked data permanently.")) return;
-    const { error } = await supabase.from(table).delete().eq('id', id);
-    if (error) alert("Could not delete. Check if resource is currently active.");
-    else loadDashboardData(true);
+  const handleDownloadTicketReport = () => {
+    const headers = ["Ticket ID", "Event", "Customer", "Amount (Gross)", "Net Revenue (95%)", "Date"];
+    const csvData = data.tickets.map(t => [
+      t.id,
+      t.events?.title,
+      t.customer_email,
+      t.amount,
+      (t.amount * 0.95).toFixed(2),
+      new Date(t.created_at).toLocaleDateString()
+    ]);
+    
+    const csvContent = [headers, ...csvData].map(e => e.join(",")).join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `ousted_sales_report_${new Date().toISOString().slice(0,10)}.csv`);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
-  const submitWithdrawal = async () => {
-    const amount = parseFloat(withdrawAmount);
-    if (!amount || amount < 5) return alert("Minimum withdrawal is GHS 5.00");
-    if (amount > stats.availableBalance) return alert("Insufficient funds available.");
-    if (!momoConfig.number || momoConfig.number.length < 10) {
-      return alert("Please provide a valid Mobile Money number in Settings.");
-    }
-
-    setIsProcessing(true);
-    try {
-      const { error } = await supabase.from('payouts').insert([{
-        organizer_id: data.profile.id,
-        amount: amount,
-        momo_number: momoConfig.number,
-        momo_network: momoConfig.network,
-        account_name: momoConfig.accountName,
-        status: 'pending',
-        created_at: new Date().toISOString()
-      }]);
-
-      if (error) throw error;
-      alert("Withdrawal request sent! Funds typically arrive in 24 hours.");
-      setShowWithdrawModal(false);
-      setWithdrawAmount('');
-      loadDashboardData(true);
-    } catch (err) {
-      console.error("Payout error:", err);
-      alert("Transaction failed. Contact support if balance was deducted.");
-    } finally {
-      setIsProcessing(false);
-    }
+  // --- 5. SUB-COMPONENTS (MODALS) ---
+  const TicketDetailModal = () => {
+    if (!selectedTicket) return null;
+    return (
+      <div style={modalOverlay} onClick={() => setSelectedTicket(null)}>
+        <div style={modalContent} onClick={e => e.stopPropagation()}>
+          <div style={modalHeader}>
+            <h3 style={modalTitle}>Ticket Specification</h3>
+            <button style={closeBtn} onClick={() => setSelectedTicket(null)}><X size={20}/></button>
+          </div>
+          <div style={modalBody}>
+            <div style={ticketPreviewCard}>
+               <div style={previewTop}>
+                 <p style={previewEventName}>{selectedTicket.events?.title}</p>
+                 <span style={previewStatus}>VERIFIED</span>
+               </div>
+               <div style={previewMid}>
+                  <QrCode size={120} strokeWidth={1.5}/>
+                  <div style={previewInfo}>
+                    <p style={previewLabel}>HOLDER</p>
+                    <p style={previewValue}>{selectedTicket.customer_email}</p>
+                    <p style={previewLabel} style={{marginTop: '10px'}}>TICKET ID</p>
+                    <p style={previewValue}>#{selectedTicket.id.slice(0,12)}</p>
+                  </div>
+               </div>
+               <div style={previewBottom}>
+                 <div style={previewStat}>
+                    <span>NET PRICE</span>
+                    <p>GHS {(selectedTicket.amount * 0.95).toFixed(2)}</p>
+                 </div>
+                 <div style={previewStat}>
+                    <span>TIER</span>
+                    <p>{selectedTicket.ticket_type || 'Standard'}</p>
+                 </div>
+               </div>
+            </div>
+          </div>
+          <button style={modalActionBtn} onClick={() => window.print()}>PRINT RECEIPT</button>
+        </div>
+      </div>
+    );
   };
 
-  const updateMomoSettings = async () => {
-    setIsProcessing(true);
-    try {
-      const { error } = await supabase.auth.updateUser({
-        data: { 
-          momo_number: momoConfig.number, 
-          momo_network: momoConfig.network,
-          account_name: momoConfig.accountName
-        }
-      });
-      if (error) throw error;
-      alert("Payment preferences updated.");
-      setShowSettingsModal(false);
-    } catch (err) {
-      alert("Error saving preferences.");
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const copyLink = (path, id) => {
-    const url = `${window.location.origin}/${path}/${id}`;
-    navigator.clipboard.writeText(url);
-    setCopying(id);
-    setTimeout(() => setCopying(null), 2000);
-  };
-
-  const filteredTickets = data.tickets.filter(t => {
-    const searchStr = ticketSearch.toLowerCase();
-    const matchesSearch = t.guest_name?.toLowerCase().includes(searchStr) || 
-                          t.reference?.toLowerCase().includes(searchStr);
-    const matchesEvent = selectedEventFilter === 'all' || t.event_id === selectedEventFilter;
-    return matchesSearch && matchesEvent;
-  });
-
+  // --- 6. LOADING & ONBOARDING VIEWS ---
   if (loading) return (
     <div style={fullPageCenter}>
-      <Loader2 className="animate-spin" size={48} color="#0ea5e9"/>
-      <h2 style={{marginTop: '24px', fontWeight: 900, letterSpacing: '-1px'}}>SECURE ACCESS...</h2>
-      <p style={{color: '#64748b', fontSize: '14px'}}>Fetching financial records</p>
+      <div style={loaderContainer}>
+        <div style={luxuryLoaderRing}></div>
+        <h2 style={loadingLogo}>OUSTED</h2>
+        <p style={loadingText}>PREPARING YOUR LUXURY ASSETS</p>
+      </div>
     </div>
   );
 
+  if (!isOnboarded) {
+    return (
+      <div style={mainWrapper}>
+        <div style={topNav}>
+          <h1 style={logoText}>OUSTED <span style={badgePro}>SETUP</span></h1>
+          <button style={logoutCircle} onClick={handleLogout}><LogOut size={20}/></button>
+        </div>
+
+        <div style={onboardingContainer}>
+          <div style={onboardHero}>
+            <div style={heroDecoration}><Sparkles size={40} color="#0ea5e9"/></div>
+            <h2 style={onboardTitle}>The Gateway to Excellence</h2>
+            <p style={onboardSub}>Complete your business onboarding to unlock premium event creation, automated payouts, and real-time sales analytics.</p>
+            
+            <button style={primaryOnboardBtn} onClick={() => router.push('/dashboard/organizer/onboarding')}>
+              BEGIN ONBOARDING FORM <ChevronRight size={20}/>
+            </button>
+          </div>
+
+          <div style={onboardInfoSection}>
+            <h3 style={sectionHeading}>How Service Fees & Payouts Work</h3>
+            <div style={howItWorksGrid}>
+              <div style={howCard}>
+                <div style={howIcon}><Building2 size={24}/></div>
+                <h3 style={howTitle}>95% Revenue Share</h3>
+                <p style={howText}>Ousted organizers receive 95% of every ticket sold. We calculate this instantly upon every successful transaction.</p>
+              </div>
+              <div style={howCard}>
+                <div style={howIcon}><ShieldCheck size={24}/></div>
+                <h3 style={howTitle}>5% Flat Commission</h3>
+                <p style={howText}>The 5% fee covers all Paystack processing costs, secure QR code generation, email delivery, and platform hosting.</p>
+              </div>
+              <div style={howCard}>
+                <div style={howIcon}><Banknote size={24}/></div>
+                <h3 style={howTitle}>Automatic Settlement</h3>
+                <p style={howText}>Funds are settled directly into your connected bank or Mobile Money account according to the Paystack cycle.</p>
+              </div>
+            </div>
+
+            <div style={commissionNotice}>
+               <Info size={24} color="#0ea5e9"/>
+               <div style={{display: 'flex', flexDirection: 'column'}}>
+                 <p style={{margin: 0, fontSize: '15px', fontWeight: 800, color: '#1e293b'}}>Ousted Partner Transparency</p>
+                 <p style={{margin: 0, fontSize: '13px', color: '#64748b', marginTop: '4px'}}>
+                   Example: For a high-end ticket priced at <b>GHS 500.00</b>, you receive <b>GHS 475.00</b>. There are zero hidden management or withdrawal fees.
+                 </p>
+               </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // --- 7. MAIN DASHBOARD RENDER ---
   return (
     <div style={mainWrapper}>
+      <TicketDetailModal />
+      
+      {/* Header */}
       <div style={topNav}>
-        <div>
+        <div style={logoSection}>
           <h1 style={logoText}>OUSTED <span style={badgePro}>ORGANIZER</span></h1>
         </div>
+        
         <div style={headerActions}>
+           <div style={searchWrapper}>
+              <Search size={18} style={searchIcon}/>
+              <input 
+                type="text" 
+                placeholder="Search events or tickets..." 
+                style={searchInput}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+           </div>
+           
            <div style={userBrief}>
              <p style={userEmail}>{data.profile?.email}</p>
-             <p style={userRole}>Verified Organizer</p>
+             <p style={userRole}>Verified Merchant</p>
            </div>
+
            <button style={circleAction} onClick={() => loadDashboardData(true)}>
-             <RefreshCcw size={20} className={refreshing ? 'animate-spin' : ''}/>
+             <RefreshCcw size={18} className={refreshing ? 'animate-spin' : ''}/>
            </button>
+           
            <button style={logoutCircle} onClick={handleLogout}>
-             <LogOut size={20}/>
+             <LogOut size={18}/>
            </button>
         </div>
       </div>
 
+      {/* Finance Grid */}
       <div style={financeGrid}>
         <div style={balanceCard}>
-          <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start'}}>
-            <div>
-              <p style={financeLabel}>AVAILABLE TO WITHDRAW</p>
-              <h2 style={balanceValue}>GHS {stats.availableBalance.toLocaleString(undefined, {minimumFractionDigits: 2})}</h2>
-              <div style={pendingTag}>
-                <Clock size={12}/> GHS {stats.pendingWithdrawals.toLocaleString()} is currently processing
-              </div>
-            </div>
-            <div style={iconCircleLarge}><Wallet size={32} color="#0ea5e9"/></div>
+          <div style={cardHeader}>
+            <p style={financeLabel}>TOTAL NET REVENUE (YOUR 95%)</p>
+            <div style={statusDot}>LIVE DATA</div>
+          </div>
+          <h2 style={balanceValue}>GHS {stats.netRevenue.toLocaleString(undefined, {minimumFractionDigits: 2})}</h2>
+          
+          <div style={revenueBreakdown}>
+             <div style={breakdownItem}>
+                <span style={breakdownLabel}>Gross Ticket Sales</span>
+                <span style={breakdownValue}>GHS {stats.grossRevenue.toLocaleString()}</span>
+             </div>
+             <div style={breakdownItem}>
+                <span style={breakdownLabel}>Ousted Service Fee (5%)</span>
+                <span style={breakdownValue}>- GHS {(stats.grossRevenue * 0.05).toLocaleString()}</span>
+             </div>
+          </div>
+
+          <div style={financeActionRow}>
+            <button style={withdrawBtn}>SETTLEMENT HISTORY <History size={18}/></button>
+            <button style={settingsIconBtn}><Settings size={20}/></button>
           </div>
           
-          <div style={financeActionRow}>
-            <button style={withdrawBtn} onClick={() => setShowWithdrawModal(true)}>
-              WITHDRAW FUNDS <ArrowUpRight size={18}/>
-            </button>
-            <button style={settingsIconBtn} onClick={() => setShowSettingsModal(true)}>
-              <Settings size={20}/>
-            </button>
-          </div>
+          <div style={cardDecoration}></div>
         </div>
 
         <div style={statsOverview}>
           <div style={statBox}>
-            <p style={statLabel}>GROSS REVENUE</p>
-            <p style={statNumber}>GHS {stats.totalRevenue.toLocaleString()}</p>
-            <TrendingUp size={16} color="#22c55e"/>
+            <div style={statInfo}>
+              <p style={statLabel}>TOTAL TICKETS ISSUED</p>
+              <p style={statNumber}>{stats.ticketCount.toLocaleString()}</p>
+            </div>
+            <div style={statIconBox}><Ticket size={24} color="#000"/></div>
           </div>
+          
           <div style={statBox}>
-            <p style={statLabel}>TOTAL TICKETS</p>
-            <p style={statNumber}>{stats.ticketCount}</p>
-            <Ticket size={16} color="#0ea5e9"/>
+            <div style={statInfo}>
+              <p style={statLabel}>CONTEST VOTE REVENUE</p>
+              <p style={statNumber}>{stats.totalVotes.toLocaleString()}</p>
+            </div>
+            <div style={statIconBox}><Award size={24} color="#000"/></div>
           </div>
-          <div style={statBox}>
-            <p style={statLabel}>TOTAL VOTES</p>
-            <p style={statNumber}>{stats.totalVotes.toLocaleString()}</p>
-            <Award size={16} color="#f59e0b"/>
+
+          <div style={balanceMiniBox}>
+             <div style={{display: 'flex', alignItems: 'center', gap: '10px'}}>
+               <Wallet size={18} color="#0ea5e9"/>
+               <span style={miniLabel}>AVAILABLE FOR SETTLEMENT</span>
+             </div>
+             <span style={miniValue}>GHS {stats.availableBalance.toLocaleString()}</span>
           </div>
         </div>
       </div>
 
-      <div style={tabBar}>
-        <button onClick={() => setActiveTab('events')} style={tabItem(activeTab === 'events')}>
-          <Calendar size={18}/> MY EVENTS
-        </button>
-        <button onClick={() => setActiveTab('contests')} style={tabItem(activeTab === 'contests')}>
-          <Trophy size={18}/> CONTESTS
-        </button>
-        <button onClick={() => setActiveTab('sales')} style={tabItem(activeTab === 'sales')}>
-          <History size={18}/> SALES & PAYMENTS
-        </button>
-        <button onClick={() => setActiveTab('analytics')} style={tabItem(activeTab === 'analytics')}>
-          <BarChart3 size={18}/> ANALYTICS
-        </button>
+      {/* Navigation & Controls */}
+      <div style={tabContainer}>
+        <div style={tabBar}>
+          <button onClick={() => setActiveTab('events')} style={tabItem(activeTab === 'events')}>
+            <Calendar size={16}/> EVENTS
+          </button>
+          <button onClick={() => setActiveTab('contests')} style={tabItem(activeTab === 'contests')}>
+            <Trophy size={16}/> CONTESTS
+          </button>
+          <button onClick={() => setActiveTab('sales')} style={tabItem(activeTab === 'sales')}>
+            <BarChart3 size={16}/> SALES LEDGER
+          </button>
+        </div>
+        
+        <div style={tabActions}>
+          {activeTab === 'sales' && (
+            <button style={secondaryBtn} onClick={handleDownloadTicketReport}>
+              <Download size={18}/> EXPORT CSV
+            </button>
+          )}
+          <button style={addBtn} onClick={() => router.push('/dashboard/organizer/create')}>
+            <Plus size={18}/> CREATE NEW EVENT
+          </button>
+        </div>
       </div>
 
+      {/* Content Viewport */}
       <div style={viewPort}>
         {activeTab === 'events' && (
-          <div style={fadeAnim}>
-            <div style={viewHeader}>
-              <h2 style={viewTitle}>Events Dashboard</h2>
-              <button style={addBtn} onClick={() => router.push('/dashboard/organizer/create')}>
-                <Plus size={20}/> ADD NEW EVENT
-              </button>
-            </div>
-            <div style={cardGrid}>
-              {data.events.map(event => (
-                <div key={event.id} style={itemCard}>
-                  <div style={itemImage(event.images?.[0])}>
-                    <div style={cardQuickActions}>
-                      <button style={miniAction} onClick={() => copyLink('events', event.id)}>
-                        {copying === event.id ? <Check size={14} color="#22c55e"/> : <LinkIcon size={14}/>}
-                      </button>
-                      <button style={miniAction} onClick={() => setShowQR(`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${window.location.origin}/events/${event.id}`)}>
-                        <QrCode size={14}/>
-                      </button>
-                    </div>
-                  </div>
-                  <div style={itemBody}>
-                    <h3 style={itemTitle}>{event.title}</h3>
-                    <div style={itemMeta}>
-                      <span style={metaLine}><Calendar size={14}/> {new Date(event.date).toLocaleDateString()}</span>
-                      <span style={metaLine}><MapPin size={14}/> {event.location || 'Accra, GH'}</span>
-                    </div>
-                    <button style={fullWidthBtn} onClick={() => { setSelectedEventFilter(event.id); setActiveTab('sales'); }}>
-                      VIEW TICKET SALES <ChevronRight size={16}/>
-                    </button>
-                    <button style={deleteBtn} onClick={() => deleteResource('events', event.id)}>
-                      <Trash2 size={14}/> DELETE EVENT
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
+          <div style={gridContent}>
+            {filteredEvents.length === 0 ? (
+              <div style={emptyState}>
+                <div style={emptyIllustration}><Calendar size={60} color="#f1f5f9"/></div>
+                <h3 style={emptyTitle}>No matching events found</h3>
+                <p style={emptySub}>Curate your first premium event to start generating revenue.</p>
+                <button style={emptyBtn} onClick={() => router.push('/dashboard/organizer/create')}>Build Your First Event</button>
+              </div>
+            ) : (
+              <div style={luxuryTableContainer}>
+                <table style={luxuryTable}>
+                  <thead>
+                    <tr>
+                      <th style={thStyle}>EVENT DESCRIPTION</th>
+                      <th style={thStyle}>DATE & VENUE</th>
+                      <th style={thStyle}>STATUS</th>
+                      <th style={thStyle}>NET EARNINGS (95%)</th>
+                      <th style={thStyle}>MANAGEMENT</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredEvents.map((event) => (
+                      <tr key={event.id} style={trStyle}>
+                        <td style={tdStyle}>
+                          <div style={eventBrief}>
+                            <div style={eventImagePlaceholder}>
+                               {event.image_url ? <img src={event.image_url} style={imgThumb} alt={event.title}/> : <MapPin size={20} color="#94a3b8"/>}
+                            </div>
+                            <div style={eventInfo}>
+                              <p style={eventTitleText}>{event.title}</p>
+                              <p style={eventCategory}>{event.category || 'Luxury Experience'}</p>
+                            </div>
+                          </div>
+                        </td>
+                        <td style={tdStyle}>
+                          <div style={dateBox}>
+                            <p style={dateText}>{new Date(event.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+                            <p style={venueText}>{event.location}</p>
+                          </div>
+                        </td>
+                        <td style={tdStyle}>
+                          <span style={statusBadge(event.status)}>{event.status?.toUpperCase() || 'ACTIVE'}</span>
+                        </td>
+                        <td style={tdStyle}>
+                          <div style={earningsWrapper}>
+                             <p style={tablePrice}>GHS {(data.tickets.filter(t => t.event_id === event.id).reduce((s, t) => s + (t.amount || 0), 0) * 0.95).toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
+                             <p style={earningsGross}>Gross: GHS {data.tickets.filter(t => t.event_id === event.id).reduce((s, t) => s + (t.amount || 0), 0).toLocaleString()}</p>
+                          </div>
+                        </td>
+                        <td style={tdStyle}>
+                          <div style={actionGroup}>
+                            <button title="View Dashboard" style={iconAction} onClick={() => router.push(`/dashboard/organizer/events/${event.id}`)}><Eye size={16}/></button>
+                            <button title="Edit Details" style={iconAction} onClick={() => router.push(`/dashboard/organizer/events/edit/${event.id}`)}><Settings size={16}/></button>
+                            <button title="Delete Event" style={deleteAction} onClick={() => handleDeleteEvent(event.id)}><Trash2 size={16}/></button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 
         {activeTab === 'contests' && (
-          <div style={fadeAnim}>
-            <div style={viewHeader}>
-              <h2 style={viewTitle}>Active Contests</h2>
-              <button style={addBtn} onClick={() => router.push('/dashboard/organizer/contests/create')}>
-                <Plus size={20}/> NEW CONTEST
-              </button>
-            </div>
-            <div style={cardGrid}>
-              {data.contests.map(contest => (
-                <div key={contest.id} style={contestCard}>
-                  <div style={contestHead}>
-                    <div style={contestIcon}><Award size={24} color="#0ea5e9"/></div>
-                    <div style={{flex: 1}}>
-                      <h3 style={contestTitleText}>{contest.title}</h3>
-                      <p style={contestSubText}>{contest.candidates?.length || 0} candidates registered</p>
+          <div style={gridContent}>
+            {data.contests.length === 0 ? (
+               <div style={emptyState}>
+                 <Trophy size={60} color="#f1f5f9"/>
+                 <h3 style={emptyTitle}>No active contests</h3>
+                 <p style={emptySub}>Engagement contests drive high-volume revenue splits.</p>
+               </div>
+            ) : (
+              <div style={contestGrid}>
+                {data.contests.map((contest) => (
+                  <div key={contest.id} style={contestCard}>
+                    <div style={contestHeader}>
+                      <div style={contestTitleGroup}>
+                        <h3 style={contestTitle}>{contest.title}</h3>
+                        <p style={contestSub}>{contest.candidates?.length || 0} Professional Candidates</p>
+                      </div>
+                      <div style={contestIconBox}><Award size={22} color="#0ea5e9"/></div>
                     </div>
-                  </div>
-                  <div style={voteDisplay}>
-                    <p style={voteLabelText}>VOTE COUNT</p>
-                    <p style={voteNumText}>{(contest.candidates?.reduce((a, b) => a + (b.vote_count || 0), 0)).toLocaleString()}</p>
-                  </div>
-                  <div style={contestFooter}>
-                    <button style={contestLinkBtn} onClick={() => copyLink('voting', contest.id)}>
-                      {copying === contest.id ? <Check size={14}/> : <><LinkIcon size={14}/> COPY LINK</>}
+                    
+                    <div style={contestProgressSection}>
+                       <div style={progressLabelRow}>
+                          <span>VOTING ENGAGEMENT</span>
+                          <span>{contest.candidates?.reduce((s, c) => s + (c.vote_count || 0), 0).toLocaleString()} VOTES</span>
+                       </div>
+                       <div style={progressBarBg}><div style={progressBarFill(75)}></div></div>
+                    </div>
+
+                    <div style={contestBody}>
+                      <div style={contestStat}>
+                         <span style={cStatLabel}>NET EARNINGS</span>
+                         <span style={cStatVal}>GHS {(contest.candidates?.reduce((s, c) => s + (c.vote_count || 0), 0) * 0.95).toFixed(2)}</span>
+                      </div>
+                      <div style={contestStat}>
+                         <span style={cStatLabel}>TOP CANDIDATE</span>
+                         <span style={cStatVal}>{contest.candidates?.sort((a,b) => b.vote_count - a.vote_count)[0]?.name || 'N/A'}</span>
+                      </div>
+                    </div>
+                    
+                    <button style={manageContestBtn} onClick={() => router.push(`/dashboard/organizer/contests/${contest.id}`)}>
+                      OPEN CONTEST CONTROL <ChevronRight size={16}/>
                     </button>
-                    <button style={contestDeleteBtn} onClick={() => deleteResource('contests', contest.id)}>
-                      <Trash2 size={14}/>
-                    </button>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
         {activeTab === 'sales' && (
-          <div style={fadeAnim}>
-            <div style={viewHeader}>
-              <h2 style={viewTitle}>Transaction Records</h2>
-              <div style={filterGroup}>
-                <div style={searchBox}>
-                  <Search size={18} color="#94a3b8"/>
-                  <input 
-                    style={searchInputField} 
-                    placeholder="Find attendee..." 
-                    value={ticketSearch}
-                    onChange={(e) => setTicketSearch(e.target.value)}
-                  />
-                </div>
-                <select style={eventDropdown} value={selectedEventFilter} onChange={(e) => setSelectedEventFilter(e.target.value)}>
-                  <option value="all">All Events</option>
-                  {data.events.map(e => <option key={e.id} value={e.id}>{e.title}</option>)}
-                </select>
-              </div>
-            </div>
-
-            <div style={tableWrapper}>
-              <table style={dataTable}>
-                <thead>
-                  <tr>
-                    <th style={tableTh}>ATTENDEE</th>
-                    <th style={tableTh}>EVENT</th>
-                    <th style={tableTh}>PAID</th>
-                    <th style={tableTh}>REF</th>
-                    <th style={tableTh}>STATUS</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredTickets.map((t) => (
-                    <tr key={t.id} style={tableTr}>
-                      <td style={tableTd}>
-                        <p style={guestBold}>{t.guest_name}</p>
-                        <p style={guestMuted}>{t.guest_email || 'No email'}</p>
-                      </td>
-                      <td style={tableTd}>{t.events?.title}</td>
-                      <td style={tableTd}>GHS {t.amount}</td>
-                      <td style={tableTd}><code style={codeRef}>{t.reference}</code></td>
-                      <td style={tableTd}>
-                        {t.is_scanned ? 
-                          <span style={scannedPill}>SCANNED</span> : 
-                          <span style={activePill}>ACTIVE</span>
-                        }
-                      </td>
+          <div style={gridContent}>
+            <div style={luxuryTableContainer}>
+                <table style={luxuryTable}>
+                  <thead>
+                    <tr>
+                      <th style={thStyle}>TICKET ID</th>
+                      <th style={thStyle}>EVENT REFERENCE</th>
+                      <th style={thStyle}>BUYER CREDENTIALS</th>
+                      <th style={thStyle}>TIER</th>
+                      <th style={thStyle}>NET CREDIT (95%)</th>
+                      <th style={thStyle}>TIMESTAMP</th>
+                      <th style={thStyle}>ACTIONS</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <h3 style={{marginTop: '50px', fontWeight: 900, fontSize: '18px', display: 'flex', alignItems: 'center', gap: '10px'}}>
-              <Banknote size={20} color="#0ea5e9"/> Withdrawal History
-            </h3>
-            <div style={tableWrapper}>
-              <table style={dataTable}>
-                <thead>
-                  <tr>
-                    <th style={tableTh}>DATE</th>
-                    <th style={tableTh}>AMOUNT</th>
-                    <th style={tableTh}>DESTINATION</th>
-                    <th style={tableTh}>STATUS</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.payouts.map((p) => (
-                    <tr key={p.id} style={tableTr}>
-                      <td style={tableTd}>{new Date(p.created_at).toLocaleDateString()}</td>
-                      <td style={tableTd}>GHS {p.amount}</td>
-                      <td style={tableTd}>{p.momo_number} ({p.momo_network})</td>
-                      <td style={tableTd}>
-                        <span style={statusBadge(p.status)}>{p.status.toUpperCase()}</span>
-                      </td>
-                    </tr>
-                  ))}
-                  {data.payouts.length === 0 && (
-                    <tr><td colSpan="4" style={{padding: '30px', textAlign: 'center', color: '#94a3b8'}}>No withdrawals recorded yet.</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {activeTab === 'analytics' && (
-          <div style={fadeAnim}>
-            <div style={analyticsSplash}>
-              <div style={splashIcon}><BarChart3 size={60} color="#cbd5e1"/></div>
-              <h2 style={splashTitle}>Visual Insights</h2>
-              <p style={splashText}>Comprehensive charts for ticket velocity and vote distribution are being prepared. Check back after your next 10 sales.</p>
-              <div style={growthMock}>
-                <div style={{height: '40%', width: '15%', background: '#f1f5f9', borderRadius: '10px'}}></div>
-                <div style={{height: '60%', width: '15%', background: '#f1f5f9', borderRadius: '10px'}}></div>
-                <div style={{height: '90%', width: '15%', background: '#e0f2fe', borderRadius: '10px'}}></div>
-                <div style={{height: '75%', width: '15%', background: '#f1f5f9', borderRadius: '10px'}}></div>
-                <div style={{height: '100%', width: '15%', background: '#0ea5e9', borderRadius: '10px'}}></div>
-              </div>
+                  </thead>
+                  <tbody>
+                    {filteredTickets.length === 0 ? (
+                      <tr><td colSpan="7" style={{padding: '80px', textAlign: 'center', color: '#94a3b8'}}>No transaction records found matching your query.</td></tr>
+                    ) : (
+                      filteredTickets.map((ticket) => (
+                        <tr key={ticket.id} style={trStyle}>
+                          <td style={tdStyle}><span style={ticketCode}>#{ticket.id.slice(0,10).toUpperCase()}</span></td>
+                          <td style={tdStyle}><span style={eventRefText}>{ticket.events?.title}</span></td>
+                          <td style={tdStyle}>{ticket.customer_email || 'Guest Participant'}</td>
+                          <td style={tdStyle}><span style={typeBadge}>{ticket.ticket_type || 'GENERAL'}</span></td>
+                          <td style={tdStyle}><p style={netSaleText}>GHS {(ticket.amount * 0.95).toFixed(2)}</p></td>
+                          <td style={tdStyle}>{new Date(ticket.created_at).toLocaleDateString()}</td>
+                          <td style={tdStyle}>
+                             <button style={iconAction} onClick={() => setSelectedTicket(ticket)}><QrCode size={16}/></button>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
             </div>
           </div>
         )}
       </div>
 
-      {/* --- MODALS --- */}
-      
-      {showWithdrawModal && (
-        <div style={overlay} onClick={() => setShowWithdrawModal(false)}>
-          <div style={modal} onClick={e => e.stopPropagation()}>
-            <div style={modalHead}>
-              <h2 style={modalTitle}>Request Payout</h2>
-              <button style={closeBtn} onClick={() => setShowWithdrawModal(false)}><X size={20}/></button>
-            </div>
-            <div style={modalInfoBox}>
-              <p style={infoLabel}>CURRENT WITHDRAWABLE BALANCE</p>
-              <h3 style={infoValue}>GHS {stats.availableBalance.toLocaleString()}</h3>
-            </div>
-            <div style={inputStack}>
-              <label style={fieldLabel}>WITHDRAWAL AMOUNT (GHS)</label>
-              <input 
-                type="number" 
-                style={bigInput} 
-                placeholder="0.00" 
-                value={withdrawAmount}
-                onChange={(e) => setWithdrawAmount(e.target.value)}
-              />
-              <p style={inputHint}>Funds will be sent to <b>{momoConfig.number || 'No MoMo set'}</b></p>
-            </div>
-            <div style={securityNote}>
-              <ShieldCheck size={16} color="#16a34a"/>
-              <span>Secure 256-bit encrypted transaction</span>
-            </div>
-            <button 
-              style={actionSubmitBtn(isProcessing || !withdrawAmount)} 
-              onClick={submitWithdrawal}
-              disabled={isProcessing || !withdrawAmount}
-            >
-              {isProcessing ? <Loader2 className="animate-spin"/> : 'CONFIRM WITHDRAWAL'}
-            </button>
-          </div>
+      {/* Footer Branding */}
+      <div style={footerBranding}>
+        <p>© 2025 OUSTED PREMIUM TICKETING. ALL RIGHTS RESERVED.</p>
+        <div style={footerLinks}>
+           <a href="#">Support</a>
+           <a href="#">Merchant Terms</a>
+           <a href="#">API Docs</a>
         </div>
-      )}
-
-      {showSettingsModal && (
-        <div style={overlay} onClick={() => setShowSettingsModal(false)}>
-          <div style={modal} onClick={e => e.stopPropagation()}>
-            <div style={modalHead}>
-              <h2 style={modalTitle}>Payout Setup</h2>
-              <button style={closeBtn} onClick={() => setShowSettingsModal(false)}><X size={20}/></button>
-            </div>
-
-            {/* PAYSTACK ONBOARDING ACCESS */}
-            <div style={onboardingPromo}>
-              <div style={{flex: 1}}>
-                <h4 style={{margin: 0, fontSize: '14px', fontWeight: 900}}>Automatic Ticket Splits</h4>
-                <p style={{margin: '5px 0 0', fontSize: '12px', color: '#64748b'}}>Onboard with Paystack to receive your 95% share of ticket sales instantly.</p>
-              </div>
-              <button 
-                style={onboardBtn} 
-                onClick={() => router.push('/dashboard/organizer/onboarding')}
-              >
-                ONBOARD NOW <ChevronRight size={16}/>
-              </button>
-            </div>
-
-            <div style={{height: '1px', background: '#f1f5f9', margin: '20px 0'}} />
-
-            <div style={inputStack}>
-              <label style={fieldLabel}>ACCOUNT HOLDER NAME</label>
-              <input 
-                style={modalInput} 
-                placeholder="Full Name as on ID"
-                value={momoConfig.accountName}
-                onChange={(e) => setMomoConfig({...momoConfig, accountName: e.target.value})}
-              />
-            </div>
-            <div style={inputStack}>
-              <label style={fieldLabel}>NETWORK</label>
-              <select 
-                style={modalInput}
-                value={momoConfig.network}
-                onChange={(e) => setMomoConfig({...momoConfig, network: e.target.value})}
-              >
-                <option value="MTN">MTN Mobile Money</option>
-                <option value="VODAFONE">Vodafone Cash</option>
-                <option value="AIRTELTIGO">AirtelTigo Money</option>
-              </select>
-            </div>
-            <div style={inputStack}>
-              <label style={fieldLabel}>PHONE NUMBER (FOR VOTING PAYOUTS)</label>
-              <input 
-                style={modalInput} 
-                placeholder="05XXXXXXXX"
-                value={momoConfig.number}
-                onChange={(e) => setMomoConfig({...momoConfig, number: e.target.value})}
-              />
-            </div>
-            <button style={actionSubmitBtn(isProcessing)} onClick={updateMomoSettings}>
-              {isProcessing ? <Loader2 className="animate-spin"/> : 'SAVE PREFERENCES'}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {showQR && (
-        <div style={overlay} onClick={() => setShowQR(null)}>
-          <div style={qrContent} onClick={e => e.stopPropagation()}>
-            <h3 style={{marginBottom: '20px', fontWeight: 900}}>Share QR Code</h3>
-            <div style={qrBorder}>
-               <img src={showQR} style={{width: '100%'}} alt="QR"/>
-            </div>
-            <button style={downloadBtn} onClick={() => window.open(showQR)}>
-              <Download size={18}/> DOWNLOAD IMAGE
-            </button>
-          </div>
-        </div>
-      )}
+      </div>
     </div>
   );
 }
 
-// --- UPDATED LUXURY STYLES (REQUIRED FOR THE NEW SECTION) ---
+// --- 8. EXHAUSTIVE LUXURY STYLING ---
 
-const mainWrapper = { padding: '40px 20px 100px', maxWidth: '1280px', margin: '0 auto', background: '#fcfdfe', minHeight: '100vh', fontFamily: '"Inter", sans-serif' };
-const topNav = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '50px' };
-const logoText = { fontSize: '24px', fontWeight: 950, letterSpacing: '-1.5px', margin: 0 };
-const badgePro = { background: '#000', color: '#fff', fontSize: '10px', padding: '4px 8px', borderRadius: '6px', verticalAlign: 'middle', marginLeft: '10px' };
-const headerActions = { display: 'flex', gap: '15px', alignItems: 'center' };
-const userBrief = { textAlign: 'right' };
-const userEmail = { margin: 0, fontSize: '14px', fontWeight: 700 };
-const userRole = { margin: 0, fontSize: '11px', color: '#94a3b8', fontWeight: 600 };
-const circleAction = { width: '45px', height: '45px', borderRadius: '15px', border: '1px solid #e2e8f0', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#64748b' };
-const logoutCircle = { width: '45px', height: '45px', borderRadius: '15px', border: 'none', background: '#fff1f2', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#e11d48' };
+const mainWrapper = { 
+  padding: '40px 20px', 
+  maxWidth: '1300px', 
+  margin: '0 auto', 
+  fontFamily: '"Inter", -apple-system, sans-serif',
+  color: '#000',
+  minHeight: '100vh',
+  backgroundColor: '#fcfcfc'
+};
 
-const financeGrid = { display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '25px', marginBottom: '50px' };
-const balanceCard = { background: '#000', borderRadius: '35px', padding: '40px', color: '#fff', boxShadow: '0 20px 40px rgba(0,0,0,0.1)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' };
-const financeLabel = { fontSize: '11px', fontWeight: 800, color: '#666', letterSpacing: '1px', margin: '0 0 10px' };
-const balanceValue = { fontSize: '48px', fontWeight: 950, margin: 0, letterSpacing: '-2px' };
-const pendingTag = { display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#0ea5e9', marginTop: '10px', fontWeight: 600 };
-const iconCircleLarge = { width: '70px', height: '70px', borderRadius: '25px', background: 'rgba(14, 165, 233, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' };
-const financeActionRow = { display: 'flex', gap: '12px', marginTop: '30px' };
-const withdrawBtn = { flex: 1, background: '#fff', color: '#000', border: 'none', padding: '16px', borderRadius: '18px', fontWeight: 900, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', fontSize: '14px' };
-const settingsIconBtn = { width: '55px', background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '18px', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' };
+const topNav = { 
+  display: 'flex', 
+  justifyContent: 'space-between', 
+  alignItems: 'center', 
+  marginBottom: '50px',
+  flexWrap: 'wrap',
+  gap: '20px'
+};
 
-const statsOverview = { display: 'grid', gridTemplateColumns: 'repeat(1, 1fr)', gap: '15px' };
-const statBox = { background: '#fff', padding: '20px 30px', borderRadius: '25px', border: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' };
-const statLabel = { margin: 0, fontSize: '11px', fontWeight: 800, color: '#94a3b8' };
-const statNumber = { margin: '5px 0 0', fontSize: '22px', fontWeight: 900 };
+const logoSection = { display: 'flex', alignItems: 'center' };
+const logoText = { fontSize: '26px', fontWeight: 950, letterSpacing: '-1.8px', display: 'flex', alignItems: 'center' };
+const badgePro = { background: '#000', color: '#fff', fontSize: '10px', padding: '5px 12px', borderRadius: '8px', marginLeft: '12px', letterSpacing: '1.2px', fontWeight: 900 };
 
-const tabBar = { display: 'flex', gap: '30px', borderBottom: '1px solid #e2e8f0', marginBottom: '40px' };
-const tabItem = (active) => ({ padding: '15px 5px', background: 'none', border: 'none', color: active ? '#000' : '#94a3b8', fontSize: '13px', fontWeight: 800, cursor: 'pointer', borderBottom: active ? '3px solid #0ea5e9' : '3px solid transparent', display: 'flex', alignItems: 'center', gap: '10px', transition: '0.2s' });
+const headerActions = { display: 'flex', alignItems: 'center', gap: '15px', flexWrap: 'wrap' };
+const searchWrapper = { position: 'relative', minWidth: '280px' };
+const searchIcon = { position: 'absolute', left: '15px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' };
+const searchInput = { width: '100%', padding: '12px 15px 12px 45px', borderRadius: '15px', border: '1px solid #f1f5f9', background: '#fff', fontSize: '14px', outline: 'none', transition: 'all 0.2s ease' };
 
-const viewPort = { minHeight: '400px' };
-const fadeAnim = { animation: 'fadeIn 0.4s ease-out' };
-const viewHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px', flexWrap: 'wrap', gap: '20px' };
-const viewTitle = { margin: 0, fontSize: '24px', fontWeight: 900 };
-const addBtn = { background: '#0ea5e9', color: '#fff', border: 'none', padding: '14px 24px', borderRadius: '15px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px', fontSize: '13px' };
+const userBrief = { textAlign: 'right', marginRight: '5px' };
+const userEmail = { margin: 0, fontSize: '13px', fontWeight: 800 };
+const userRole = { margin: 0, fontSize: '11px', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px', fontWeight: 700 };
 
-const cardGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '25px' };
-const itemCard = { background: '#fff', borderRadius: '30px', border: '1px solid #f1f5f9', overflow: 'hidden', transition: 'transform 0.2s' };
-const itemImage = (url) => ({ height: '180px', background: url ? `url(${url}) center/cover` : '#f8fafc', position: 'relative' });
-const cardQuickActions = { position: 'absolute', top: '15px', right: '15px', display: 'flex', gap: '8px' };
-const miniAction = { width: '35px', height: '35px', borderRadius: '10px', background: 'rgba(255,255,255,0.9)', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#000' };
-const itemBody = { padding: '25px' };
-const itemTitle = { margin: '0 0 10px', fontSize: '18px', fontWeight: 900 };
-const itemMeta = { display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' };
-const metaLine = { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#64748b', fontWeight: 500 };
-const fullWidthBtn = { width: '100%', background: '#f8fafc', border: '1px solid #e2e8f0', padding: '12px', borderRadius: '12px', fontWeight: 700, fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px' };
-const deleteBtn = { background: 'none', border: 'none', color: '#fca5a5', fontSize: '11px', fontWeight: 700, cursor: 'pointer', marginTop: '15px', display: 'block', width: '100%' };
+const circleAction = { width: '48px', height: '48px', borderRadius: '16px', border: '1px solid #f1f5f9', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', transition: 'all 0.3s' };
+const logoutCircle = { width: '48px', height: '48px', borderRadius: '16px', border: 'none', background: '#fff1f2', color: '#e11d48', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
 
-const contestCard = { background: '#fff', padding: '25px', borderRadius: '30px', border: '1px solid #f1f5f9' };
-const contestHead = { display: 'flex', gap: '15px', alignItems: 'center', marginBottom: '20px' };
-const contestIcon = { width: '50px', height: '50px', borderRadius: '15px', background: '#f0f9ff', display: 'flex', alignItems: 'center', justifyContent: 'center' };
-const contestTitleText = { margin: 0, fontSize: '16px', fontWeight: 900 };
-const contestSubText = { margin: 0, fontSize: '12px', color: '#94a3b8', fontWeight: 500 };
-const voteDisplay = { background: '#f8fafc', padding: '15px 20px', borderRadius: '20px', marginBottom: '20px' };
-const voteLabelText = { margin: 0, fontSize: '10px', fontWeight: 800, color: '#94a3b8', letterSpacing: '0.5px' };
-const voteNumText = { margin: 0, fontSize: '24px', fontWeight: 950 };
-const contestFooter = { display: 'flex', gap: '10px' };
-const contestLinkBtn = { flex: 1, background: '#fff', border: '1px solid #e2e8f0', padding: '10px', borderRadius: '12px', fontSize: '11px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' };
-const contestDeleteBtn = { width: '40px', height: '40px', background: '#fff1f2', border: 'none', borderRadius: '12px', color: '#e11d48', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
+// FINANCE CARDS
+const financeGrid = { display: 'grid', gridTemplateColumns: '1.7fr 1fr', gap: '30px', marginBottom: '60px' };
+const balanceCard = { background: '#000', borderRadius: '45px', padding: '50px', color: '#fff', boxShadow: '0 35px 70px -15px rgba(0, 0, 0, 0.3)', position: 'relative', overflow: 'hidden' };
+const cardDecoration = { position: 'absolute', top: '-100px', right: '-100px', width: '300px', height: '300px', background: 'radial-gradient(circle, rgba(255,255,255,0.05) 0%, transparent 70%)', borderRadius: '50%' };
+const cardHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'center' };
+const financeLabel = { fontSize: '13px', fontWeight: 800, color: '#525252', letterSpacing: '2.5px' };
+const statusDot = { background: '#22c55e', color: '#fff', fontSize: '10px', padding: '5px 14px', borderRadius: '20px', fontWeight: 950 };
+const balanceValue = { fontSize: '64px', fontWeight: 950, margin: '25px 0', letterSpacing: '-3px' };
+const revenueBreakdown = { borderTop: '1px solid #262626', paddingTop: '25px', marginTop: '25px', display: 'flex', flexDirection: 'column', gap: '12px' };
+const breakdownItem = { display: 'flex', justifyContent: 'space-between', fontSize: '14px' };
+const breakdownLabel = { color: '#737373', fontWeight: 500 };
+const breakdownValue = { fontWeight: 700, color: '#e5e5e5' };
+const financeActionRow = { display: 'flex', gap: '15px', marginTop: '45px' };
+const withdrawBtn = { flex: 1, background: '#fff', color: '#000', border: 'none', padding: '20px', borderRadius: '22px', fontWeight: 900, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', fontSize: '15px', transition: 'transform 0.2s' };
+const settingsIconBtn = { width: '60px', background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: '22px', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' };
 
-const filterGroup = { display: 'flex', gap: '15px' };
-const searchBox = { background: '#f1f5f9', borderRadius: '12px', padding: '0 15px', display: 'flex', alignItems: 'center', gap: '10px' };
-const searchInputField = { background: 'none', border: 'none', padding: '12px 0', fontSize: '13px', fontWeight: 600, outline: 'none', width: '200px' };
-const eventDropdown = { background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '0 15px', fontSize: '13px', fontWeight: 700 };
+const statsOverview = { display: 'flex', flexDirection: 'column', gap: '20px' };
+const statBox = { background: '#fff', padding: '35px', borderRadius: '35px', border: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 10px 20px -5px rgba(0, 0, 0, 0.03)' };
+const statIconBox = { width: '55px', height: '55px', background: '#f8fafc', borderRadius: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center' };
+const statInfo = { display: 'flex', flexDirection: 'column' };
+const statLabel = { fontSize: '12px', fontWeight: 800, color: '#94a3b8', letterSpacing: '1.2px', margin: 0 };
+const statNumber = { fontSize: '32px', fontWeight: 950, margin: '8px 0 0', letterSpacing: '-1px' };
+const balanceMiniBox = { background: '#f0f9ff', padding: '22px 35px', borderRadius: '28px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid #e0f2fe' };
+const miniLabel = { fontSize: '12px', fontWeight: 900, color: '#0ea5e9', letterSpacing: '0.5px' };
+const miniValue = { fontSize: '20px', fontWeight: 950, color: '#0ea5e9' };
 
-const tableWrapper = { background: '#fff', borderRadius: '25px', border: '1px solid #f1f5f9', overflow: 'hidden', marginTop: '20px' };
-const dataTable = { width: '100%', borderCollapse: 'collapse', textAlign: 'left' };
-const tableTh = { padding: '20px', fontSize: '11px', fontWeight: 800, color: '#94a3b8', borderBottom: '1px solid #f1f5f9' };
-const tableTr = { borderBottom: '1px solid #f8fafc' };
-const tableTd = { padding: '20px', fontSize: '13px', fontWeight: 600 };
-const guestBold = { margin: 0, fontWeight: 800 };
-const guestMuted = { margin: 0, fontSize: '11px', color: '#94a3b8' };
-const codeRef = { background: '#f1f5f9', padding: '4px 8px', borderRadius: '6px', fontSize: '11px' };
-const activePill = { background: '#f0fdf4', color: '#16a34a', padding: '6px 12px', borderRadius: '20px', fontSize: '11px', fontWeight: 800 };
-const scannedPill = { background: '#f1f5f9', color: '#94a3b8', padding: '6px 12px', borderRadius: '20px', fontSize: '11px', fontWeight: 800 };
-const statusBadge = (s) => ({ background: s === 'success' ? '#f0fdf4' : '#fff7ed', color: s === 'success' ? '#16a34a' : '#f97316', padding: '4px 10px', borderRadius: '8px', fontSize: '10px', fontWeight: 800 });
+// TABS
+const tabContainer = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '35px', borderBottom: '1px solid #f1f5f9', flexWrap: 'wrap', gap: '20px' };
+const tabBar = { display: 'flex', gap: '45px' };
+const tabItem = (active) => ({ padding: '25px 0', background: 'none', border: 'none', color: active ? '#000' : '#94a3b8', fontSize: '14px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '12px', borderBottom: active ? '4px solid #000' : '4px solid transparent', transition: 'all 0.3s ease' });
+const tabActions = { display: 'flex', gap: '15px' };
+const secondaryBtn = { background: '#fff', color: '#000', border: '1px solid #e2e8f0', padding: '12px 24px', borderRadius: '16px', fontWeight: 800, fontSize: '13px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px' };
+const addBtn = { background: '#000', color: '#fff', border: 'none', padding: '14px 28px', borderRadius: '18px', fontWeight: 900, fontSize: '13px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px', boxShadow: '0 10px 20px rgba(0,0,0,0.1)' };
 
-const analyticsSplash = { textAlign: 'center', padding: '100px 20px' };
-const splashIcon = { marginBottom: '30px' };
-const splashTitle = { fontSize: '28px', fontWeight: 950, margin: '0 0 10px' };
-const splashText = { color: '#64748b', maxWidth: '400px', margin: '0 auto 40px', fontSize: '14px', lineHeight: 1.6 };
-const growthMock = { display: 'flex', alignItems: 'flex-end', justifyContent: 'center', gap: '15px', height: '150px' };
+// TABLE & LISTS
+const luxuryTableContainer = { background: '#fff', borderRadius: '35px', border: '1px solid #f1f5f9', overflow: 'hidden', boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.02)' };
+const luxuryTable = { width: '100%', borderCollapse: 'collapse', textAlign: 'left' };
+const thStyle = { padding: '22px 30px', background: '#fafafa', fontSize: '12px', fontWeight: 900, color: '#94a3b8', letterSpacing: '1.2px', textTransform: 'uppercase' };
+const trStyle = { borderBottom: '1px solid #f8fafc', transition: 'background 0.2s' };
+const tdStyle = { padding: '30px' };
 
-const overlay = { position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(8px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' };
-const modal = { background: '#fff', width: '90%', maxWidth: '450px', borderRadius: '35px', padding: '40px', boxShadow: '0 30px 60px rgba(0,0,0,0.2)' };
-const modalHead = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' };
-const modalTitle = { fontSize: '20px', fontWeight: 950, margin: 0 };
+const eventBrief = { display: 'flex', alignItems: 'center', gap: '20px' };
+const eventImagePlaceholder = { width: '60px', height: '60px', background: '#f1f5f9', borderRadius: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' };
+const imgThumb = { width: '100%', height: '100%', objectFit: 'cover' };
+const eventInfo = { display: 'flex', flexDirection: 'column', gap: '4px' };
+const eventTitleText = { margin: 0, fontWeight: 900, fontSize: '16px', color: '#1a1a1a' };
+const eventCategory = { margin: 0, fontSize: '12px', color: '#94a3b8', fontWeight: 600 };
+const dateBox = { display: 'flex', flexDirection: 'column', gap: '4px' };
+const dateText = { margin: 0, fontWeight: 800, fontSize: '14px' };
+const venueText = { margin: 0, fontSize: '12px', color: '#94a3b8', fontWeight: 500 };
+const earningsWrapper = { display: 'flex', flexDirection: 'column', gap: '2px' };
+const tablePrice = { fontWeight: 950, fontSize: '18px', margin: 0 };
+const earningsGross = { margin: 0, fontSize: '11px', color: '#94a3b8', fontWeight: 600 };
+const actionGroup = { display: 'flex', gap: '10px' };
+const iconAction = { width: '40px', height: '40px', borderRadius: '12px', border: '1px solid #f1f5f9', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', transition: 'all 0.2s' };
+const deleteAction = { ...iconAction, color: '#e11d48', borderColor: '#fee2e2', background: '#fff1f2' };
+const statusBadge = (s) => ({ padding: '7px 15px', borderRadius: '10px', fontSize: '11px', fontWeight: 900, background: s === 'active' ? '#f0fdf4' : '#fff7ed', color: s === 'active' ? '#16a34a' : '#ea580c' });
+
+// ONBOARDING
+const onboardingContainer = { maxWidth: '900px', margin: '0 auto', animation: 'fadeIn 0.7s ease-out' };
+const onboardHero = { background: '#fff', border: '1px solid #f1f5f9', borderRadius: '55px', padding: '100px 50px', textAlign: 'center', marginBottom: '60px', boxShadow: '0 30px 60px -12px rgba(0,0,0,0.05)' };
+const heroDecoration = { marginBottom: '35px', display: 'inline-block', padding: '25px', background: '#f0f9ff', borderRadius: '30px' };
+const onboardTitle = { fontSize: '48px', fontWeight: 950, margin: '0 0 25px', letterSpacing: '-2.5px' };
+const onboardSub = { color: '#64748b', fontSize: '19px', maxWidth: '600px', margin: '0 auto 50px', lineHeight: 1.7 };
+const primaryOnboardBtn = { background: '#000', color: '#fff', border: 'none', padding: '26px 55px', borderRadius: '25px', fontWeight: 950, fontSize: '17px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '18px', margin: '0 auto', boxShadow: '0 15px 30px rgba(0,0,0,0.15)' };
+
+const onboardInfoSection = { padding: '0 20px' };
+const sectionHeading = { fontSize: '13px', fontWeight: 900, letterSpacing: '2.5px', color: '#94a3b8', textTransform: 'uppercase', textAlign: 'center', marginBottom: '40px' };
+const howItWorksGrid = { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '25px', marginBottom: '60px' };
+const howCard = { background: '#fff', padding: '40px', borderRadius: '40px', border: '1px solid #f1f5f9' };
+const howIcon = { width: '60px', height: '60px', background: '#f8fafc', borderRadius: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '30px', color: '#0ea5e9' };
+const howTitle = { fontSize: '20px', fontWeight: 900, margin: '0 0 15px' };
+const howText = { fontSize: '15px', color: '#64748b', lineHeight: 1.7, margin: 0 };
+const commissionNotice = { background: '#fff', padding: '30px 45px', borderRadius: '35px', display: 'flex', alignItems: 'center', gap: '25px', border: '1px solid #e0f2fe' };
+
+// MODALS
+const modalOverlay = { position: 'fixed', top: 0, left: 0, width: '100%', height: '100%', background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 };
+const modalContent = { background: '#fff', width: '90%', maxWidth: '450px', borderRadius: '40px', padding: '40px', position: 'relative', animation: 'slideUp 0.3s ease-out' };
+const modalHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' };
+const modalTitle = { fontSize: '22px', fontWeight: 950, margin: 0, letterSpacing: '-1px' };
 const closeBtn = { background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' };
-const modalInfoBox = { background: '#f8fafc', padding: '25px', borderRadius: '22px', marginBottom: '30px' };
-const infoLabel = { fontSize: '10px', fontWeight: 800, color: '#94a3b8', margin: '0 0 5px' };
-const infoValue = { fontSize: '28px', fontWeight: 950, margin: 0 };
-const inputStack = { display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' };
-const fieldLabel = { fontSize: '10px', fontWeight: 800, color: '#64748b' };
-const bigInput = { width: '100%', border: 'none', borderBottom: '2px solid #f1f5f9', padding: '15px 0', fontSize: '32px', fontWeight: 950, outline: 'none' };
-const modalInput = { width: '100%', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '15px', fontSize: '14px', fontWeight: 600 };
-const inputHint = { fontSize: '12px', color: '#94a3b8', margin: '10px 0 0' };
-const securityNote = { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', color: '#16a34a', fontWeight: 700, margin: '20px 0' };
-const actionSubmitBtn = (disabled) => ({ width: '100%', background: disabled ? '#f1f5f9' : '#000', color: disabled ? '#94a3b8' : '#fff', border: 'none', padding: '18px', borderRadius: '18px', fontWeight: 900, cursor: disabled ? 'not-allowed' : 'pointer', fontSize: '14px', marginTop: '10px' });
+const modalBody = { marginBottom: '35px' };
+const ticketPreviewCard = { background: '#fafafa', borderRadius: '30px', border: '2px dashed #e2e8f0', padding: '30px' };
+const previewTop = { display: 'flex', justifyContent: 'space-between', marginBottom: '30px' };
+const previewEventName = { fontWeight: 900, fontSize: '18px', margin: 0 };
+const previewStatus = { fontSize: '10px', fontWeight: 900, background: '#000', color: '#fff', padding: '4px 10px', borderRadius: '6px' };
+const previewMid = { display: 'flex', gap: '20px', alignItems: 'center', paddingBottom: '30px', borderBottom: '1px solid #e2e8f0', marginBottom: '30px' };
+const previewInfo = { display: 'flex', flexDirection: 'column' };
+const previewLabel = { fontSize: '10px', color: '#94a3b8', fontWeight: 800, margin: 0 };
+const previewValue = { fontSize: '13px', fontWeight: 700, margin: '2px 0 0' };
+const previewBottom = { display: 'flex', justifyContent: 'space-between' };
+const previewStat = { display: 'flex', flexDirection: 'column' };
+const modalActionBtn = { width: '100%', padding: '20px', background: '#000', color: '#fff', border: 'none', borderRadius: '20px', fontWeight: 900, fontSize: '15px', cursor: 'pointer' };
 
-const qrContent = { background: '#fff', padding: '40px', borderRadius: '35px', textAlign: 'center', width: '350px' };
-const qrBorder = { padding: '20px', border: '2px solid #f1f5f9', borderRadius: '25px', marginBottom: '25px' };
-const downloadBtn = { width: '100%', background: '#0ea5e9', color: '#fff', border: 'none', padding: '16px', borderRadius: '18px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' };
-const fullPageCenter = { height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#fcfdfe' };
+// CONTESTS
+const contestGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '30px' };
+const contestCard = { background: '#fff', borderRadius: '40px', border: '1px solid #f1f5f9', padding: '40px', transition: 'transform 0.2s' };
+const contestHeader = { display: 'flex', justifyContent: 'space-between', marginBottom: '30px' };
+const contestTitleGroup = { display: 'flex', flexDirection: 'column', gap: '5px' };
+const contestTitle = { margin: 0, fontSize: '22px', fontWeight: 950, letterSpacing: '-0.5px' };
+const contestSub = { margin: 0, fontSize: '12px', color: '#94a3b8', fontWeight: 700 };
+const contestIconBox = { width: '50px', height: '50px', background: '#f0f9ff', borderRadius: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center' };
+const contestProgressSection = { marginBottom: '35px' };
+const progressLabelRow = { display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontWeight: 900, color: '#0ea5e9', marginBottom: '12px', letterSpacing: '0.5px' };
+const progressBarBg = { height: '8px', background: '#f1f5f9', borderRadius: '10px', overflow: 'hidden' };
+const progressBarFill = (w) => ({ height: '100%', width: `${w}%`, background: '#0ea5e9', borderRadius: '10px' });
+const contestBody = { display: 'flex', gap: '35px', marginBottom: '40px', padding: '25px', background: '#fafafa', borderRadius: '25px' };
+const contestStat = { display: 'flex', flexDirection: 'column', gap: '5px' };
+const cStatLabel = { fontSize: '10px', fontWeight: 800, color: '#94a3b8', letterSpacing: '1px' };
+const cStatVal = { fontSize: '22px', fontWeight: 950, color: '#1a1a1a' };
+const manageContestBtn = { width: '100%', background: '#fff', border: '1px solid #e2e8f0', padding: '18px', borderRadius: '20px', fontWeight: 900, fontSize: '13px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' };
 
-// NEW ONBOARDING STYLES
-const onboardingPromo = { background: '#e0f2fe', padding: '20px', borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '15px' };
-const onboardBtn = { background: '#0ea5e9', color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '12px', fontWeight: 800, fontSize: '11px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', whiteSpace: 'nowrap' };
+// UTILS & LOADER
+const fullPageCenter = { height: '100vh', width: '100vw', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff' };
+const loaderContainer = { textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center' };
+const luxuryLoaderRing = { width: '60px', height: '60px', border: '4px solid #f3f3f3', borderTop: '4px solid #000', borderRadius: '50%', animation: 'spin 1s linear infinite', marginBottom: '25px' };
+const loadingLogo = { fontSize: '28px', fontWeight: 950, letterSpacing: '6px', margin: '0 0 10px' };
+const loadingText = { fontSize: '12px', fontWeight: 800, color: '#94a3b8', letterSpacing: '2px' };
+
+const ticketCode = { fontFamily: 'monospace', background: '#f1f5f9', padding: '6px 10px', borderRadius: '8px', fontSize: '12px', fontWeight: 700, color: '#475569' };
+const typeBadge = { padding: '4px 10px', borderRadius: '6px', fontSize: '10px', fontWeight: 900, background: '#f8fafc', border: '1px solid #e2e8f0' };
+const eventRefText = { fontWeight: 700, color: '#000' };
+const netSaleText = { fontWeight: 900, color: '#16a34a', margin: 0 };
+const emptyState = { textAlign: 'center', padding: '120px 0', display: 'flex', flexDirection: 'column', alignItems: 'center' };
+const emptyIllustration = { marginBottom: '30px', opacity: 0.5 };
+const emptyTitle = { fontSize: '22px', fontWeight: 900, margin: '0 0 10px' };
+const emptySub = { color: '#94a3b8', fontSize: '15px', marginBottom: '30px' };
+const emptyBtn = { background: '#000', color: '#fff', border: 'none', padding: '16px 35px', borderRadius: '15px', fontWeight: 800, cursor: 'pointer' };
+
+const footerBranding = { marginTop: '100px', borderTop: '1px solid #f1f5f9', paddingTop: '40px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '40px' };
+const footerLinks = { display: 'flex', gap: '30px' };
