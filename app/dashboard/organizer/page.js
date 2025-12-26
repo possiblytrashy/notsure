@@ -742,3 +742,7 @@ const fieldLabel = { fontSize: '9px', fontWeight: 900, color: '#94a3b8', letterS
 const modalInput = { padding: '14px', borderRadius: '12px', border: '1px solid #eee', fontSize: '14px', outline: 'none', fontWeight: 600 };
 const actionSubmitBtn = (p) => ({ padding: '16px', background: '#000', color: '#fff', border: 'none', borderRadius: '14px', fontWeight: 800, cursor: p ? 'not-allowed' : 'pointer', fontSize: '13px' });
 const emptyState = { padding: '60px', textAlign: 'center', background: '#fff', borderRadius: '24px', border: '1px dashed #eee', color: '#94a3b8', fontWeight: 600 };
+const handleLogout = async () => {
+    await supabase.auth.signOut();
+    router.push('/login');
+  };
