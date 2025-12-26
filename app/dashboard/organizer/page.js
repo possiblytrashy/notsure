@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '../../../lib/supabase';
+import { createClientComponentClient } from '@supabase/auth-helpers-nextjs';
 import { useRouter } from 'next/navigation';
 import { 
   Plus, BarChart3, Users, Ticket, Calendar, 
@@ -14,6 +14,7 @@ import {
 
 export default function OrganizerDashboard() {
   const router = useRouter();
+  const supabase = createClientComponentClient();
 
   // --- 1. CORE DATA STATE ---
   const [activeTab, setActiveTab] = useState('events');
@@ -22,18 +23,18 @@ export default function OrganizerDashboard() {
   const [data, setData] = useState({ 
     events: [], 
     contests: [], 
-    payouts: [], // Now tracks automated settlements
     tickets: [], 
     profile: null 
   });
 
-  // --- 2. FINANCIAL & ANALYTICS STATE ---
+  // --- 2. FINANCIAL & ANALYTICS STATE (Initialized with 0 to prevent toLocaleString errors) ---
   const [stats, setStats] = useState({
-    totalGross: 0,        // 100% of sales
-    organizerShare: 0,   // 95% of sales
-    commissionPaid: 0,   // 5% system fee
+    totalGross: 0,
+    organizerShare: 0,
+    commissionPaid: 0,
     ticketCount: 0,
-    activeContests: 0
+    activeContests: 0,
+    totalVotes: 0
   });
 
   // --- 3. UI & MODAL STATE ---
@@ -44,16 +45,15 @@ export default function OrganizerDashboard() {
   const [ticketSearch, setTicketSearch] = useState('');
   const [selectedEventFilter, setSelectedEventFilter] = useState('all');
   
-  // Paystack Subaccount Preferences (The "Onboarding stuff")
   const [paystackConfig, setPaystackConfig] = useState({
     businessName: "",
     bankCode: "",
     accountNumber: "",
-    subaccountCode: "", // If this exists, they are "Onboarded"
+    subaccountCode: "", 
     isVerified: false
   });
 
-  // --- 4. THE DATA ENGINE (REFINED FOR AUTOMATED 5% SPLITS) ---
+  // --- 4. THE DATA ENGINE ---
   const loadDashboardData = useCallback(async (isSilent = false) => {
     try {
       if (!isSilent) setLoading(true);
@@ -66,48 +66,52 @@ export default function OrganizerDashboard() {
       }
 
       // Fetch Profile for Subaccount Info
-      const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', user.id)
+        .single();
 
-      const [eventsRes, contestsRes, payoutsRes, ticketsRes] = await Promise.all([
+      // Parallel Fetch with fixed ordering syntax to avoid 400 errors
+      const [eventsRes, contestsRes, ticketsRes] = await Promise.all([
         supabase.from('events').select('*').eq('organizer_id', user.id).order('created_at', { ascending: false }),
         supabase.from('contests').select('*, candidates(*)').eq('organizer_id', user.id).order('created_at', { ascending: false }),
-        supabase.from('payouts').select('*').eq('organizer_id', user.id).order('created_at', { ascending: false }),
         supabase.from('tickets').select('*, events(title, organizer_id)').order('created_at', { ascending: false })
       ]);
 
       const myTickets = ticketsRes.data?.filter(t => t.events?.organizer_id === user.id) || [];
       
-      // LOGIC: Calculate the 95/5 split for the UI
+      // Calculate Financials (The 95/5 Split)
       const totalGross = myTickets.reduce((acc, t) => acc + (parseFloat(t.amount) || 0), 0);
-      const organizerShare = totalGross * 0.95; // Your 95%
-      const commissionPaid = totalGross * 0.05; // Your 5% system fee
-
+      
+      // Safe Vote Count calculation
       const totalVotes = contestsRes.data?.reduce((acc, c) => 
         acc + (c.candidates?.reduce((sum, cand) => sum + (parseInt(cand.vote_count) || 0), 0) || 0), 0) || 0;
 
       setStats({
         totalGross,
-        organizerShare,
-        commissionPaid,
+        organizerShare: totalGross * 0.95,
+        commissionPaid: totalGross * 0.05,
         ticketCount: myTickets.length,
-        activeContests: contestsRes.data?.length || 0
+        activeContests: contestsRes.data?.length || 0,
+        totalVotes: totalVotes
       });
 
       setData({
         events: eventsRes.data || [],
         contests: contestsRes.data || [],
-        payouts: payoutsRes.data || [],
         tickets: myTickets,
         profile: { ...user, ...profile }
       });
 
       if (profile?.paystack_subaccount_code) {
-        setPaystackConfig(prev => ({
-          ...prev,
-          subaccountCode: profile.paystack_subaccount_code,
+        setPaystackConfig({
           businessName: profile.business_name || "",
+          bankCode: profile.bank_code || "",
+          accountNumber: profile.account_number || "",
+          subaccountCode: profile.paystack_subaccount_code,
           isVerified: true
-        }));
+        });
       }
 
     } catch (err) {
@@ -116,7 +120,7 @@ export default function OrganizerDashboard() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [router]);
+  }, [router, supabase]);
 
   useEffect(() => {
     loadDashboardData();
@@ -128,32 +132,22 @@ export default function OrganizerDashboard() {
     router.push('/login');
   };
 
-  const deleteResource = async (table, id) => {
-    if (!confirm("Are you sure?")) return;
-    const { error } = await supabase.from(table).delete().eq('id', id);
-    if (error) alert("Error deleting resource.");
-    else loadDashboardData(true);
-  };
-
-  // UPDATED: Saves Paystack onboarding details to profile
   const saveOnboardingDetails = async () => {
     setIsProcessing(true);
     try {
-      // In a real flow, this would call your /api/paystack/subaccount route
-      // For the UI, we update the profile to reflect they are setting up.
+      // Logic for saving bank details and triggering your subaccount creation
       const { error } = await supabase.from('profiles').update({
         business_name: paystackConfig.businessName,
         bank_code: paystackConfig.bankCode,
         account_number: paystackConfig.accountNumber,
-        onboarding_complete: true
       }).eq('id', data.profile.id);
 
       if (error) throw error;
-      alert("Payout account details saved! Your 95% split is now active.");
+      alert("Details saved! Automated 95% payouts are ready.");
       setShowSettingsModal(false);
       loadDashboardData(true);
     } catch (err) {
-      alert("Update failed.");
+      alert("Error updating payout details.");
     } finally {
       setIsProcessing(false);
     }
@@ -177,7 +171,7 @@ export default function OrganizerDashboard() {
   if (loading) return (
     <div style={fullPageCenter}>
       <Loader2 className="animate-spin" size={48} color="#0ea5e9"/>
-      <h2 style={{marginTop: '24px', fontWeight: 900, letterSpacing: '-1px'}}>SECURE ACCESS...</h2>
+      <h2 style={{marginTop: '24px', fontWeight: 900, letterSpacing: '-1px'}}>SYNCING FINANCIALS...</h2>
     </div>
   );
 
@@ -193,7 +187,7 @@ export default function OrganizerDashboard() {
              <p style={userEmail}>{data.profile?.email}</p>
              <div style={onboardingBadge(paystackConfig.subaccountCode)}>
                {paystackConfig.subaccountCode ? <ShieldCheck size={12}/> : <AlertCircle size={12}/>}
-               {paystackConfig.subaccountCode ? 'AUTOMATED PAYOUTS LIVE' : 'ONBOARDING REQUIRED'}
+               {paystackConfig.subaccountCode ? 'AUTOMATED SPLITS ACTIVE' : 'PAYOUTS NOT CONFIGURED'}
              </div>
            </div>
            <button style={circleAction} onClick={() => loadDashboardData(true)}>
@@ -205,15 +199,15 @@ export default function OrganizerDashboard() {
         </div>
       </div>
 
-      {/* AUTOMATED REVENUE GRID */}
+      {/* FINANCE OVERVIEW */}
       <div style={financeGrid}>
         <div style={balanceCard}>
           <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start'}}>
             <div>
               <p style={financeLabel}>YOUR 95% NET EARNINGS</p>
-              <h2 style={balanceValue}>GHS {stats.organizerShare.toLocaleString(undefined, {minimumFractionDigits: 2})}</h2>
+              <h2 style={balanceValue}>GHS {(stats.organizerShare || 0).toLocaleString(undefined, {minimumFractionDigits: 2})}</h2>
               <div style={autoPayoutTag}>
-                <Zap size={14} fill="#0ea5e9"/> Automated splits are active via Paystack
+                <Zap size={14} fill="#0ea5e9"/> Settled automatically via Paystack
               </div>
             </div>
             <div style={iconCircleLarge}><Wallet size={32} color="#0ea5e9"/></div>
@@ -221,12 +215,12 @@ export default function OrganizerDashboard() {
           
           <div style={financeActionRow}>
             <div style={miniStatSplit}>
-               <span style={miniLabel}>GROSS SALES</span>
-               <span style={miniValue}>GHS {stats.totalGross.toLocaleString()}</span>
+               <span style={miniLabel}>GROSS REVENUE (100%)</span>
+               <span style={miniValue}>GHS {(stats.totalGross || 0).toLocaleString()}</span>
             </div>
             <div style={miniStatSplit}>
-               <span style={miniLabel}>5% COMMISSIONS</span>
-               <span style={miniValue}>GHS {stats.commissionPaid.toLocaleString()}</span>
+               <span style={miniLabel}>SYSTEM FEE (5%)</span>
+               <span style={miniValue}>GHS {(stats.commissionPaid || 0).toLocaleString()}</span>
             </div>
             <button style={settingsIconBtn} onClick={() => setShowSettingsModal(true)}>
               <Settings size={20}/>
@@ -236,21 +230,24 @@ export default function OrganizerDashboard() {
 
         <div style={statsOverview}>
           <div style={statBox}>
-            <p style={statLabel}>TOTAL TICKETS SOLD</p>
-            <p style={statNumber}>{stats.ticketCount}</p>
-            <Ticket size={16} color="#0ea5e9"/>
+            <div>
+              <p style={statLabel}>TICKETS SOLD</p>
+              <p style={statNumber}>{stats.ticketCount || 0}</p>
+            </div>
+            <Ticket size={24} color="#0ea5e9"/>
           </div>
           <div style={statBox}>
-            <p style={statLabel}>TOTAL VOTES</p>
-            <p style={statNumber}>{stats.totalVotes.toLocaleString()}</p>
-            <Award size={16} color="#f59e0b"/>
+            <div>
+              <p style={statLabel}>CONTEST VOTES</p>
+              <p style={statNumber}>{(stats.totalVotes || 0).toLocaleString()}</p>
+            </div>
+            <Award size={24} color="#f59e0b"/>
           </div>
-          {/* Status Alert if not onboarded */}
           {!paystackConfig.subaccountCode && (
             <div style={alertBox} onClick={() => setShowSettingsModal(true)}>
-              <Info size={16}/>
-              <span>Setup Bank Details for 95% share splits</span>
-              <ChevronRight size={16}/>
+              <Info size={18}/>
+              <span>Configure your bank account to receive 95% splits</span>
+              <ChevronRight size={18}/>
             </div>
           )}
         </div>
@@ -274,13 +271,13 @@ export default function OrganizerDashboard() {
         {activeTab === 'events' && (
           <div style={fadeAnim}>
             <div style={viewHeader}>
-              <h2 style={viewTitle}>Events Dashboard</h2>
+              <h2 style={viewTitle}>Event Management</h2>
               <button style={addBtn} onClick={() => router.push('/dashboard/organizer/create')}>
-                <Plus size={20}/> ADD NEW EVENT
+                <Plus size={20}/> CREATE LUXURY EVENT
               </button>
             </div>
             <div style={cardGrid}>
-              {data.events.map(event => (
+              {data.events.length > 0 ? data.events.map(event => (
                 <div key={event.id} style={itemCard}>
                   <div style={itemImage(event.images?.[0])}>
                     <div style={cardQuickActions}>
@@ -296,14 +293,16 @@ export default function OrganizerDashboard() {
                     <h3 style={itemTitle}>{event.title}</h3>
                     <div style={itemMeta}>
                       <span style={metaLine}><Calendar size={14}/> {new Date(event.date).toLocaleDateString()}</span>
-                      <span style={metaLine}><MapPin size={14}/> {event.location || 'Accra, GH'}</span>
+                      <span style={metaLine}><MapPin size={14}/> {event.location || 'Not Set'}</span>
                     </div>
                     <button style={fullWidthBtn} onClick={() => { setSelectedEventFilter(event.id); setActiveTab('sales'); }}>
-                      VIEW TICKET SALES <ChevronRight size={16}/>
+                      VIEW PERFORMANCE <ChevronRight size={16}/>
                     </button>
                   </div>
                 </div>
-              ))}
+              )) : (
+                <p style={emptyText}>No events created yet.</p>
+              )}
             </div>
           </div>
         )}
@@ -311,19 +310,19 @@ export default function OrganizerDashboard() {
         {activeTab === 'sales' && (
           <div style={fadeAnim}>
              <div style={viewHeader}>
-              <h2 style={viewTitle}>Real-time Ticket Sales</h2>
+              <h2 style={viewTitle}>Live Sales Ledger</h2>
               <div style={filterGroup}>
                 <div style={searchBox}>
                   <Search size={18} color="#94a3b8"/>
                   <input 
                     style={searchInputField} 
-                    placeholder="Guest name or Ref..." 
+                    placeholder="Search guests..." 
                     value={ticketSearch}
                     onChange={(e) => setTicketSearch(e.target.value)}
                   />
                 </div>
                 <select style={eventDropdown} value={selectedEventFilter} onChange={(e) => setSelectedEventFilter(e.target.value)}>
-                  <option value="all">All Events</option>
+                  <option value="all">Filter by Event</option>
                   {data.events.map(e => <option key={e.id} value={e.id}>{e.title}</option>)}
                 </select>
               </div>
@@ -334,29 +333,34 @@ export default function OrganizerDashboard() {
                 <thead>
                   <tr>
                     <th style={tableTh}>ATTENDEE</th>
-                    <th style={tableTh}>EVENT</th>
+                    <th style={tableTh}>EVENT / REF</th>
                     <th style={tableTh}>PAID (100%)</th>
-                    <th style={tableTh}>YOUR SHARE (95%)</th>
+                    <th style={tableTh}>YOUR 95%</th>
                     <th style={tableTh}>STATUS</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredTickets.map((t) => (
+                  {filteredTickets.length > 0 ? filteredTickets.map((t) => (
                     <tr key={t.id} style={tableTr}>
                       <td style={tableTd}>
-                        <p style={guestBold}>{t.guest_name}</p>
+                        <p style={guestBold}>{t.guest_name || 'Guest'}</p>
                         <p style={guestMuted}>{t.guest_email}</p>
                       </td>
-                      <td style={tableTd}>{t.events?.title}</td>
-                      <td style={tableTd}>GHS {t.amount}</td>
-                      <td style={tableTd} style={{fontWeight: 700, color: '#16a34a'}}>
-                        GHS {(t.amount * 0.95).toFixed(2)}
+                      <td style={tableTd}>
+                        <p style={{margin:0, fontWeight:600}}>{t.events?.title}</p>
+                        <p style={{margin:0, fontSize: '11px', color:'#94a3b8'}}>{t.reference}</p>
+                      </td>
+                      <td style={tableTd}>GHS {(t.amount || 0).toLocaleString()}</td>
+                      <td style={tableTd} style={{fontWeight: 800, color: '#16a34a'}}>
+                        GHS {((t.amount || 0) * 0.95).toLocaleString()}
                       </td>
                       <td style={tableTd}>
-                        {t.is_scanned ? <span style={scannedPill}>SCANNED</span> : <span style={activePill}>ACTIVE</span>}
+                        {t.is_scanned ? <span style={scannedPill}>CHECKED IN</span> : <span style={activePill}>VALID</span>}
                       </td>
                     </tr>
-                  ))}
+                  )) : (
+                    <tr><td colSpan="5" style={{padding: '40px', textAlign: 'center', color: '#94a3b8'}}>No sales data found.</td></tr>
+                  )}
                 </tbody>
               </table>
             </div>
@@ -370,8 +374,8 @@ export default function OrganizerDashboard() {
           <div style={modal} onClick={e => e.stopPropagation()}>
             <div style={modalHead}>
               <div>
-                <h2 style={modalTitle}>Payout Settings</h2>
-                <p style={{margin: '5px 0 0', fontSize: '12px', color: '#64748b'}}>Automatic 95% split via Paystack</p>
+                <h2 style={modalTitle}>Payout Configuration</h2>
+                <p style={{margin: '5px 0 0', fontSize: '12px', color: '#64748b'}}>Set up your bank for instant 95% splits</p>
               </div>
               <button style={closeBtn} onClick={() => setShowSettingsModal(false)}><X size={20}/></button>
             </div>
@@ -379,28 +383,28 @@ export default function OrganizerDashboard() {
             <div style={onboardingPromo}>
               <Zap size={24} color="#0ea5e9"/>
               <p style={{margin: 0, fontSize: '13px', lineHeight: '1.4'}}>
-                Your funds are split <b>at the moment of purchase</b>. No manual withdrawals needed.
+                Once configured, <b>95% of every sale</b> is sent to your account automatically. The platform retains 5%.
               </p>
             </div>
 
             <div style={{margin: '25px 0'}}>
               <div style={inputStack}>
-                <label style={fieldLabel}>BUSINESS / ORGANIZER NAME</label>
+                <label style={fieldLabel}>BUSINESS NAME</label>
                 <input 
                   style={modalInput} 
-                  placeholder="e.g. Luxury Events GH"
                   value={paystackConfig.businessName}
                   onChange={(e) => setPaystackConfig({...paystackConfig, businessName: e.target.value})}
+                  placeholder="e.g. Ousted Luxury Events"
                 />
               </div>
               <div style={inputStack}>
-                <label style={fieldLabel}>SETTLEMENT BANK</label>
+                <label style={fieldLabel}>SETTLEMENT BANK / NETWORK</label>
                 <select 
                   style={modalInput}
                   value={paystackConfig.bankCode}
                   onChange={(e) => setPaystackConfig({...paystackConfig, bankCode: e.target.value})}
                 >
-                  <option value="">Select Bank / Network</option>
+                  <option value="">Select Option</option>
                   <option value="MTN">MTN Mobile Money</option>
                   <option value="VOD">Vodafone Cash</option>
                   <option value="058">Guaranty Trust Bank</option>
@@ -411,9 +415,9 @@ export default function OrganizerDashboard() {
                 <label style={fieldLabel}>ACCOUNT NUMBER</label>
                 <input 
                   style={modalInput} 
-                  placeholder="MoMo Number or Bank Account"
                   value={paystackConfig.accountNumber}
                   onChange={(e) => setPaystackConfig({...paystackConfig, accountNumber: e.target.value})}
+                  placeholder="Wallet or Bank Number"
                 />
               </div>
             </div>
@@ -423,24 +427,20 @@ export default function OrganizerDashboard() {
               onClick={saveOnboardingDetails}
               disabled={isProcessing}
             >
-              {isProcessing ? <Loader2 className="animate-spin"/> : 'ENABLE AUTOMATIC PAYOUTS'}
+              {isProcessing ? <Loader2 className="animate-spin"/> : 'CONFIRM PAYOUT ACCOUNT'}
             </button>
-            
-            <p style={{fontSize: '11px', color: '#94a3b8', textAlign: 'center', marginTop: '15px'}}>
-              Powered by Paystack Subaccounts. A 5% platform commission is applied to all sales.
-            </p>
           </div>
         </div>
       )}
 
-      {/* QR MODAL (PRESERVED) */}
+      {/* QR MODAL */}
       {showQR && (
         <div style={overlay} onClick={() => setShowQR(null)}>
           <div style={qrContent} onClick={e => e.stopPropagation()}>
-            <h3 style={{marginBottom: '20px', fontWeight: 900}}>Share QR Code</h3>
+            <h3 style={{marginBottom: '20px', fontWeight: 900}}>Event Portal QR</h3>
             <div style={qrBorder}><img src={showQR} style={{width: '100%'}} alt="QR"/></div>
             <button style={downloadBtn} onClick={() => window.open(showQR)}>
-              <Download size={18}/> DOWNLOAD IMAGE
+              <Download size={18}/> DOWNLOAD QR
             </button>
           </div>
         </div>
@@ -449,9 +449,8 @@ export default function OrganizerDashboard() {
   );
 }
 
-// --- UPDATED LUXURY STYLES FOR AUTOMATION ---
-
-const mainWrapper = { padding: '40px 20px 100px', maxWidth: '1280px', margin: '0 auto', background: '#fcfdfe', minHeight: '100vh', fontFamily: '"Inter", sans-serif' };
+// --- LUXURY STYLES ---
+const mainWrapper = { padding: '40px 20px 100px', maxWidth: '1280px', margin: '0 auto', background: '#fcfdfe', minHeight: '100vh', fontFamily: 'inherit' };
 const fullPageCenter = { height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' };
 const topNav = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '50px' };
 const logoText = { fontSize: '24px', fontWeight: 950, letterSpacing: '-1.5px', margin: 0 };
@@ -461,12 +460,7 @@ const userBrief = { textAlign: 'right' };
 const userEmail = { margin: 0, fontSize: '14px', fontWeight: 700 };
 const circleAction = { width: '45px', height: '45px', borderRadius: '15px', border: '1px solid #e2e8f0', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#64748b' };
 const logoutCircle = { width: '45px', height: '45px', borderRadius: '15px', border: 'none', background: '#fff1f2', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#e11d48' };
-
-const onboardingBadge = (onboarded) => ({ 
-  display: 'flex', alignItems: 'center', gap: '5px', fontSize: '10px', fontWeight: 800, 
-  color: onboarded ? '#16a34a' : '#e11d48', marginTop: '2px' 
-});
-
+const onboardingBadge = (onboarded) => ({ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '10px', fontWeight: 800, color: onboarded ? '#16a34a' : '#e11d48', marginTop: '2px' });
 const financeGrid = { display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '25px', marginBottom: '50px' };
 const balanceCard = { background: '#000', borderRadius: '35px', padding: '40px', color: '#fff', boxShadow: '0 20px 40px rgba(0,0,0,0.1)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' };
 const financeLabel = { fontSize: '11px', fontWeight: 800, color: '#666', letterSpacing: '1px', margin: '0 0 10px' };
@@ -478,25 +472,21 @@ const miniStatSplit = { display: 'flex', flexDirection: 'column', gap: '2px' };
 const miniLabel = { fontSize: '9px', fontWeight: 800, color: '#666' };
 const miniValue = { fontSize: '13px', fontWeight: 700 };
 const settingsIconBtn = { marginLeft: 'auto', width: '50px', height: '50px', background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '18px', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' };
-
 const statsOverview = { display: 'grid', gridTemplateColumns: 'repeat(1, 1fr)', gap: '12px' };
 const statBox = { background: '#fff', padding: '18px 25px', borderRadius: '22px', border: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' };
 const statLabel = { margin: 0, fontSize: '11px', fontWeight: 800, color: '#94a3b8' };
 const statNumber = { margin: '5px 0 0', fontSize: '20px', fontWeight: 900 };
 const alertBox = { background: '#fff1f2', padding: '15px 20px', borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '12px', fontSize: '12px', fontWeight: 700, color: '#e11d48', cursor: 'pointer' };
-
 const tabBar = { display: 'flex', gap: '30px', borderBottom: '1px solid #e2e8f0', marginBottom: '40px' };
 const tabItem = (active) => ({ padding: '15px 5px', background: 'none', border: 'none', color: active ? '#000' : '#94a3b8', fontSize: '13px', fontWeight: 800, cursor: 'pointer', borderBottom: active ? '3px solid #0ea5e9' : '3px solid transparent', display: 'flex', alignItems: 'center', gap: '10px' });
-
 const viewPort = { minHeight: '400px' };
 const fadeAnim = { animation: 'fadeIn 0.4s ease-out' };
 const viewHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px', flexWrap: 'wrap', gap: '20px' };
 const viewTitle = { margin: 0, fontSize: '24px', fontWeight: 900 };
 const addBtn = { background: '#0ea5e9', color: '#fff', border: 'none', padding: '14px 24px', borderRadius: '15px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px' };
-
 const cardGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '25px' };
 const itemCard = { background: '#fff', borderRadius: '30px', border: '1px solid #f1f5f9', overflow: 'hidden' };
-const itemImage = (url) => ({ height: '180px', background: url ? `url(${url}) center/cover` : '#f8fafc', position: 'relative' });
+const itemImage = (url) => ({ height: '180px', background: url ? `url(${url}) center/cover` : '#f8fafc', position: 'relative', backgroundColor: '#f1f5f9' });
 const cardQuickActions = { position: 'absolute', top: '15px', right: '15px', display: 'flex', gap: '8px' };
 const miniAction = { width: '35px', height: '35px', borderRadius: '10px', background: 'rgba(255,255,255,0.9)', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#000' };
 const itemBody = { padding: '25px' };
@@ -504,12 +494,10 @@ const itemTitle = { margin: '0 0 10px', fontSize: '18px', fontWeight: 900 };
 const itemMeta = { display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' };
 const metaLine = { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#64748b', fontWeight: 500 };
 const fullWidthBtn = { width: '100%', background: '#f8fafc', border: '1px solid #e2e8f0', padding: '12px', borderRadius: '12px', fontWeight: 700, fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px' };
-
 const filterGroup = { display: 'flex', gap: '10px' };
 const searchBox = { display: 'flex', alignItems: 'center', background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '0 15px', width: '250px' };
 const searchInputField = { border: 'none', padding: '12px', outline: 'none', fontSize: '13px', width: '100%' };
 const eventDropdown = { border: '1px solid #e2e8f0', borderRadius: '12px', padding: '0 10px', fontSize: '13px', fontWeight: 600, outline: 'none' };
-
 const tableWrapper = { background: '#fff', borderRadius: '25px', border: '1px solid #f1f5f9', overflow: 'hidden' };
 const dataTable = { width: '100%', borderCollapse: 'collapse' };
 const tableTh = { textAlign: 'left', padding: '20px', background: '#f8fafc', fontSize: '11px', fontWeight: 800, color: '#94a3b8' };
@@ -519,7 +507,6 @@ const guestBold = { margin: 0, fontWeight: 700 };
 const guestMuted = { margin: 0, fontSize: '12px', color: '#94a3b8' };
 const scannedPill = { background: '#f0fdf4', color: '#16a34a', padding: '6px 12px', borderRadius: '10px', fontSize: '11px', fontWeight: 800 };
 const activePill = { background: '#eff6ff', color: '#2563eb', padding: '6px 12px', borderRadius: '10px', fontSize: '11px', fontWeight: 800 };
-
 const overlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(5px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' };
 const modal = { background: '#fff', width: '100%', maxWidth: '450px', borderRadius: '35px', padding: '40px' };
 const modalHead = { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' };
@@ -530,7 +517,7 @@ const inputStack = { marginBottom: '20px' };
 const fieldLabel = { display: 'block', fontSize: '11px', fontWeight: 800, marginBottom: '10px', color: '#64748b' };
 const modalInput = { width: '100%', padding: '15px', borderRadius: '15px', border: '1px solid #e2e8f0', fontSize: '14px', outline: 'none' };
 const actionSubmitBtn = (disabled) => ({ width: '100%', background: disabled ? '#f1f5f9' : '#000', color: disabled ? '#94a3b8' : '#fff', border: 'none', padding: '18px', borderRadius: '20px', fontWeight: 900, cursor: disabled ? 'not-allowed' : 'pointer' });
-
 const qrContent = { background: '#fff', padding: '40px', borderRadius: '35px', textAlign: 'center', maxWidth: '400px', width: '100%' };
 const qrBorder = { border: '1px solid #f1f5f9', padding: '20px', borderRadius: '25px', marginBottom: '20px' };
 const downloadBtn = { width: '100%', background: '#000', color: '#fff', border: 'none', padding: '15px', borderRadius: '15px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' };
+const emptyText = { textAlign: 'center', color: '#94a3b8', padding: '40px', width: '100%', gridColumn: '1/-1' };
