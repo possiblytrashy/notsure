@@ -23,7 +23,7 @@ export default function OrganizerDashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [data, setData] = useState({ 
     events: [], 
-    contests: [], 
+    competitions: [], // NEW: Grand Competitions
     tickets: [], 
     profile: null 
   });
@@ -35,9 +35,8 @@ export default function OrganizerDashboard() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [ticketSearch, setTicketSearch] = useState('');
   const [selectedEventFilter, setSelectedEventFilter] = useState('all');
-  const [showCandidateModal, setShowCandidateModal] = useState(null); // Holds contest object
+  const [showCandidateModal, setShowCandidateModal] = useState(null); 
   
-  // Payout/Onboarding State
   const [paystackConfig, setPaystackConfig] = useState({
     businessName: "",
     bankCode: "",
@@ -46,10 +45,9 @@ export default function OrganizerDashboard() {
     isVerified: false
   });
 
-  // Candidate Creation State
   const [newCandidate, setNewCandidate] = useState({ name: '', image_url: '' });
 
-  // --- 3. DATA ENGINE ---
+  // --- 3. DATA ENGINE (NESTED FETCH) ---
   const loadDashboardData = useCallback(async (isSilent = false) => {
     try {
       if (!isSilent) setLoading(true);
@@ -61,26 +59,24 @@ export default function OrganizerDashboard() {
         return;
       }
 
-      // Parallel Data Fetching
-      const [profileRes, eventsRes, contestsRes, ticketsRes, candidatesRes] = await Promise.all([
+      const [profileRes, eventsRes, compsRes, ticketsRes] = await Promise.all([
         supabase.from('profiles').select('*').eq('id', user.id).single(),
         supabase.from('events').select('*').eq('organizer_id', user.id).order('created_at', { ascending: false }),
-        supabase.from('contests').select('*').eq('organizer_id', user.id).order('created_at', { ascending: false }),
+        supabase.from('competitions').select(`
+            *,
+            contests (
+              *,
+              candidates (*)
+            )
+        `).eq('organizer_id', user.id).order('created_at', { ascending: false }),
         supabase.from('tickets').select('*, events(title, organizer_id)').order('created_at', { ascending: false }),
-        supabase.from('candidates').select('*')
       ]);
 
       const myTickets = ticketsRes.data?.filter(t => t.events?.organizer_id === user.id) || [];
       
-      // Manually map candidates to contests to avoid Relationship errors (400)
-      const contestsWithCandidates = (contestsRes.data || []).map(contest => ({
-        ...contest,
-        candidates: (candidatesRes.data || []).filter(c => c.contest_id === contest.id)
-      }));
-      
       setData({
         events: eventsRes.data || [],
-        contests: contestsWithCandidates,
+        competitions: compsRes.data || [],
         tickets: myTickets,
         profile: { ...user, ...profileRes.data }
       });
@@ -106,11 +102,22 @@ export default function OrganizerDashboard() {
     loadDashboardData();
   }, [loadDashboardData]);
 
-  // --- 4. COMPUTED ANALYTICS (95/5 SPLIT) ---
+  // --- 4. COMPUTED ANALYTICS ---
   const stats = useMemo(() => {
-    const totalGross = data.tickets.reduce((acc, t) => acc + (parseFloat(t.amount) || 0), 0);
-    const totalVotes = data.contests.reduce((acc, c) => 
-      acc + (c.candidates?.reduce((sum, cand) => sum + (parseInt(cand.vote_count) || 0), 0) || 0), 0);
+    const ticketGross = data.tickets.reduce((acc, t) => acc + (parseFloat(t.amount) || 0), 0);
+    
+    // Calculate Vote Revenue from Nested Structure
+    let totalVotes = 0;
+    let voteGross = 0;
+    data.competitions.forEach(comp => {
+      comp.contests?.forEach(ct => {
+        const cVotes = ct.candidates?.reduce((sum, cand) => sum + (parseInt(cand.vote_count) || 0), 0) || 0;
+        totalVotes += cVotes;
+        voteGross += (cVotes * (ct.vote_price || 0));
+      });
+    });
+
+    const totalGross = ticketGross + voteGross;
     const scannedCount = data.tickets.filter(t => t.is_scanned).length;
     
     return {
@@ -120,7 +127,7 @@ export default function OrganizerDashboard() {
       ticketCount: data.tickets.length,
       activeEvents: data.events.length,
       totalVotes,
-      avgTicketValue: data.tickets.length ? totalGross / data.tickets.length : 0,
+      avgTicketValue: data.tickets.length ? ticketGross / data.tickets.length : 0,
       checkInRate: data.tickets.length ? Math.round((scannedCount / data.tickets.length) * 100) : 0
     };
   }, [data]);
@@ -216,7 +223,7 @@ export default function OrganizerDashboard() {
         </div>
       </div>
 
-      {/* FINANCE HERO (95/5 SPLIT) */}
+      {/* FINANCE HERO */}
       <div style={financeGrid}>
         <div style={balanceCard}>
           <div style={cardHeader}>
@@ -259,9 +266,9 @@ export default function OrganizerDashboard() {
         </div>
       </div>
 
-      {/* NAVIGATION TABS (Strict Order) */}
+      {/* NAVIGATION TABS */}
       <div style={tabBar}>
-        {['events', 'sales', 'contests', 'analytics'].map((tab) => (
+        {['events', 'sales', 'competitions', 'analytics'].map((tab) => (
           <button key={tab} onClick={() => setActiveTab(tab)} style={tabItem(activeTab === tab)}>
             {tab.toUpperCase()}
           </button>
@@ -369,96 +376,50 @@ export default function OrganizerDashboard() {
           </div>
         )}
 
-        {/* 3. CONTESTS VIEW (With Candidate Management) */}
-        {activeTab === 'contests' && (
+        {/* 3. COMPETITIONS VIEW (NESTED) */}
+        {activeTab === 'competitions' && (
           <div style={fadeAnim}>
              <div style={sectionTitleRow}>
-                <h2 style={viewTitle}>Contest Management</h2>
+                <h2 style={viewTitle}>Grand Competitions</h2>
                 <button style={addBtn} onClick={() => router.push('/dashboard/organizer/contests/create')}>
-                  <Plus size={20}/> NEW CATEGORY
+                  <Plus size={20}/> NEW GRAND COMPETITION
                 </button>
              </div>
              <div style={contestGrid}>
-                {data.contests.map(contest => {
-                  const sortedCandidates = [...(contest.candidates || [])].sort((a,b) => b.vote_count - a.vote_count);
-                  return (
-                    <div key={contest.id} style={contestCard}>
-                       <div style={contestHeader}>
-                          <div>
-                            <h3 style={{margin:0, fontSize: '18px', fontWeight: 900}}>{contest.title}</h3>
-                            <p style={perfSub}>{contest.candidates?.length || 0} Candidates Participated</p>
+                {data.competitions.map(comp => (
+                  <div key={comp.id} style={contestCard}>
+                     <div style={contestHeader}>
+                        <h3 style={{margin:0, fontSize: '18px', fontWeight: 900}}>{comp.title}</h3>
+                        <div style={badgeLuxury}>NESTED</div>
+                     </div>
+                     <div style={nestedCategoryList}>
+                        {comp.contests?.map(ct => (
+                          <div key={ct.id} style={categoryRow}>
+                             <div style={catHeader}>
+                                <p style={catTitle}>{ct.title}</p>
+                                <button style={miniAction} onClick={() => setShowCandidateModal(ct)}>
+                                   <UserPlus size={16}/>
+                                </button>
+                             </div>
+                             <div style={candidateScroll}>
+                                {ct.candidates?.map(cand => (
+                                  <div key={cand.id} style={miniCandCard}>
+                                     <p style={candName}>{cand.name}</p>
+                                     <p style={candVotes}>{cand.vote_count} Votes</p>
+                                  </div>
+                                ))}
+                             </div>
                           </div>
-                          <button style={miniAction} onClick={() => setShowCandidateModal(contest)}>
-                             <UserPlus size={16}/>
-                          </button>
-                       </div>
-                       <div style={candidateList}>
-                          {sortedCandidates.length > 0 ? sortedCandidates.map((cand, idx) => (
-                            <div key={cand.id} style={candidateRow}>
-                               <span style={rankNum}>0{idx + 1}</span>
-                               <div style={candInfo}>
-                                  <p style={candName}>{cand.name}</p>
-                                  <p style={candVotes}>{cand.vote_count} VOTES</p>
-                               </div>
-                               <div style={voteBarContainer}>
-                                  <div style={voteBarFill(idx === 0 ? 100 : (cand.vote_count / (sortedCandidates[0]?.vote_count || 1)) * 100)}></div>
-                               </div>
-                            </div>
-                          )) : <div style={emptySmall}>No candidates added. Click the + icon.</div>}
-                       </div>
-                    </div>
-                  );
-                })}
-             </div>
-          </div>
-        )}
-
-        {/* 4. ANALYTICS VIEW */}
-        {activeTab === 'analytics' && (
-          <div style={fadeAnim}>
-             <div style={sectionTitleRow}>
-                <h2 style={viewTitle}>Performance Insights</h2>
-                <div style={activityBadge}><Activity size={14}/> LIVE ENGINE</div>
-             </div>
-             <div style={analyticsGrid}>
-                {data.events.map(event => {
-                  const eventSales = data.tickets.filter(t => t.event_id === event.id);
-                  const revenue = eventSales.reduce((acc, t) => acc + (parseFloat(t.amount) || 0), 0);
-                  const scanned = eventSales.filter(t => t.is_scanned).length;
-                  const rate = eventSales.length ? Math.round((scanned / eventSales.length) * 100) : 0;
-                  
-                  return (
-                    <div key={event.id} style={eventPerformanceCard}>
-                       <div style={perfHeader}>
-                          <h4 style={perfName}>{event.title}</h4>
-                          <span style={perfTag}>EVENT DATA</span>
-                       </div>
-                       <div style={perfMain}>
-                          <p style={perfLabel}>Gross Revenue Generated</p>
-                          <h3 style={perfValue}>GHS {revenue.toLocaleString()}</h3>
-                          <div style={shareRow}>
-                            <span>Organizer Share (95%)</span>
-                            <span>GHS {(revenue * 0.95).toLocaleString()}</span>
-                          </div>
-                       </div>
-                       <div style={perfFooter}>
-                          <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '8px'}}>
-                             <span>Check-in Progress</span>
-                             <span>{rate}% ({scanned}/{eventSales.length})</span>
-                          </div>
-                          <div style={progressBar}><div style={progressFill(rate)}></div></div>
-                       </div>
-                    </div>
-                  );
-                })}
+                        ))}
+                     </div>
+                  </div>
+                ))}
              </div>
           </div>
         )}
       </div>
 
-      {/* MODALS SECTION */}
-
-      {/* 1. SETTINGS MODAL (Onboarding) */}
+      {/* --- MODALS --- */}
       {showSettingsModal && (
         <div style={overlay} onClick={() => setShowSettingsModal(false)}>
           <div style={modal} onClick={e => e.stopPropagation()}>
@@ -497,7 +458,6 @@ export default function OrganizerDashboard() {
         </div>
       )}
 
-      {/* 2. ADD CANDIDATE MODAL */}
       {showCandidateModal && (
         <div style={overlay} onClick={() => setShowCandidateModal(null)}>
           <div style={modal} onClick={e => e.stopPropagation()}>
@@ -523,7 +483,6 @@ export default function OrganizerDashboard() {
         </div>
       )}
 
-      {/* 3. QR PREVIEW MODAL */}
       {showQR && (
         <div style={overlay} onClick={() => setShowQR(null)}>
           <div style={modal} onClick={e => e.stopPropagation()}>
@@ -542,7 +501,7 @@ export default function OrganizerDashboard() {
   );
 }
 
-// --- LUXURY STYLES (TRIPLE CHECKED) ---
+// --- FULL STYLES OBJECT ---
 const mainWrapper = { padding: '50px 30px', maxWidth: '1440px', margin: '0 auto', background: '#fcfcfc', minHeight: '100vh', fontFamily: 'Inter, sans-serif' };
 const fullPageCenter = { height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#fff' };
 const shimmerLogo = { fontSize: '32px', fontWeight: 950, letterSpacing: '-2px', marginBottom: '10px' };
@@ -581,13 +540,14 @@ const viewPort = { minHeight: '600px' };
 const fadeAnim = { animation: 'fadeIn 0.6s ease' };
 const viewHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '40px' };
 const viewTitle = { margin: 0, fontSize: '24px', fontWeight: 950, letterSpacing: '-1px' };
+const sectionTitleRow = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' };
 const addBtn = { background: '#000', color: '#fff', border: 'none', padding: '14px 28px', borderRadius: '14px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px' };
 const cardGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '30px' };
-const itemCard = { background: '#fff', borderRadius: '24px', border: '1px solid #f0f0f0', overflow: 'hidden', transition: '0.3s' };
+const itemCard = { background: '#fff', borderRadius: '24px', border: '1px solid #f0f0f0', overflow: 'hidden' };
 const itemImage = (url) => ({ height: '240px', background: url ? `url(${url}) center/cover` : '#f8f8f8', position: 'relative' });
 const imageOverlay = { position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, transparent, rgba(0,0,0,0.4))' };
 const cardQuickActions = { position: 'absolute', top: '15px', right: '15px', display: 'flex', gap: '10px' };
-const miniAction = { width: '40px', height: '40px', borderRadius: '12px', background: 'rgba(255,255,255,0.9)', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 4px 10px rgba(0,0,0,0.1)' };
+const miniAction = { width: '40px', height: '40px', borderRadius: '12px', background: '#fff', border: '1px solid #eee', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
 const itemBody = { padding: '25px' };
 const itemTitle = { margin: '0 0 12px', fontSize: '18px', fontWeight: 900 };
 const itemMeta = { display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '25px' };
@@ -600,52 +560,41 @@ const searchBox = { display: 'flex', alignItems: 'center', background: '#fff', b
 const searchInputField = { border: 'none', padding: '12px', outline: 'none', fontSize: '14px', width: '220px' };
 const eventDropdown = { border: '1px solid #eee', borderRadius: '12px', padding: '0 15px', fontWeight: 700, fontSize: '13px' };
 const outlineBtn = { display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 20px', borderRadius: '12px', border: '1px solid #eee', background: '#fff', fontWeight: 800, fontSize: '12px', cursor: 'pointer' };
+
+// --- TABLE STYLES ---
 const tableWrapper = { background: '#fff', borderRadius: '24px', border: '1px solid #f0f0f0', overflow: 'hidden' };
-const dataTable = { width: '100%', borderCollapse: 'collapse' };
-const tableTh = { textAlign: 'left', padding: '20px', background: '#fafafa', fontSize: '10px', fontWeight: 900, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px' };
-const tableTr = { borderBottom: '1px solid #f9f9f9' };
-const tableTd = { padding: '20px', fontSize: '14px', verticalAlign: 'middle' };
-const guestBold = { margin: 0, fontWeight: 800, color: '#000' };
-const guestMuted = { margin: 0, fontSize: '11px', color: '#94a3b8', fontWeight: 600 };
-const scannedPill = { background: '#fee2e2', color: '#ef4444', padding: '6px 12px', borderRadius: '6px', fontSize: '10px', fontWeight: 900 };
-const activePill = { background: '#f0fdf4', color: '#16a34a', padding: '6px 12px', borderRadius: '6px', fontSize: '10px', fontWeight: 900 };
-const contestGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(450px, 1fr))', gap: '30px' };
-const contestCard = { background: '#fff', borderRadius: '24px', padding: '35px', border: '1px solid #f0f0f0' };
-const contestHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '35px' };
-const perfSub = { margin: '4px 0 0', fontSize: '12px', color: '#94a3b8', fontWeight: 600 };
-const candidateList = { display: 'flex', flexDirection: 'column', gap: '20px' };
-const candidateRow = { display: 'grid', gridTemplateColumns: '40px 1.2fr 150px', alignItems: 'center', gap: '20px' };
-const rankNum = { fontWeight: 950, color: '#eee', fontSize: '20px' };
-const candInfo = { overflow: 'hidden' };
-const candName = { margin: 0, fontWeight: 800, fontSize: '15px' };
-const candVotes = { margin: 0, fontSize: '11px', color: '#94a3b8', fontWeight: 700 };
-const voteBarContainer = { height: '8px', background: '#f5f5f5', borderRadius: '10px', overflow: 'hidden' };
-const voteBarFill = (w) => ({ width: `${w}%`, height: '100%', background: '#000', borderRadius: '10px' });
-const overlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 };
-const modal = { background: '#fff', width: '90%', maxWidth: '450px', borderRadius: '30px', padding: '45px', boxShadow: '0 30px 60px rgba(0,0,0,0.2)' };
-const modalHead = { display: 'flex', justifyContent: 'space-between', marginBottom: '35px' };
+const dataTable = { width: '100%', borderCollapse: 'collapse', textAlign: 'left' };
+const tableTh = { padding: '20px', background: '#fcfcfc', borderBottom: '1px solid #f0f0f0', fontSize: '11px', fontWeight: 800, color: '#94a3b8', letterSpacing: '1px' };
+const tableTr = { borderBottom: '1px solid #f8f8f8' };
+const tableTd = { padding: '20px', fontSize: '13px', color: '#000' };
+const guestBold = { margin: 0, fontWeight: 800 };
+const guestMuted = { margin: '4px 0 0', fontSize: '11px', color: '#94a3b8' };
+const scannedPill = { background: '#f0fdf4', color: '#16a34a', padding: '6px 12px', borderRadius: '8px', fontSize: '10px', fontWeight: 900 };
+const activePill = { background: '#eff6ff', color: '#3b82f6', padding: '6px 12px', borderRadius: '8px', fontSize: '10px', fontWeight: 900 };
+const emptyTableState = { padding: '50px', textAlign: 'center', color: '#94a3b8', fontSize: '14px' };
+
+// --- CONTEST / CANDIDATE STYLES ---
+const contestGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))', gap: '30px' };
+const contestCard = { background: '#fff', borderRadius: '24px', border: '1px solid #f0f0f0', padding: '30px' };
+const contestHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px' };
+const nestedCategoryList = { display: 'flex', flexDirection: 'column', gap: '20px' };
+const categoryRow = { background: '#fcfcfc', border: '1px solid #f0f0f0', borderRadius: '16px', padding: '20px' };
+const catHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' };
+const catTitle = { margin: 0, fontSize: '14px', fontWeight: 800 };
+const candidateScroll = { display: 'flex', gap: '10px', overflowX: 'auto', paddingBottom: '10px' };
+const miniCandCard = { minWidth: '120px', background: '#fff', border: '1px solid #eee', padding: '12px', borderRadius: '12px' };
+const candName = { margin: 0, fontSize: '12px', fontWeight: 800 };
+const candVotes = { margin: '4px 0 0', fontSize: '10px', color: '#0ea5e9', fontWeight: 700 };
+
+// --- MODAL STYLES ---
+const overlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(5px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 };
+const modal = { background: '#fff', width: '450px', borderRadius: '30px', padding: '40px', position: 'relative' };
+const modalHead = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' };
 const modalTitle = { margin: 0, fontSize: '24px', fontWeight: 950, letterSpacing: '-1px' };
 const closeBtn = { background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' };
-const onboardingPromo = { background: '#f0f9ff', padding: '20px', borderRadius: '16px', display: 'flex', alignItems: 'center', gap: '15px', marginBottom: '35px' };
-const modalBody = { display: 'flex', flexDirection: 'column', gap: '25px' };
-const inputStack = { display: 'flex', flexDirection: 'column', gap: '10px' };
-const fieldLabel = { fontSize: '10px', fontWeight: 900, color: '#94a3b8', marginLeft: '5px' };
-const modalInput = { padding: '16px', borderRadius: '14px', border: '1px solid #eee', fontSize: '14px', fontWeight: 600, outline: 'none' };
-const actionSubmitBtn = (dis) => ({ background: dis ? '#eee' : '#000', color: '#fff', padding: '18px', borderRadius: '16px', border: 'none', fontWeight: 800, fontSize: '14px', cursor: 'pointer', marginTop: '10px' });
-const analyticsGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))', gap: '30px' };
-const eventPerformanceCard = { background: '#fff', borderRadius: '24px', padding: '35px', border: '1px solid #f0f0f0' };
-const perfHeader = { display: 'flex', justifyContent: 'space-between', marginBottom: '30px' };
-const perfName = { margin: 0, fontSize: '18px', fontWeight: 900 };
-const perfTag = { background: '#000', color: '#fff', padding: '5px 12px', borderRadius: '6px', fontSize: '10px', fontWeight: 900 };
-const perfMain = { marginBottom: '35px' };
-const perfLabel = { fontSize: '11px', color: '#94a3b8', marginBottom: '10px', fontWeight: 800, textTransform: 'uppercase' };
-const perfValue = { fontSize: '32px', fontWeight: 950, margin: 0 };
-const shareRow = { display: 'flex', justifyContent: 'space-between', marginTop: '15px', fontSize: '13px', color: '#16a34a', fontWeight: 700 };
-const perfFooter = { display: 'flex', flexDirection: 'column' };
-const progressBar = { height: '10px', background: '#f5f5f5', borderRadius: '10px', overflow: 'hidden' };
-const progressFill = (w) => ({ width: `${w}%`, height: '100%', background: '#0ea5e9' });
-const activityBadge = { display: 'flex', alignItems: 'center', gap: '10px', fontSize: '11px', fontWeight: 900, color: '#ef4444', background: '#fef2f2', padding: '6px 15px', borderRadius: '20px' };
-const sectionTitleRow = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '40px' };
-const emptyState = { gridColumn: '1/-1', textAlign: 'center', padding: '100px', color: '#94a3b8', fontWeight: 700 };
-const emptyTableState = { textAlign: 'center', padding: '50px', color: '#94a3b8', fontWeight: 600 };
-const emptySmall = { textAlign: 'center', padding: '20px', color: '#94a3b8', fontSize: '12px', border: '1px dashed #eee', borderRadius: '12px' };
+const modalBody = { display: 'flex', flexDirection: 'column', gap: '20px' };
+const onboardingPromo = { background: '#f0f9ff', padding: '15px', borderRadius: '16px', display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '20px', color: '#0369a1' };
+const inputStack = { display: 'flex', flexDirection: 'column', gap: '8px' };
+const fieldLabel = { fontSize: '10px', fontWeight: 900, color: '#94a3b8', letterSpacing: '1px' };
+const modalInput = { padding: '15px', borderRadius: '12px', border: '1px solid #eee', fontSize: '14px', outline: 'none', fontWeight: 600 };
+const actionSubmitBtn = (p) => ({ padding: '18px', background: '#000', color: '#fff', border: 'none', borderRadius: '16px', fontWeight: 800, cursor: p ? 'not-allowed' : 'pointer', fontSize: '14px' });
