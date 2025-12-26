@@ -24,25 +24,22 @@ export default function EventPage() {
 
   useEffect(() => {
     async function init() {
-      // 1. Fetch Event
       const { data: eventData, error } = await supabase.from('events').select('*').eq('id', id).single();
       if (error) return console.error("Event fetch error:", error);
       setEvent(eventData);
       if (eventData?.ticket_tiers?.length > 0) setSelectedTier(0);
 
-      // 2. Check Auth Status (for auto-fill)
       const { data: { user: currentUser } } = await supabase.auth.getUser();
       if (currentUser) {
         setUser(currentUser);
         setGuestEmail(currentUser.email);
-        // Try to get name from metadata if it exists
         setGuestName(currentUser.user_metadata?.full_name || '');
       }
     }
     if (id) init();
   }, [id]);
 
-  // FORCE SCRIPT LOADER (Nuclear Option)
+  // FORCE SCRIPT LOADER
   const loadPaystackScript = () => {
     return new Promise((resolve, reject) => {
       if (window.PaystackPop) {
@@ -58,11 +55,34 @@ export default function EventPage() {
     });
   };
 
+  // SUCCESS HANDLER (Separated to fix the callback validation error)
+  const recordSuccessfulPayment = async (response, tier) => {
+    const ticketData = {
+      event_id: id,
+      tier_name: tier.name,
+      amount: tier.price,
+      reference: response.reference,
+      status: 'paid',
+      user_id: user ? user.id : null,
+      guest_email: guestEmail,
+      guest_name: guestName
+    };
+
+    const { error } = await supabase.from('tickets').insert([ticketData]);
+
+    if (error) {
+      console.error("Save Error:", error);
+      alert("Payment successful! Please save your reference: " + response.reference);
+    } else {
+      setPaymentSuccess(true);
+    }
+    setIsProcessing(false);
+  };
+
   const handlePurchase = async (e) => {
     if (e) e.preventDefault();
     if (selectedTier === null || !event || isProcessing) return;
 
-    // Validation
     if (!guestEmail || !guestEmail.includes('@')) {
       alert("Please enter a valid email address.");
       return;
@@ -71,14 +91,13 @@ export default function EventPage() {
     setIsProcessing(true);
 
     try {
-      // 1. Ensure Script is Loaded
       const PaystackPop = await loadPaystackScript();
       
       const tier = event.ticket_tiers[selectedTier];
       const amountInPesewas = Math.round(parseFloat(tier.price) * 100);
       const publicKey = process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY;
 
-      // 2. Initialize Paystack Setup
+      // CORE FIX: Standardize the object passed to .setup()
       const handler = PaystackPop.setup({
         key: publicKey,
         email: guestEmail.trim(),
@@ -87,31 +106,12 @@ export default function EventPage() {
         metadata: {
           custom_fields: [
             { display_name: "Event", variable_name: "event_title", value: event.title },
-            { display_name: "Attendee", variable_name: "attendee_name", value: guestName || "Guest" }
+            { display_name: "Customer", variable_name: "customer_name", value: guestName || "Guest" }
           ]
         },
-        // Using explicit function to ensure context is correct
-        callback: async function(response) {
-          const ticketData = {
-            event_id: id,
-            tier_name: tier.name,
-            amount: tier.price,
-            reference: response.reference,
-            status: 'paid',
-            user_id: user ? user.id : null,
-            guest_email: guestEmail,
-            guest_name: guestName
-          };
-
-          const { error } = await supabase.from('tickets').insert([ticketData]);
-
-          if (error) {
-            console.error("Save Error:", error);
-            alert("Payment successful! Please save your reference: " + response.reference);
-          } else {
-            setPaymentSuccess(true);
-          }
-          setIsProcessing(false);
+        // We use function() declarations instead of arrow functions for Paystack's internal validator
+        callback: function(response) {
+          recordSuccessfulPayment(response, tier);
         },
         onClose: function() {
           setIsProcessing(false);
@@ -122,7 +122,7 @@ export default function EventPage() {
 
     } catch (error) {
       console.error("Purchase Error:", error);
-      alert("Could not load payment gateway. Check your connection.");
+      alert("Failed to initialize payment. Please try again.");
       setIsProcessing(false);
     }
   };
@@ -130,9 +130,9 @@ export default function EventPage() {
   if (paymentSuccess) {
     return (
       <div style={{ maxWidth: '500px', margin: '100px auto', textAlign: 'center', padding: '40px', background: '#fff', borderRadius: '32px', boxShadow: '0 20px 50px rgba(0,0,0,0.1)' }}>
-        <CheckCircle2 size={80} color="#22c55e" style={{ marginBottom: '20px' }} />
-        <h2 style={{ fontSize: '32px', fontWeight: 900 }}>Ticket Secured!</h2>
-        <p style={{ color: '#64748b', marginBottom: '30px' }}>Your ticket for <b>{event.title}</b> has been sent to <b>{guestEmail}</b>.</p>
+        <CheckCircle2 size={80} color="#22c55e" style={{ marginBottom: '20px', margin: '0 auto' }} />
+        <h2 style={{ fontSize: '32px', fontWeight: 900, marginTop: '20px' }}>Ticket Secured!</h2>
+        <p style={{ color: '#64748b', margin: '20px 0 30px 0' }}>Your ticket for <b>{event.title}</b> has been sent to <b>{guestEmail}</b>.</p>
         <button onClick={() => user ? router.push('/dashboard/tickets') : window.location.reload()} style={checkoutBtn(false)}>
           {user ? "View in Dashboard" : "Return to Event"}
         </button>
@@ -152,7 +152,7 @@ export default function EventPage() {
         {/* LEFT: IMAGE CAROUSEL */}
         <div style={{ position: 'relative', borderRadius: '40px', overflow: 'hidden', height: '600px', boxShadow: '0 30px 60px rgba(0,0,0,0.1)', background: '#f1f5f9' }}>
           {event.images && event.images.length > 0 ? (
-            <img src={event.images[currentImg]} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+            <img src={event.images[currentImg]} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="Event" />
           ) : (
             <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>No Image</div>
           )}
@@ -164,7 +164,7 @@ export default function EventPage() {
           )}
         </div>
 
-        {/* RIGHT: DETAILS & GUEST FORM */}
+        {/* RIGHT: DETAILS & FORM */}
         <div style={{ padding: '10px' }}>
           <h1 style={{ fontSize: '48px', fontWeight: 900, margin: '0 0 10px 0', letterSpacing: '-2px', lineHeight: 1 }}>{event.title}</h1>
           
@@ -175,7 +175,7 @@ export default function EventPage() {
 
           <form onSubmit={handlePurchase}>
             <div style={{ marginBottom: '30px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-               <h3 style={{ fontWeight: 900, fontSize: '18px', margin: '0 0 5px 0' }}>Contact Information</h3>
+               <h3 style={{ fontWeight: 900, fontSize: '18px', margin: '0' }}>Contact Details</h3>
                
                <div style={inputBox}>
                   <User size={18} color="#94a3b8" />
@@ -188,7 +188,7 @@ export default function EventPage() {
                </div>
             </div>
 
-            <h3 style={{ fontWeight: 900, fontSize: '18px', margin: '0 0 15px 0' }}>Select Ticket</h3>
+            <h3 style={{ fontWeight: 900, fontSize: '18px', margin: '0 0 15px 0' }}>Ticket Type</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
               {event.ticket_tiers?.map((tier, idx) => (
                 <div 
@@ -198,7 +198,7 @@ export default function EventPage() {
                     padding: '20px', borderRadius: '24px', border: '2px solid', 
                     borderColor: selectedTier === idx ? '#0ea5e9' : 'rgba(0,0,0,0.05)',
                     background: selectedTier === idx ? '#f0f9ff' : 'white',
-                    cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', transition: '0.2s'
+                    cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center'
                   }}
                 >
                   <span style={{ fontWeight: 800, fontSize: '17px' }}>{tier.name}</span>
@@ -215,13 +215,13 @@ export default function EventPage() {
               {isProcessing ? (
                 <><Loader2 className="animate-spin" style={{ marginRight: '10px' }} /> PROCESSING...</>
               ) : (
-                `CONFIRM & PAY GHS ${event.ticket_tiers?.[selectedTier]?.price || '0.00'}`
+                `PAY GHS ${event.ticket_tiers?.[selectedTier]?.price || '0.00'}`
               )}
             </button>
           </form>
           
           <div style={{ marginTop: '20px', display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center', color: '#94a3b8', fontSize: '13px' }}>
-            <ShieldCheck size={16} /> 256-bit Secure Payment via Paystack
+            <ShieldCheck size={16} /> Secure Payment via Paystack
           </div>
         </div>
       </div>
@@ -247,6 +247,5 @@ const checkoutBtn = (disabled) => ({
   cursor: disabled ? 'not-allowed' : 'pointer', 
   display: 'flex', 
   justifyContent: 'center', 
-  alignItems: 'center',
-  transition: 'all 0.3s ease'
+  alignItems: 'center'
 });
