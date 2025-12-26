@@ -627,11 +627,7 @@ export default function OrganizerDashboard() {
 
       )}
 
-    </div>
-
-  );
-
-}
+    
     </div>
   );
 }
