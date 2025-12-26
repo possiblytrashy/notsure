@@ -1,18 +1,21 @@
 import { NextResponse } from 'next/server';
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs';
-import { cookies } from 'next/headers';
+import { createClient } from '@supabase/supabase-js';
+
+// Initialize Supabase with Service Role Key to allow profile updates
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
 
 export async function POST(request) {
-  const supabase = createRouteHandlerClient({ cookies });
-  
-  // 1. Get current logged-in user
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-
-  const { business_name, settlement_bank, account_number, percentage_charge } = await request.json();
-
   try {
-    // 2. Call Paystack to create the Subaccount
+    const { business_name, settlement_bank, account_number, userId } = await request.json();
+
+    if (!userId) {
+      return NextResponse.json({ error: "User ID is required" }, { status: 401 });
+    }
+
+    // 1. Call Paystack to create the Subaccount
     const paystackRes = await fetch('https://api.paystack.co/subaccount', {
       method: 'POST',
       headers: {
@@ -23,7 +26,7 @@ export async function POST(request) {
         business_name: business_name,
         settlement_bank: settlement_bank, // e.g., "MTN" or "057"
         account_number: account_number,
-        percentage_charge: 5, // Your 5% commission
+        percentage_charge: 5, // Your 5% commission setup
         description: `Ousted Organizer: ${business_name}`
       }),
     });
@@ -36,14 +39,14 @@ export async function POST(request) {
 
     const subaccountCode = paystackData.data.subaccount_code;
 
-    // 3. Save the subaccount_code to the organizer's profile in Supabase
-    const { error: dbError } = await supabase
+    // 2. Update the profile using the Admin client to bypass RLS for this system action
+    const { error: dbError } = await supabaseAdmin
       .from('profiles')
       .update({ 
         paystack_subaccount_code: subaccountCode,
         is_organizer: true 
       })
-      .eq('id', user.id);
+      .eq('id', userId);
 
     if (dbError) throw dbError;
 
