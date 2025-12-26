@@ -2,111 +2,131 @@
 import { useState, useEffect } from 'react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import { supabase } from '../../../lib/supabase';
+import { Ticket, CheckCircle2, XCircle, AlertCircle, RefreshCw, ArrowLeft } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 
 export default function AdvancedScanner() {
-  const [status, setStatus] = useState({ message: 'Ready to scan', color: '#666', details: '' });
+  const router = useRouter();
+  const [status, setStatus] = useState({ 
+    type: 'ready', 
+    message: 'Ready to Scan', 
+    color: '#666', 
+    details: 'Align the ticket QR code in the frame' 
+  });
+  const [isScanning, setIsScanning] = useState(true);
 
   const verifyTicket = async (decodedText) => {
-    // 1. CLEAN THE DATA: If the QR is a URL, get just the ID after the last slash
-    // Example: "https://ousted.com/ticket/REF123" becomes "REF123"
-    const cleanedRef = decodedText.includes('/') 
-      ? decodedText.split('/').pop().trim() 
-      : decodedText.trim();
+    if (!isScanning) return;
+    
+    setIsScanning(false);
+    setStatus({ type: 'loading', message: 'Verifying...', color: '#0ea5e9', details: 'Accessing Ousted Database...' });
 
-    setStatus({ message: 'Verifying...', color: '#0ea5e9', details: cleanedRef });
+    // Clean URL if present: Extracts 'REF123' from 'https://site.com/ticket/REF123'
+    const ticketRef = decodedText.includes('/') ? decodedText.split('/').pop().trim() : decodedText.trim();
 
     try {
-      // 2. QUERY THE CORRECT COLUMN: We use 'reference' instead of 'qr_code'
-      const { data, error } = await supabase
+      // Query searching the 'reference' column specifically (matches your Dashboard Sales table)
+      const { data: ticket, error } = await supabase
         .from('tickets')
         .select('*, events(title)')
-        .eq('reference', cleanedRef)
-        .single();
+        .eq('reference', ticketRef)
+        .maybeSingle();
 
-      if (error || !data) {
-        console.error("Supabase Error:", error);
-        setStatus({ message: 'INVALID TICKET', color: '#ef4444', details: `Ref: ${cleanedRef} not found.` });
-        return;
-      }
+      if (error) throw error;
 
-      // 3. CHECK STATUS: Use the column 'is_scanned' or 'is_used'
-      if (data.is_scanned) {
+      if (!ticket) {
         setStatus({ 
+          type: 'error', 
+          message: 'INVALID TICKET', 
+          color: '#ef4444', 
+          details: `Reference: ${ticketRef} not found.` 
+        });
+      } else if (ticket.is_scanned) {
+        setStatus({ 
+          type: 'warning', 
           message: 'ALREADY USED', 
           color: '#f59e0b', 
-          details: `Scanned at: ${new Date(data.updated_at).toLocaleTimeString()}` 
+          details: `Previously scanned on ${new Date(ticket.updated_at).toLocaleDateString()}` 
         });
       } else {
-        // 4. UPDATE STATUS: Mark as used
+        // Update database using the ticket's internal ID
         const { error: updateErr } = await supabase
           .from('tickets')
           .update({ 
-            is_scanned: true,
-            // We can also track when it was scanned
+            is_scanned: true, 
+            updated_at: new Date().toISOString() 
           })
-          .eq('id', data.id);
+          .eq('id', ticket.id);
 
         if (updateErr) throw updateErr;
 
         setStatus({ 
+          type: 'success', 
           message: 'VALID TICKET', 
           color: '#22c55e', 
-          details: `${data.events.title} - ${data.guest_name}` 
+          details: `${ticket.events.title} — ${ticket.guest_name}` 
         });
       }
     } catch (err) {
-      console.error("Scanner System Error:", err);
-      setStatus({ message: 'SYSTEM ERROR', color: '#000', details: 'Check connection.' });
+      console.error(err);
+      setStatus({ type: 'error', message: 'SCANNER ERROR', color: '#000', details: 'Check internet connection.' });
     }
   };
 
   useEffect(() => {
     const scanner = new Html5QrcodeScanner('reader', { 
-      fps: 10, 
+      fps: 15, 
       qrbox: { width: 250, height: 250 },
-      aspectRatio: 1.0 
+      aspectRatio: 1.0
     });
 
-    scanner.render(
-      (text) => {
-        // Stop scanner briefly to prevent double-scans
-        verifyTicket(text);
-      }, 
-      (err) => { /* ignore normal scanning errors */ }
-    );
-
-    return () => scanner.clear();
-  }, []);
+    scanner.render(verifyTicket, (err) => {});
+    return () => scanner.clear().catch(() => {});
+  }, [isScanning]);
 
   return (
-    <div style={{ maxWidth: '500px', margin: '0 auto', padding: '120px 20px', textAlign: 'center' }}>
-      <h2 style={{fontWeight: 900, marginBottom: '20px'}}>Ticket Scanner</h2>
-      
-      <div style={{ 
-        background: status.color, 
-        color: 'white', 
-        padding: '30px', 
-        borderRadius: '30px', 
-        marginBottom: '20px', 
-        transition: 'all 0.3s ease'
-      }}>
-        <div style={{ fontSize: '24px', fontWeight: 900, marginBottom: '5px' }}>{status.message}</div>
-        <div style={{ fontSize: '12px', opacity: 0.8 }}>{status.details}</div>
+    <div style={container}>
+      <div style={header}>
+        <button onClick={() => router.back()} style={backBtn}><ArrowLeft size={20}/> Exit</button>
+        <h2 style={{margin: 0, fontWeight: 900}}>Ousted Scanner</h2>
+        <div style={{width: '60px'}}></div> 
       </div>
 
-      <div id="reader" style={{ 
-        borderRadius: '30px', 
-        overflow: 'hidden', 
-        background: 'white',
-        border: '1px solid #eee' 
-      }}></div>
+      <div style={{...statusCard, background: status.color}}>
+        <div style={statusIconBox}>
+          {status.type === 'ready' && <Ticket size={32} />}
+          {status.type === 'loading' && <RefreshCw size={32} className="animate-spin" />}
+          {status.type === 'success' && <CheckCircle2 size={32} />}
+          {status.type === 'warning' && <AlertCircle size={32} />}
+          {status.type === 'error' && <XCircle size={32} />}
+        </div>
+        <h1 style={statusTitle}>{status.message}</h1>
+        <p style={statusDetails}>{status.details}</p>
+        
+        {!isScanning && (
+          <button onClick={() => setIsScanning(true)} style={nextBtn}>SCAN NEXT</button>
+        )}
+      </div>
 
-      <button 
-        onClick={() => window.location.reload()}
-        style={{marginTop: '30px', background: '#f4f4f5', border: 'none', padding: '12px 20px', borderRadius: '15px', fontWeight: 700, cursor: 'pointer'}}
-      >
-        Reset Scanner
-      </button>
+      <div style={scannerContainer}>
+        {isScanning ? (
+          <div id="reader"></div>
+        ) : (
+          <div style={pausedBox}>Verification Result Displayed Above</div>
+        )}
+      </div>
     </div>
   );
 }
+
+// Minimalist Styles to prevent interference
+const container = { maxWidth: '480px', margin: '0 auto', padding: '40px 20px', textAlign: 'center' };
+const header = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' };
+const backBtn = { background: '#f4f4f5', border: 'none', padding: '10px 18px', borderRadius: '14px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' };
+const statusCard = { padding: '40px 20px', borderRadius: '40px', color: '#fff', marginBottom: '20px', transition: 'all 0.3s ease' };
+const statusIconBox = { marginBottom: '10px', display: 'flex', justifyContent: 'center' };
+const statusTitle = { margin: '0 0 5px', fontSize: '28px', fontWeight: 900 };
+const statusDetails = { margin: 0, fontSize: '13px', opacity: 0.8 };
+const nextBtn = { marginTop: '20px', width: '100%', padding: '16px', borderRadius: '15px', border: 'none', background: '#fff', color: '#000', fontWeight: 900, cursor: 'pointer' };
+const scannerContainer = { borderRadius: '35px', overflow: 'hidden', border: '6px solid #000', background: '#000', aspectRatio: '1/1' };
+const pausedBox = { height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#666', background: '#eee', fontWeight: 700, fontSize: '14px' };
