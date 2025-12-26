@@ -50,7 +50,7 @@ export default function OrganizerDashboard() {
   const [newCandidate, setNewCandidate] = useState({ name: '', image_url: '' });
 
   // --- 3. DATA ENGINE ---
- const loadDashboardData = useCallback(async (isSilent = false) => {
+const loadDashboardData = useCallback(async (isSilent = false) => {
     try {
       if (!isSilent) setLoading(true);
       else setRefreshing(true);
@@ -61,33 +61,41 @@ export default function OrganizerDashboard() {
         return;
       }
 
-      // We use individual awaits or a modified Promise.all to prevent one failure from hanging the UI
-      const profileRes = await supabase.from('profiles').select('*').eq('id', user.id).single();
-      const eventsRes = await supabase.from('events').select('*').eq('organizer_id', user.id).order('created_at', { ascending: false });
+      // 1. Fetch Profile and Events (The most stable tables)
+      const [profileRes, eventsRes] = await Promise.all([
+        supabase.from('profiles').select('*').eq('id', user.id).single(),
+        supabase.from('events').select('*').eq('organizer_id', user.id).order('created_at', { ascending: false })
+      ]);
+
+      // 2. Fetch Tickets with a fallback to empty array if the join fails
+      const { data: ticketsData, error: tErr } = await supabase
+        .from('tickets')
+        .select('*, events!inner(title, organizer_id)')
+        .eq('events.organizer_id', user.id);
       
-      // Try fetching contests - if this fails, we return an empty array instead of crashing
-      const { data: contestsData, error: contestErr } = await supabase
+      if (tErr) console.error("Ticket Join Error:", tErr.message);
+
+      // 3. Fetch Contests with a fallback (This is likely your 400 source)
+      const { data: contestsData, error: cErr } = await supabase
         .from('contests')
         .select('*')
-        .or(`organizer_id.eq.${user.id},user_id.eq.${user.id}`) // Checks both possible column names
-        .order('created_at', { ascending: false });
+        .eq('organizer_id', user.id);
 
-      if (contestErr) console.warn("Contest fetch non-critical error:", contestErr.message);
+      if (cErr) console.error("Contest Error:", cErr.message);
 
-      const ticketsRes = await supabase.from('tickets').select('*, events!inner(title, organizer_id)').eq('events.organizer_id', user.id);
-      const candidatesRes = await supabase.from('candidates').select('*');
+      // 4. Fetch Candidates
+      const { data: candData } = await supabase.from('candidates').select('*');
 
-      const myTickets = ticketsRes.data || [];
-      
-      const contestsWithCandidates = (contestsData || []).map(contest => ({
+      // Map data safely
+      const finalContests = (contestsData || []).map(contest => ({
         ...contest,
-        candidates: (candidatesRes.data || []).filter(c => c.contest_id === contest.id)
+        candidates: (candData || []).filter(c => c.contest_id === contest.id)
       }));
-      
+
       setData({
         events: eventsRes.data || [],
-        contests: contestsWithCandidates,
-        tickets: myTickets,
+        contests: finalContests,
+        tickets: ticketsData || [],
         profile: { ...user, ...profileRes.data }
       });
 
@@ -100,15 +108,15 @@ export default function OrganizerDashboard() {
           isVerified: true
         });
       }
+
     } catch (err) {
-      console.error("Critical Dashboard Error:", err);
-      // Ensure loading ends even if there is a crash
+      console.error("Dashboard caught error:", err);
     } finally {
+      // THIS MUST RUN to remove the loading screen
       setLoading(false);
       setRefreshing(false);
     }
   }, [router]);
-
   // --- 4. COMPUTED ANALYTICS (95/5 SPLIT) ---
   const stats = useMemo(() => {
     const totalGross = data.tickets.reduce((acc, t) => acc + (parseFloat(t.amount) || 0), 0);
