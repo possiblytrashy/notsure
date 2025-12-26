@@ -88,13 +88,14 @@ export default function EventPage() {
   const recordPayment = async (response, tier) => {
     const ticketData = {
       event_id: id,
+      tier_id: tier.id, // Explicitly linking the tier ID
       tier_name: tier.name,
       amount: parseFloat(tier.price),
       reference: response.reference,
       status: 'paid',
       user_id: user ? user.id : null,
-      guest_email: guestEmail,
-      guest_name: guestName
+      customer_email: guestEmail, // Updated to match your webhook schema
+      customer_name: guestName
     };
 
     const { error } = await supabase.from('tickets').insert([ticketData]);
@@ -114,6 +115,12 @@ export default function EventPage() {
     if (e) e.preventDefault();
     if (selectedTier === null || !event || isProcessing) return;
     
+    // Safety check for split payments
+    if (!event.organizer_subaccount) {
+      alert("Billing Error: This event has not been properly linked for payouts. Please contact the organizer.");
+      return;
+    }
+    
     setIsProcessing(true);
 
     try {
@@ -125,8 +132,24 @@ export default function EventPage() {
         email: guestEmail.trim(),
         amount: Math.round(parseFloat(tier.price) * 100),
         currency: "GHS",
-        callback: function(res) { recordPayment(res, tier); },
-        onClose: function() { setIsProcessing(false); }
+        
+        // --- 5% SPLIT & METADATA CONFIGURATION ---
+        subaccount: event.organizer_subaccount, // Routes 95% to Organizer
+        bearer: "subaccount",                  // Organizer covers Paystack processing fees
+        metadata: {
+          type: 'TICKET',
+          event_id: id,
+          tier_id: tier.id,
+          customer_name: guestName
+        },
+        // -----------------------------------------
+
+        callback: function(res) { 
+          recordPayment(res, tier); 
+        },
+        onClose: function() { 
+          setIsProcessing(false); 
+        }
       });
       handler.openIframe();
     } catch (err) {
@@ -374,7 +397,6 @@ export default function EventPage() {
   );
 }
 
-// --- CONSOLIDATED STYLING OBJECT ---
 const styles = {
   pageLayout: { maxWidth: '1300px', margin: '0 auto', padding: '20px 24px 100px', fontFamily: '"Inter", sans-serif' },
   navBar: { display: 'flex', justifyContent: 'space-between', marginBottom: '30px' },
