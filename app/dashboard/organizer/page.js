@@ -51,72 +51,78 @@ export default function OrganizerDashboard() {
 
   // --- 3. DATA ENGINE ---
 const loadDashboardData = useCallback(async (isSilent = false) => {
-    try {
-      if (!isSilent) setLoading(true);
-      else setRefreshing(true);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second hard limit
 
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
-      if (authError || !user) {
-        router.push('/login');
-        return;
-      }
+  try {
+    if (!isSilent) setLoading(true);
+    else setRefreshing(true);
 
-      // 1. Fetch Profile and Events (The most stable tables)
-      const [profileRes, eventsRes] = await Promise.all([
-        supabase.from('profiles').select('*').eq('id', user.id).single(),
-        supabase.from('events').select('*').eq('organizer_id', user.id).order('created_at', { ascending: false })
-      ]);
+    // 1. Auth Check with error handling for network failure
+    const { data: authData, error: authError } = await supabase.auth.getUser().catch(err => {
+      console.error("Network failed to reach Supabase:", err);
+      return { data: { user: null }, error: err };
+    });
 
-      // 2. Fetch Tickets with a fallback to empty array if the join fails
-      const { data: ticketsData, error: tErr } = await supabase
-        .from('tickets')
-        .select('*, events!inner(title, organizer_id)')
-        .eq('events.organizer_id', user.id);
-      
-      if (tErr) console.error("Ticket Join Error:", tErr.message);
+    clearTimeout(timeoutId);
 
-      // 3. Fetch Contests with a fallback (This is likely your 400 source)
-      const { data: contestsData, error: cErr } = await supabase
-        .from('contests')
-        .select('*')
-        .eq('organizer_id', user.id);
-
-      if (cErr) console.error("Contest Error:", cErr.message);
-
-      // 4. Fetch Candidates
-      const { data: candData } = await supabase.from('candidates').select('*');
-
-      // Map data safely
-      const finalContests = (contestsData || []).map(contest => ({
-        ...contest,
-        candidates: (candData || []).filter(c => c.contest_id === contest.id)
-      }));
-
-      setData({
-        events: eventsRes.data || [],
-        contests: finalContests,
-        tickets: ticketsData || [],
-        profile: { ...user, ...profileRes.data }
-      });
-
-      if (profileRes.data?.paystack_subaccount_code) {
-        setPaystackConfig({
-          businessName: profileRes.data.business_name || "",
-          bankCode: profileRes.data.bank_code || "",
-          accountNumber: profileRes.data.account_number || "",
-          subaccountCode: profileRes.data.paystack_subaccount_code,
-          isVerified: true
-        });
-      }
-
-    } catch (err) {
-      console.error("Dashboard caught error:", err);
-    } finally {
-      // THIS MUST RUN to remove the loading screen
-      setLoading(false);
-      setRefreshing(false);
+    if (authError || !authData?.user) {
+      console.log("No valid session found, redirecting...");
+      router.push('/login');
+      return;
     }
-  }, [router]);
+
+    const user = authData.user;
+
+    // 2. Fetch data in parallel but handle individual failures
+    const [profileRes, eventsRes, contestsRes, ticketsRes, candidatesRes] = await Promise.allSettled([
+      supabase.from('profiles').select('*').eq('id', user.id).single(),
+      supabase.from('events').select('*').eq('organizer_id', user.id).order('created_at', { ascending: false }),
+      supabase.from('contests').select('*').eq('organizer_id', user.id),
+      supabase.from('tickets').select('*, events!inner(title, organizer_id)').eq('events.organizer_id', user.id),
+      supabase.from('candidates').select('*')
+    ]);
+
+    // Helper to get data safely from settled promises
+    const getRes = (res) => (res.status === 'fulfilled' ? res.value.data : []);
+    const getSingle = (res) => (res.status === 'fulfilled' ? res.value.data : null);
+
+    const profileData = getSingle(profileRes);
+    const eventsData = getRes(eventsRes);
+    const contestsData = getRes(contestsRes);
+    const ticketsData = getRes(ticketsRes);
+    const candidatesData = getRes(candidatesRes);
+
+    // 3. Map Data
+    const finalContests = (contestsData || []).map(contest => ({
+      ...contest,
+      candidates: (candidatesData || []).filter(c => c.contest_id === contest.id)
+    }));
+
+    setData({
+      events: eventsData || [],
+      contests: finalContests,
+      tickets: ticketsData || [],
+      profile: { ...user, ...profileData }
+    });
+
+    if (profileData?.paystack_subaccount_code) {
+      setPaystackConfig({
+        businessName: profileData.business_name || "",
+        bankCode: profileData.bank_code || "",
+        accountNumber: profileData.account_number || "",
+        subaccountCode: profileData.paystack_subaccount_code,
+        isVerified: true
+      });
+    }
+
+  } catch (err) {
+    console.error("Dashboard engine crashed:", err);
+  } finally {
+    setLoading(false);
+    setRefreshing(false);
+  }
+}, [router]);
   // --- 4. COMPUTED ANALYTICS (95/5 SPLIT) ---
   const stats = useMemo(() => {
     const totalGross = data.tickets.reduce((acc, t) => acc + (parseFloat(t.amount) || 0), 0);
