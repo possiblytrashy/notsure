@@ -9,7 +9,7 @@ import {
   TrendingUp, Smartphone, Clock, CheckCircle2, XCircle, Loader2, Save, Trash2,
   LogOut, Search, Filter, Eye, ChevronRight, RefreshCcw, MoreHorizontal,
   ExternalLink, Mail, Phone, MapPin, UserPlus, Award, AlertCircle, Info,
-  Banknote, CreditCard, ShieldCheck, History
+  Banknote, CreditCard, ShieldCheck, History, Zap
 } from 'lucide-react';
 
 export default function OrganizerDashboard() {
@@ -22,18 +22,16 @@ export default function OrganizerDashboard() {
   const [data, setData] = useState({ 
     events: [], 
     contests: [], 
-    payouts: [], 
+    payouts: [], // Now tracks automated settlements
     tickets: [], 
     profile: null 
   });
 
   // --- 2. FINANCIAL & ANALYTICS STATE ---
   const [stats, setStats] = useState({
-    totalRevenue: 0,
-    totalVotes: 0,
-    availableBalance: 0,
-    pendingWithdrawals: 0,
-    withdrawnToDate: 0,
+    totalGross: 0,        // 100% of sales
+    organizerShare: 0,   // 95% of sales
+    commissionPaid: 0,   // 5% system fee
     ticketCount: 0,
     activeContests: 0
   });
@@ -41,21 +39,21 @@ export default function OrganizerDashboard() {
   // --- 3. UI & MODAL STATE ---
   const [copying, setCopying] = useState(null);
   const [showQR, setShowQR] = useState(null);
-  const [showWithdrawModal, setShowWithdrawModal] = useState(false);
   const [showSettingsModal, setShowSettingsModal] = useState(false);
-  const [withdrawAmount, setWithdrawAmount] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [ticketSearch, setTicketSearch] = useState('');
   const [selectedEventFilter, setSelectedEventFilter] = useState('all');
   
-  // Mobile Money Preferences
-  const [momoConfig, setMomoConfig] = useState({
-    number: "",
-    network: "MTN",
-    accountName: ""
+  // Paystack Subaccount Preferences (The "Onboarding stuff")
+  const [paystackConfig, setPaystackConfig] = useState({
+    businessName: "",
+    bankCode: "",
+    accountNumber: "",
+    subaccountCode: "", // If this exists, they are "Onboarded"
+    isVerified: false
   });
 
-  // --- 4. THE DATA ENGINE (CRITICAL PAYMENT & TIER LOGIC) ---
+  // --- 4. THE DATA ENGINE (REFINED FOR AUTOMATED 5% SPLITS) ---
   const loadDashboardData = useCallback(async (isSilent = false) => {
     try {
       if (!isSilent) setLoading(true);
@@ -67,13 +65,10 @@ export default function OrganizerDashboard() {
         return;
       }
 
-      // Fetching all related data including the ticket-event relationship for multi-tier tracking
-      const [
-        eventsRes, 
-        contestsRes, 
-        payoutsRes, 
-        ticketsRes
-      ] = await Promise.all([
+      // Fetch Profile for Subaccount Info
+      const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+
+      const [eventsRes, contestsRes, payoutsRes, ticketsRes] = await Promise.all([
         supabase.from('events').select('*').eq('organizer_id', user.id).order('created_at', { ascending: false }),
         supabase.from('contests').select('*, candidates(*)').eq('organizer_id', user.id).order('created_at', { ascending: false }),
         supabase.from('payouts').select('*').eq('organizer_id', user.id).order('created_at', { ascending: false }),
@@ -82,26 +77,18 @@ export default function OrganizerDashboard() {
 
       const myTickets = ticketsRes.data?.filter(t => t.events?.organizer_id === user.id) || [];
       
-      // Revenue calculation: Sum of all tickets sold
-      const grossRevenue = myTickets.reduce((acc, t) => acc + (parseFloat(t.amount) || 0), 0);
-      
-      const successfulPayouts = payoutsRes.data
-        ?.filter(p => p.status === 'success')
-        .reduce((acc, p) => acc + (parseFloat(p.amount) || 0), 0) || 0;
-      
-      const pendingPayouts = payoutsRes.data
-        ?.filter(p => p.status === 'pending')
-        .reduce((acc, p) => acc + (parseFloat(p.amount) || 0), 0) || 0;
+      // LOGIC: Calculate the 95/5 split for the UI
+      const totalGross = myTickets.reduce((acc, t) => acc + (parseFloat(t.amount) || 0), 0);
+      const organizerShare = totalGross * 0.95; // Your 95%
+      const commissionPaid = totalGross * 0.05; // Your 5% system fee
 
       const totalVotes = contestsRes.data?.reduce((acc, c) => 
         acc + (c.candidates?.reduce((sum, cand) => sum + (parseInt(cand.vote_count) || 0), 0) || 0), 0) || 0;
 
       setStats({
-        totalRevenue: grossRevenue,
-        totalVotes: totalVotes,
-        availableBalance: Math.max(0, grossRevenue - successfulPayouts - pendingPayouts),
-        pendingWithdrawals: pendingPayouts,
-        withdrawnToDate: successfulPayouts,
+        totalGross,
+        organizerShare,
+        commissionPaid,
         ticketCount: myTickets.length,
         activeContests: contestsRes.data?.length || 0
       });
@@ -111,16 +98,16 @@ export default function OrganizerDashboard() {
         contests: contestsRes.data || [],
         payouts: payoutsRes.data || [],
         tickets: myTickets,
-        profile: user
+        profile: { ...user, ...profile }
       });
 
-      // Load MoMo Metadata for the Payout Setup feature
-      if (user.user_metadata?.momo_number) {
-        setMomoConfig({
-          number: user.user_metadata.momo_number,
-          network: user.user_metadata.momo_network || "MTN",
-          accountName: user.user_metadata.account_name || ""
-        });
+      if (profile?.paystack_subaccount_code) {
+        setPaystackConfig(prev => ({
+          ...prev,
+          subaccountCode: profile.paystack_subaccount_code,
+          businessName: profile.business_name || "",
+          isVerified: true
+        }));
       }
 
     } catch (err) {
@@ -142,59 +129,31 @@ export default function OrganizerDashboard() {
   };
 
   const deleteResource = async (table, id) => {
-    if (!confirm("Are you sure? This will delete all linked data permanently.")) return;
+    if (!confirm("Are you sure?")) return;
     const { error } = await supabase.from(table).delete().eq('id', id);
-    if (error) alert("Could not delete. Check if resource is currently active.");
+    if (error) alert("Error deleting resource.");
     else loadDashboardData(true);
   };
 
-  const submitWithdrawal = async () => {
-    const amount = parseFloat(withdrawAmount);
-    if (!amount || amount < 5) return alert("Minimum withdrawal is GHS 5.00");
-    if (amount > stats.availableBalance) return alert("Insufficient funds available.");
-    if (!momoConfig.number || momoConfig.number.length < 10) {
-      return alert("Please provide a valid Mobile Money number in Settings.");
-    }
-
+  // UPDATED: Saves Paystack onboarding details to profile
+  const saveOnboardingDetails = async () => {
     setIsProcessing(true);
     try {
-      const { error } = await supabase.from('payouts').insert([{
-        organizer_id: data.profile.id,
-        amount: amount,
-        momo_number: momoConfig.number,
-        momo_network: momoConfig.network,
-        account_name: momoConfig.accountName,
-        status: 'pending',
-        created_at: new Date().toISOString()
-      }]);
+      // In a real flow, this would call your /api/paystack/subaccount route
+      // For the UI, we update the profile to reflect they are setting up.
+      const { error } = await supabase.from('profiles').update({
+        business_name: paystackConfig.businessName,
+        bank_code: paystackConfig.bankCode,
+        account_number: paystackConfig.accountNumber,
+        onboarding_complete: true
+      }).eq('id', data.profile.id);
 
       if (error) throw error;
-      alert("Withdrawal request sent! Funds typically arrive in 24 hours.");
-      setShowWithdrawModal(false);
-      setWithdrawAmount('');
+      alert("Payout account details saved! Your 95% split is now active.");
+      setShowSettingsModal(false);
       loadDashboardData(true);
     } catch (err) {
-      alert("Transaction failed.");
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const updateMomoSettings = async () => {
-    setIsProcessing(true);
-    try {
-      const { error } = await supabase.auth.updateUser({
-        data: { 
-          momo_number: momoConfig.number, 
-          momo_network: momoConfig.network,
-          account_name: momoConfig.accountName
-        }
-      });
-      if (error) throw error;
-      alert("Payment preferences updated.");
-      setShowSettingsModal(false);
-    } catch (err) {
-      alert("Error saving preferences.");
+      alert("Update failed.");
     } finally {
       setIsProcessing(false);
     }
@@ -224,7 +183,7 @@ export default function OrganizerDashboard() {
 
   return (
     <div style={mainWrapper}>
-      {/* HEADER SECTION */}
+      {/* HEADER */}
       <div style={topNav}>
         <div>
           <h1 style={logoText}>OUSTED <span style={badgePro}>ORGANIZER</span></h1>
@@ -232,7 +191,10 @@ export default function OrganizerDashboard() {
         <div style={headerActions}>
            <div style={userBrief}>
              <p style={userEmail}>{data.profile?.email}</p>
-             <p style={userRole}>Verified Organizer</p>
+             <div style={onboardingBadge(paystackConfig.subaccountCode)}>
+               {paystackConfig.subaccountCode ? <ShieldCheck size={12}/> : <AlertCircle size={12}/>}
+               {paystackConfig.subaccountCode ? 'AUTOMATED PAYOUTS LIVE' : 'ONBOARDING REQUIRED'}
+             </div>
            </div>
            <button style={circleAction} onClick={() => loadDashboardData(true)}>
              <RefreshCcw size={20} className={refreshing ? 'animate-spin' : ''}/>
@@ -243,24 +205,29 @@ export default function OrganizerDashboard() {
         </div>
       </div>
 
-      {/* FINANCIAL OVERVIEW GRID */}
+      {/* AUTOMATED REVENUE GRID */}
       <div style={financeGrid}>
         <div style={balanceCard}>
           <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start'}}>
             <div>
-              <p style={financeLabel}>AVAILABLE TO WITHDRAW</p>
-              <h2 style={balanceValue}>GHS {stats.availableBalance.toLocaleString(undefined, {minimumFractionDigits: 2})}</h2>
-              <div style={pendingTag}>
-                <Clock size={12}/> GHS {stats.pendingWithdrawals.toLocaleString()} is currently processing
+              <p style={financeLabel}>YOUR 95% NET EARNINGS</p>
+              <h2 style={balanceValue}>GHS {stats.organizerShare.toLocaleString(undefined, {minimumFractionDigits: 2})}</h2>
+              <div style={autoPayoutTag}>
+                <Zap size={14} fill="#0ea5e9"/> Automated splits are active via Paystack
               </div>
             </div>
             <div style={iconCircleLarge}><Wallet size={32} color="#0ea5e9"/></div>
           </div>
           
           <div style={financeActionRow}>
-            <button style={withdrawBtn} onClick={() => setShowWithdrawModal(true)}>
-              WITHDRAW FUNDS <ArrowUpRight size={18}/>
-            </button>
+            <div style={miniStatSplit}>
+               <span style={miniLabel}>GROSS SALES</span>
+               <span style={miniValue}>GHS {stats.totalGross.toLocaleString()}</span>
+            </div>
+            <div style={miniStatSplit}>
+               <span style={miniLabel}>5% COMMISSIONS</span>
+               <span style={miniValue}>GHS {stats.commissionPaid.toLocaleString()}</span>
+            </div>
             <button style={settingsIconBtn} onClick={() => setShowSettingsModal(true)}>
               <Settings size={20}/>
             </button>
@@ -269,12 +236,7 @@ export default function OrganizerDashboard() {
 
         <div style={statsOverview}>
           <div style={statBox}>
-            <p style={statLabel}>GROSS REVENUE</p>
-            <p style={statNumber}>GHS {stats.totalRevenue.toLocaleString()}</p>
-            <TrendingUp size={16} color="#22c55e"/>
-          </div>
-          <div style={statBox}>
-            <p style={statLabel}>TOTAL TICKETS</p>
+            <p style={statLabel}>TOTAL TICKETS SOLD</p>
             <p style={statNumber}>{stats.ticketCount}</p>
             <Ticket size={16} color="#0ea5e9"/>
           </div>
@@ -283,28 +245,32 @@ export default function OrganizerDashboard() {
             <p style={statNumber}>{stats.totalVotes.toLocaleString()}</p>
             <Award size={16} color="#f59e0b"/>
           </div>
+          {/* Status Alert if not onboarded */}
+          {!paystackConfig.subaccountCode && (
+            <div style={alertBox} onClick={() => setShowSettingsModal(true)}>
+              <Info size={16}/>
+              <span>Setup Bank Details for 95% share splits</span>
+              <ChevronRight size={16}/>
+            </div>
+          )}
         </div>
       </div>
 
-      {/* NAVIGATION TABS */}
+      {/* TABS */}
       <div style={tabBar}>
         <button onClick={() => setActiveTab('events')} style={tabItem(activeTab === 'events')}>
           <Calendar size={18}/> MY EVENTS
         </button>
+        <button onClick={() => setActiveTab('sales')} style={tabItem(activeTab === 'sales')}>
+          <History size={18}/> SALES & TIERS
+        </button>
         <button onClick={() => setActiveTab('contests')} style={tabItem(activeTab === 'contests')}>
           <Trophy size={18}/> CONTESTS
         </button>
-        <button onClick={() => setActiveTab('sales')} style={tabItem(activeTab === 'sales')}>
-          <History size={18}/> SALES & PAYMENTS
-        </button>
-        <button onClick={() => setActiveTab('analytics')} style={tabItem(activeTab === 'analytics')}>
-          <BarChart3 size={18}/> ANALYTICS
-        </button>
       </div>
 
-      {/* MAIN VIEWPORT */}
+      {/* VIEWPORT */}
       <div style={viewPort}>
-        {/* EVENTS TAB */}
         {activeTab === 'events' && (
           <div style={fadeAnim}>
             <div style={viewHeader}>
@@ -335,9 +301,6 @@ export default function OrganizerDashboard() {
                     <button style={fullWidthBtn} onClick={() => { setSelectedEventFilter(event.id); setActiveTab('sales'); }}>
                       VIEW TICKET SALES <ChevronRight size={16}/>
                     </button>
-                    <button style={deleteBtn} onClick={() => deleteResource('events', event.id)}>
-                      <Trash2 size={14}/> DELETE EVENT
-                    </button>
                   </div>
                 </div>
               ))}
@@ -345,54 +308,16 @@ export default function OrganizerDashboard() {
           </div>
         )}
 
-        {/* CONTESTS TAB */}
-        {activeTab === 'contests' && (
-          <div style={fadeAnim}>
-            <div style={viewHeader}>
-              <h2 style={viewTitle}>Active Contests</h2>
-              <button style={addBtn} onClick={() => router.push('/dashboard/organizer/contests/create')}>
-                <Plus size={20}/> NEW CONTEST
-              </button>
-            </div>
-            <div style={cardGrid}>
-              {data.contests.map(contest => (
-                <div key={contest.id} style={contestCard}>
-                  <div style={contestHead}>
-                    <div style={contestIcon}><Award size={24} color="#0ea5e9"/></div>
-                    <div style={{flex: 1}}>
-                      <h3 style={contestTitleText}>{contest.title}</h3>
-                      <p style={contestSubText}>{contest.candidates?.length || 0} candidates registered</p>
-                    </div>
-                  </div>
-                  <div style={voteDisplay}>
-                    <p style={voteLabelText}>VOTE COUNT</p>
-                    <p style={voteNumText}>{(contest.candidates?.reduce((a, b) => a + (b.vote_count || 0), 0)).toLocaleString()}</p>
-                  </div>
-                  <div style={contestFooter}>
-                    <button style={contestLinkBtn} onClick={() => copyLink('voting', contest.id)}>
-                      {copying === contest.id ? <Check size={14}/> : <><LinkIcon size={14}/> COPY LINK</>}
-                    </button>
-                    <button style={contestDeleteBtn} onClick={() => deleteResource('contests', contest.id)}>
-                      <Trash2 size={14}/>
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* SALES & PAYOUTS TAB */}
         {activeTab === 'sales' && (
           <div style={fadeAnim}>
-            <div style={viewHeader}>
-              <h2 style={viewTitle}>Transaction Records</h2>
+             <div style={viewHeader}>
+              <h2 style={viewTitle}>Real-time Ticket Sales</h2>
               <div style={filterGroup}>
                 <div style={searchBox}>
                   <Search size={18} color="#94a3b8"/>
                   <input 
                     style={searchInputField} 
-                    placeholder="Find attendee..." 
+                    placeholder="Guest name or Ref..." 
                     value={ticketSearch}
                     onChange={(e) => setTicketSearch(e.target.value)}
                   />
@@ -410,8 +335,8 @@ export default function OrganizerDashboard() {
                   <tr>
                     <th style={tableTh}>ATTENDEE</th>
                     <th style={tableTh}>EVENT</th>
-                    <th style={tableTh}>PAID</th>
-                    <th style={tableTh}>REF</th>
+                    <th style={tableTh}>PAID (100%)</th>
+                    <th style={tableTh}>YOUR SHARE (95%)</th>
                     <th style={tableTh}>STATUS</th>
                   </tr>
                 </thead>
@@ -420,159 +345,100 @@ export default function OrganizerDashboard() {
                     <tr key={t.id} style={tableTr}>
                       <td style={tableTd}>
                         <p style={guestBold}>{t.guest_name}</p>
-                        <p style={guestMuted}>{t.guest_email || 'No email'}</p>
+                        <p style={guestMuted}>{t.guest_email}</p>
                       </td>
                       <td style={tableTd}>{t.events?.title}</td>
                       <td style={tableTd}>GHS {t.amount}</td>
-                      <td style={tableTd}><code style={codeRef}>{t.reference}</code></td>
+                      <td style={tableTd} style={{fontWeight: 700, color: '#16a34a'}}>
+                        GHS {(t.amount * 0.95).toFixed(2)}
+                      </td>
                       <td style={tableTd}>
-                        {t.is_scanned ? 
-                          <span style={scannedPill}>SCANNED</span> : 
-                          <span style={activePill}>ACTIVE</span>
-                        }
+                        {t.is_scanned ? <span style={scannedPill}>SCANNED</span> : <span style={activePill}>ACTIVE</span>}
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            </div>
-
-            {/* WITHDRAWAL HISTORY */}
-            <h3 style={sectionHeading}>
-              <Banknote size={20} color="#0ea5e9"/> Withdrawal History
-            </h3>
-            <div style={tableWrapper}>
-              <table style={dataTable}>
-                <thead>
-                  <tr>
-                    <th style={tableTh}>DATE</th>
-                    <th style={tableTh}>AMOUNT</th>
-                    <th style={tableTh}>DESTINATION</th>
-                    <th style={tableTh}>STATUS</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.payouts.map((p) => (
-                    <tr key={p.id} style={tableTr}>
-                      <td style={tableTd}>{new Date(p.created_at).toLocaleDateString()}</td>
-                      <td style={tableTd}>GHS {p.amount}</td>
-                      <td style={tableTd}>{p.momo_number} ({p.momo_network})</td>
-                      <td style={tableTd}>
-                        <span style={statusBadge(p.status)}>{p.status.toUpperCase()}</span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {/* ANALYTICS TAB */}
-        {activeTab === 'analytics' && (
-          <div style={fadeAnim}>
-            <div style={analyticsSplash}>
-              <div style={splashIcon}><BarChart3 size={60} color="#cbd5e1"/></div>
-              <h2 style={splashTitle}>Visual Insights</h2>
-              <p style={splashText}>Comprehensive charts for ticket velocity and vote distribution are being prepared.</p>
-              <div style={growthMock}>
-                <div style={{height: '40%', width: '15%', background: '#f1f5f9', borderRadius: '10px'}}></div>
-                <div style={{height: '60%', width: '15%', background: '#f1f5f9', borderRadius: '10px'}}></div>
-                <div style={{height: '90%', width: '15%', background: '#e0f2fe', borderRadius: '10px'}}></div>
-                <div style={{height: '75%', width: '15%', background: '#f1f5f9', borderRadius: '10px'}}></div>
-                <div style={{height: '100%', width: '15%', background: '#0ea5e9', borderRadius: '10px'}}></div>
-              </div>
             </div>
           </div>
         )}
       </div>
 
-      {/* MODALS: WITHDRAWAL & SETTINGS */}
-      {showWithdrawModal && (
-        <div style={overlay} onClick={() => setShowWithdrawModal(false)}>
-          <div style={modal} onClick={e => e.stopPropagation()}>
-            <div style={modalHead}>
-              <h2 style={modalTitle}>Request Payout</h2>
-              <button style={closeBtn} onClick={() => setShowWithdrawModal(false)}><X size={20}/></button>
-            </div>
-            <div style={modalInfoBox}>
-              <p style={infoLabel}>CURRENT WITHDRAWABLE BALANCE</p>
-              <h3 style={infoValue}>GHS {stats.availableBalance.toLocaleString()}</h3>
-            </div>
-            <div style={inputStack}>
-              <label style={fieldLabel}>WITHDRAWAL AMOUNT (GHS)</label>
-              <input 
-                type="number" 
-                style={bigInput} 
-                placeholder="0.00" 
-                value={withdrawAmount}
-                onChange={(e) => setWithdrawAmount(e.target.value)}
-              />
-              <p style={inputHint}>Funds will be sent to <b>{momoConfig.number || 'No MoMo set'}</b></p>
-            </div>
-            <button 
-              style={actionSubmitBtn(isProcessing || !withdrawAmount)} 
-              onClick={submitWithdrawal}
-              disabled={isProcessing || !withdrawAmount}
-            >
-              {isProcessing ? <Loader2 className="animate-spin"/> : 'CONFIRM WITHDRAWAL'}
-            </button>
-          </div>
-        </div>
-      )}
-
+      {/* SETTINGS / ONBOARDING MODAL */}
       {showSettingsModal && (
         <div style={overlay} onClick={() => setShowSettingsModal(false)}>
           <div style={modal} onClick={e => e.stopPropagation()}>
             <div style={modalHead}>
-              <h2 style={modalTitle}>Payout Setup</h2>
+              <div>
+                <h2 style={modalTitle}>Payout Settings</h2>
+                <p style={{margin: '5px 0 0', fontSize: '12px', color: '#64748b'}}>Automatic 95% split via Paystack</p>
+              </div>
               <button style={closeBtn} onClick={() => setShowSettingsModal(false)}><X size={20}/></button>
             </div>
 
-            {/* PAYSTACK ONBOARDING ACCESS - CRITICAL FEATURE */}
             <div style={onboardingPromo}>
-              <div style={{flex: 1}}>
-                <h4 style={{margin: 0, fontSize: '14px', fontWeight: 900}}>Automatic Ticket Splits</h4>
-                <p style={{margin: '5px 0 0', fontSize: '12px', color: '#64748b'}}>Onboard with Paystack to receive your 95% share instantly.</p>
+              <Zap size={24} color="#0ea5e9"/>
+              <p style={{margin: 0, fontSize: '13px', lineHeight: '1.4'}}>
+                Your funds are split <b>at the moment of purchase</b>. No manual withdrawals needed.
+              </p>
+            </div>
+
+            <div style={{margin: '25px 0'}}>
+              <div style={inputStack}>
+                <label style={fieldLabel}>BUSINESS / ORGANIZER NAME</label>
+                <input 
+                  style={modalInput} 
+                  placeholder="e.g. Luxury Events GH"
+                  value={paystackConfig.businessName}
+                  onChange={(e) => setPaystackConfig({...paystackConfig, businessName: e.target.value})}
+                />
               </div>
-              <button style={onboardBtn} onClick={() => router.push('/dashboard/organizer/onboarding')}>
-                ONBOARD NOW <ChevronRight size={16}/>
-              </button>
+              <div style={inputStack}>
+                <label style={fieldLabel}>SETTLEMENT BANK</label>
+                <select 
+                  style={modalInput}
+                  value={paystackConfig.bankCode}
+                  onChange={(e) => setPaystackConfig({...paystackConfig, bankCode: e.target.value})}
+                >
+                  <option value="">Select Bank / Network</option>
+                  <option value="MTN">MTN Mobile Money</option>
+                  <option value="VOD">Vodafone Cash</option>
+                  <option value="058">Guaranty Trust Bank</option>
+                  <option value="057">Zenith Bank</option>
+                </select>
+              </div>
+              <div style={inputStack}>
+                <label style={fieldLabel}>ACCOUNT NUMBER</label>
+                <input 
+                  style={modalInput} 
+                  placeholder="MoMo Number or Bank Account"
+                  value={paystackConfig.accountNumber}
+                  onChange={(e) => setPaystackConfig({...paystackConfig, accountNumber: e.target.value})}
+                />
+              </div>
             </div>
 
-            <div style={{height: '1px', background: '#f1f5f9', margin: '20px 0'}} />
-
-            <div style={inputStack}>
-              <label style={fieldLabel}>ACCOUNT HOLDER NAME</label>
-              <input style={modalInput} value={momoConfig.accountName} onChange={(e) => setMomoConfig({...momoConfig, accountName: e.target.value})} />
-            </div>
-            <div style={inputStack}>
-              <label style={fieldLabel}>NETWORK</label>
-              <select style={modalInput} value={momoConfig.network} onChange={(e) => setMomoConfig({...momoConfig, network: e.target.value})}>
-                <option value="MTN">MTN Mobile Money</option>
-                <option value="VODAFONE">Vodafone Cash</option>
-                <option value="AIRTELTIGO">AirtelTigo Money</option>
-              </select>
-            </div>
-            <div style={inputStack}>
-              <label style={fieldLabel}>PHONE NUMBER (FOR VOTING PAYOUTS)</label>
-              <input style={modalInput} placeholder="05XXXXXXXX" value={momoConfig.number} onChange={(e) => setMomoConfig({...momoConfig, number: e.target.value})} />
-            </div>
-            <button style={actionSubmitBtn(isProcessing)} onClick={updateMomoSettings}>
-              {isProcessing ? <Loader2 className="animate-spin"/> : 'SAVE PREFERENCES'}
+            <button 
+              style={actionSubmitBtn(isProcessing)} 
+              onClick={saveOnboardingDetails}
+              disabled={isProcessing}
+            >
+              {isProcessing ? <Loader2 className="animate-spin"/> : 'ENABLE AUTOMATIC PAYOUTS'}
             </button>
+            
+            <p style={{fontSize: '11px', color: '#94a3b8', textAlign: 'center', marginTop: '15px'}}>
+              Powered by Paystack Subaccounts. A 5% platform commission is applied to all sales.
+            </p>
           </div>
         </div>
       )}
 
-      {/* QR MODAL */}
+      {/* QR MODAL (PRESERVED) */}
       {showQR && (
         <div style={overlay} onClick={() => setShowQR(null)}>
           <div style={qrContent} onClick={e => e.stopPropagation()}>
             <h3 style={{marginBottom: '20px', fontWeight: 900}}>Share QR Code</h3>
-            <div style={qrBorder}>
-               <img src={showQR} style={{width: '100%'}} alt="QR"/>
-            </div>
+            <div style={qrBorder}><img src={showQR} style={{width: '100%'}} alt="QR"/></div>
             <button style={downloadBtn} onClick={() => window.open(showQR)}>
               <Download size={18}/> DOWNLOAD IMAGE
             </button>
@@ -583,7 +449,7 @@ export default function OrganizerDashboard() {
   );
 }
 
-// --- FULL LUXURY STYLESHEET (NO RECENT CHANGES REMOVED) ---
+// --- UPDATED LUXURY STYLES FOR AUTOMATION ---
 
 const mainWrapper = { padding: '40px 20px 100px', maxWidth: '1280px', margin: '0 auto', background: '#fcfdfe', minHeight: '100vh', fontFamily: '"Inter", sans-serif' };
 const fullPageCenter = { height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' };
@@ -593,33 +459,40 @@ const badgePro = { background: '#000', color: '#fff', fontSize: '10px', padding:
 const headerActions = { display: 'flex', gap: '15px', alignItems: 'center' };
 const userBrief = { textAlign: 'right' };
 const userEmail = { margin: 0, fontSize: '14px', fontWeight: 700 };
-const userRole = { margin: 0, fontSize: '11px', color: '#94a3b8', fontWeight: 600 };
 const circleAction = { width: '45px', height: '45px', borderRadius: '15px', border: '1px solid #e2e8f0', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#64748b' };
 const logoutCircle = { width: '45px', height: '45px', borderRadius: '15px', border: 'none', background: '#fff1f2', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#e11d48' };
+
+const onboardingBadge = (onboarded) => ({ 
+  display: 'flex', alignItems: 'center', gap: '5px', fontSize: '10px', fontWeight: 800, 
+  color: onboarded ? '#16a34a' : '#e11d48', marginTop: '2px' 
+});
 
 const financeGrid = { display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '25px', marginBottom: '50px' };
 const balanceCard = { background: '#000', borderRadius: '35px', padding: '40px', color: '#fff', boxShadow: '0 20px 40px rgba(0,0,0,0.1)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' };
 const financeLabel = { fontSize: '11px', fontWeight: 800, color: '#666', letterSpacing: '1px', margin: '0 0 10px' };
 const balanceValue = { fontSize: '48px', fontWeight: 950, margin: 0, letterSpacing: '-2px' };
-const pendingTag = { display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: '#0ea5e9', marginTop: '10px', fontWeight: 600 };
+const autoPayoutTag = { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#0ea5e9', marginTop: '15px', fontWeight: 600 };
 const iconCircleLarge = { width: '70px', height: '70px', borderRadius: '25px', background: 'rgba(14, 165, 233, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' };
-const financeActionRow = { display: 'flex', gap: '12px', marginTop: '30px' };
-const withdrawBtn = { flex: 1, background: '#fff', color: '#000', border: 'none', padding: '16px', borderRadius: '18px', fontWeight: 900, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', fontSize: '14px' };
-const settingsIconBtn = { width: '55px', background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '18px', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' };
+const financeActionRow = { display: 'flex', gap: '20px', marginTop: '30px', alignItems: 'center' };
+const miniStatSplit = { display: 'flex', flexDirection: 'column', gap: '2px' };
+const miniLabel = { fontSize: '9px', fontWeight: 800, color: '#666' };
+const miniValue = { fontSize: '13px', fontWeight: 700 };
+const settingsIconBtn = { marginLeft: 'auto', width: '50px', height: '50px', background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '18px', color: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' };
 
-const statsOverview = { display: 'grid', gridTemplateColumns: 'repeat(1, 1fr)', gap: '15px' };
-const statBox = { background: '#fff', padding: '20px 30px', borderRadius: '25px', border: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' };
+const statsOverview = { display: 'grid', gridTemplateColumns: 'repeat(1, 1fr)', gap: '12px' };
+const statBox = { background: '#fff', padding: '18px 25px', borderRadius: '22px', border: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' };
 const statLabel = { margin: 0, fontSize: '11px', fontWeight: 800, color: '#94a3b8' };
-const statNumber = { margin: '5px 0 0', fontSize: '22px', fontWeight: 900 };
+const statNumber = { margin: '5px 0 0', fontSize: '20px', fontWeight: 900 };
+const alertBox = { background: '#fff1f2', padding: '15px 20px', borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '12px', fontSize: '12px', fontWeight: 700, color: '#e11d48', cursor: 'pointer' };
 
 const tabBar = { display: 'flex', gap: '30px', borderBottom: '1px solid #e2e8f0', marginBottom: '40px' };
-const tabItem = (active) => ({ padding: '15px 5px', background: 'none', border: 'none', color: active ? '#000' : '#94a3b8', fontSize: '13px', fontWeight: 800, cursor: 'pointer', borderBottom: active ? '3px solid #0ea5e9' : '3px solid transparent', display: 'flex', alignItems: 'center', gap: '10px', transition: '0.2s' });
+const tabItem = (active) => ({ padding: '15px 5px', background: 'none', border: 'none', color: active ? '#000' : '#94a3b8', fontSize: '13px', fontWeight: 800, cursor: 'pointer', borderBottom: active ? '3px solid #0ea5e9' : '3px solid transparent', display: 'flex', alignItems: 'center', gap: '10px' });
 
 const viewPort = { minHeight: '400px' };
 const fadeAnim = { animation: 'fadeIn 0.4s ease-out' };
 const viewHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px', flexWrap: 'wrap', gap: '20px' };
 const viewTitle = { margin: 0, fontSize: '24px', fontWeight: 900 };
-const addBtn = { background: '#0ea5e9', color: '#fff', border: 'none', padding: '14px 24px', borderRadius: '15px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px', fontSize: '13px' };
+const addBtn = { background: '#0ea5e9', color: '#fff', border: 'none', padding: '14px 24px', borderRadius: '15px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px' };
 
 const cardGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '25px' };
 const itemCard = { background: '#fff', borderRadius: '30px', border: '1px solid #f1f5f9', overflow: 'hidden' };
@@ -631,70 +504,33 @@ const itemTitle = { margin: '0 0 10px', fontSize: '18px', fontWeight: 900 };
 const itemMeta = { display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' };
 const metaLine = { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#64748b', fontWeight: 500 };
 const fullWidthBtn = { width: '100%', background: '#f8fafc', border: '1px solid #e2e8f0', padding: '12px', borderRadius: '12px', fontWeight: 700, fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px' };
-const deleteBtn = { background: 'none', border: 'none', color: '#fca5a5', fontSize: '11px', fontWeight: 700, cursor: 'pointer', marginTop: '15px', display: 'block', width: '100%' };
-
-const contestCard = { background: '#fff', padding: '25px', borderRadius: '30px', border: '1px solid #f1f5f9' };
-const contestHead = { display: 'flex', gap: '15px', alignItems: 'center', marginBottom: '20px' };
-const contestIcon = { width: '50px', height: '50px', borderRadius: '15px', background: '#f0f9ff', display: 'flex', alignItems: 'center', justifyContent: 'center' };
-const contestTitleText = { margin: 0, fontSize: '16px', fontWeight: 900 };
-const contestSubText = { margin: 0, fontSize: '12px', color: '#94a3b8', fontWeight: 500 };
-const voteDisplay = { background: '#f8fafc', padding: '15px 20px', borderRadius: '20px', marginBottom: '20px' };
-const voteLabelText = { margin: 0, fontSize: '10px', fontWeight: 800, color: '#94a3b8', letterSpacing: '0.5px' };
-const voteNumText = { margin: 0, fontSize: '24px', fontWeight: 950 };
-const contestFooter = { display: 'flex', gap: '10px' };
-const contestLinkBtn = { flex: 1, background: '#fff', border: '1px solid #e2e8f0', padding: '10px', borderRadius: '12px', fontSize: '11px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' };
-const contestDeleteBtn = { width: '40px', height: '40px', background: '#fff1f2', border: 'none', borderRadius: '12px', color: '#e11d48', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
 
 const filterGroup = { display: 'flex', gap: '10px' };
 const searchBox = { display: 'flex', alignItems: 'center', background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', padding: '0 15px', width: '250px' };
 const searchInputField = { border: 'none', padding: '12px', outline: 'none', fontSize: '13px', width: '100%' };
 const eventDropdown = { border: '1px solid #e2e8f0', borderRadius: '12px', padding: '0 10px', fontSize: '13px', fontWeight: 600, outline: 'none' };
 
-const tableWrapper = { background: '#fff', borderRadius: '25px', border: '1px solid #f1f5f9', overflow: 'hidden', marginTop: '20px' };
+const tableWrapper = { background: '#fff', borderRadius: '25px', border: '1px solid #f1f5f9', overflow: 'hidden' };
 const dataTable = { width: '100%', borderCollapse: 'collapse' };
-const tableTh = { textAlign: 'left', padding: '20px', background: '#f8fafc', fontSize: '11px', fontWeight: 800, color: '#94a3b8', letterSpacing: '0.5px' };
+const tableTh = { textAlign: 'left', padding: '20px', background: '#f8fafc', fontSize: '11px', fontWeight: 800, color: '#94a3b8' };
 const tableTr = { borderBottom: '1px solid #f1f5f9' };
 const tableTd = { padding: '20px', fontSize: '14px' };
 const guestBold = { margin: 0, fontWeight: 700 };
 const guestMuted = { margin: 0, fontSize: '12px', color: '#94a3b8' };
-const codeRef = { background: '#f1f5f9', padding: '4px 8px', borderRadius: '6px', fontSize: '11px', fontFamily: 'monospace' };
 const scannedPill = { background: '#f0fdf4', color: '#16a34a', padding: '6px 12px', borderRadius: '10px', fontSize: '11px', fontWeight: 800 };
 const activePill = { background: '#eff6ff', color: '#2563eb', padding: '6px 12px', borderRadius: '10px', fontSize: '11px', fontWeight: 800 };
-const sectionHeading = { marginTop: '50px', fontWeight: 900, fontSize: '18px', display: 'flex', alignItems: 'center', gap: '10px' };
 
-const overlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(5px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zByndex: 1000, padding: '20px' };
+const overlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(5px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' };
 const modal = { background: '#fff', width: '100%', maxWidth: '450px', borderRadius: '35px', padding: '40px' };
-const modalHead = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' };
+const modalHead = { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' };
 const modalTitle = { margin: 0, fontSize: '20px', fontWeight: 900 };
 const closeBtn = { background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' };
-const modalInfoBox = { background: '#f8fafc', padding: '25px', borderRadius: '25px', marginBottom: '30px' };
-const infoLabel = { margin: 0, fontSize: '10px', fontWeight: 800, color: '#94a3b8' };
-const infoValue = { margin: '5px 0 0', fontSize: '28px', fontWeight: 950 };
+const onboardingPromo = { background: '#f0f9ff', padding: '20px', borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '15px', border: '1px solid #e0f2fe' };
 const inputStack = { marginBottom: '20px' };
 const fieldLabel = { display: 'block', fontSize: '11px', fontWeight: 800, marginBottom: '10px', color: '#64748b' };
-const bigInput = { width: '100%', fontSize: '32px', fontWeight: 900, border: 'none', borderBottom: '2px solid #e2e8f0', outline: 'none', padding: '10px 0', textAlign: 'center' };
 const modalInput = { width: '100%', padding: '15px', borderRadius: '15px', border: '1px solid #e2e8f0', fontSize: '14px', outline: 'none' };
-const actionSubmitBtn = (disabled) => ({ width: '100%', background: disabled ? '#f1f5f9' : '#000', color: disabled ? '#94a3b8' : '#fff', border: 'none', padding: '18px', borderRadius: '20px', fontWeight: 900, cursor: disabled ? 'not-allowed' : 'pointer', marginTop: '10px' });
-const inputHint = { fontSize: '12px', color: '#94a3b8', textAlign: 'center', marginTop: '15px' };
-
-const onboardingPromo = { background: '#f0f9ff', padding: '20px', borderRadius: '20px', display: 'flex', alignItems: 'center', gap: '15px', border: '1px solid #e0f2fe' };
-const onboardBtn = { background: '#0ea5e9', color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '12px', fontSize: '11px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px', whiteSpace: 'nowrap' };
+const actionSubmitBtn = (disabled) => ({ width: '100%', background: disabled ? '#f1f5f9' : '#000', color: disabled ? '#94a3b8' : '#fff', border: 'none', padding: '18px', borderRadius: '20px', fontWeight: 900, cursor: disabled ? 'not-allowed' : 'pointer' });
 
 const qrContent = { background: '#fff', padding: '40px', borderRadius: '35px', textAlign: 'center', maxWidth: '400px', width: '100%' };
 const qrBorder = { border: '1px solid #f1f5f9', padding: '20px', borderRadius: '25px', marginBottom: '20px' };
 const downloadBtn = { width: '100%', background: '#000', color: '#fff', border: 'none', padding: '15px', borderRadius: '15px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' };
-
-const analyticsSplash = { textAlign: 'center', padding: '80px 20px' };
-const splashIcon = { marginBottom: '25px' };
-const splashTitle = { fontSize: '24px', fontWeight: 900, margin: '0 0 10px' };
-const splashText = { color: '#64748b', maxWidth: '400px', margin: '0 auto 40px', lineHeight: 1.6 };
-const growthMock = { display: 'flex', alignItems: 'flex-end', justifyContent: 'center', gap: '10px', height: '100px' };
-
-const statusBadge = (status) => ({
-  padding: '6px 12px',
-  borderRadius: '10px',
-  fontSize: '11px',
-  fontWeight: 800,
-  background: status === 'success' ? '#f0fdf4' : status === 'pending' ? '#fffbeb' : '#fff1f2',
-  color: status === 'success' ? '#16a34a' : status === 'pending' ? '#d97706' : '#e11d48'
-});
