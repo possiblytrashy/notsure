@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '../../../../lib/supabase'; // Ensure this path is correct for your project
+import { supabase } from '../../../../lib/supabase'; 
 import { Landmark, Smartphone, CheckCircle, AlertCircle, Loader2, ArrowRight } from 'lucide-react';
 
 export default function Onboarding() {
@@ -33,14 +33,12 @@ export default function Onboarding() {
         throw new Error("Authentication failed. Please log in again.");
       }
 
-      // 2. Call the onboarding API with the userId
+      // 2. Call your Paystack Subaccount API
       const res = await fetch('/api/organizer/onboard', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          userId: user.id, // Critical for the updated API logic
+          userId: user.id,
           business_name: form.name,
           settlement_bank: form.bank,
           account_number: form.account
@@ -50,12 +48,30 @@ export default function Onboarding() {
       const data = await res.json();
       
       if (data.success) {
+        // 3. CRITICAL: Update the Profiles table to prevent the "Empty Table" loop
+        // We use upsert to create the row if it doesn't exist
+        const { error: profileError } = await supabase
+          .from('profiles')
+          .upsert({
+            id: user.id,
+            email: user.email,
+            paystack_subaccount_code: data.subaccount_code, // Assuming your API returns this
+            onboarding_completed: true,
+            updated_at: new Date()
+          }, { onConflict: 'id' });
+
+        if (profileError) throw new Error("Profile sync failed: " + profileError.message);
+
+        // 4. Force refresh the session metadata locally
+        await supabase.auth.refreshSession();
+
         setStatus({ type: 'success', msg: 'Payout account connected successfully!' });
         
-        // 3. Redirect to Create Event page after a short delay
+        // 5. Redirect to the main Dashboard (Fixed from /events/create to avoid 404)
         setTimeout(() => {
-          router.push('/dashboard/events/create');
+          router.push('/dashboard/organizer');
         }, 2000);
+
       } else {
         throw new Error(data.error || "Failed to create payout account.");
       }
