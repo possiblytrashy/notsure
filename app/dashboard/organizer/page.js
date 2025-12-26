@@ -42,34 +42,41 @@ export default function OrganizerDashboard() {
     activeEvents: 0
   });
 
-  // --- 2. DATA ENGINE ---
+  // --- 2. DATA ENGINE (FIXED TO PREVENT ONBOARDING LOOPS) ---
   const loadDashboardData = useCallback(async (isSilent = false) => {
     try {
       if (!isSilent) setLoading(true);
       else setRefreshing(true);
 
-      const { data: { session }, error: authError } = await supabase.auth.refreshSession();
-      const user = session?.user;
-
-      if (authError || !user) {
+      // We use getSession to force a refresh of the user object
+      const { data: { session }, error: authError } = await supabase.auth.getSession();
+      
+      if (authError || !session?.user) {
         router.push('/login');
         return;
       }
 
-      const { data: profileData } = await supabase
+      const user = session.user;
+
+      // Check Profile Table specifically for the subaccount code
+      const { data: profileData, error: profileError } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', user.id)
         .maybeSingle();
 
+      // Check both Auth Metadata and DB Profile (Redundancy to stop loops)
       const subaccount = user.user_metadata?.paystack_subaccount_code || profileData?.paystack_subaccount_code;
-      setIsOnboarded(!!subaccount);
-
-      if (!subaccount) {
+      
+      if (subaccount) {
+        setIsOnboarded(true);
+      } else {
+        setIsOnboarded(false);
         setLoading(false);
-        return;
+        return; // Halt execution so they see the Onboarding Gate
       }
 
+      // Fetch operational data
       const [eventsRes, contestsRes, payoutsRes, ticketsRes] = await Promise.all([
         supabase.from('events').select('*').eq('organizer_id', user.id).order('created_at', { ascending: false }),
         supabase.from('contests').select('*, candidates(*)').eq('organizer_id', user.id).order('created_at', { ascending: false }),
@@ -79,7 +86,7 @@ export default function OrganizerDashboard() {
 
       const myTickets = ticketsRes.data?.filter(t => t.events?.organizer_id === user.id) || [];
       const grossRev = myTickets.reduce((acc, t) => acc + (parseFloat(t.amount) || 0), 0);
-      const netRev = grossRev * 0.95; 
+      const netRev = grossRev * 0.95; // 5% Ousted Split
       
       const successfulPayouts = payoutsRes.data
         ?.filter(p => p.status === 'success')
@@ -103,7 +110,7 @@ export default function OrganizerDashboard() {
       });
 
     } catch (err) {
-      console.error("Dashboard Engine Failure:", err);
+      console.error("Critical Dashboard Error:", err);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -135,7 +142,7 @@ export default function OrganizerDashboard() {
     </div>
   );
 
-  // --- 5. RENDER: ONBOARDING GATE (HOW IT WORKS) ---
+  // --- 5. RENDER: ONBOARDING GATE (ACTIVATION UI) ---
   if (!isOnboarded) return (
     <div style={mainWrapper}>
       <div style={topNav}>
@@ -343,12 +350,21 @@ export default function OrganizerDashboard() {
              </table>
           </div>
         )}
+
+        {activeTab === 'contests' && (
+          <div style={luxuryTableContainer}>
+            <div style={{padding: '50px', textAlign: 'center', color: '#94a3b8'}}>
+               <Trophy size={40} style={{marginBottom: '20px', opacity: 0.5}}/>
+               <p style={{fontWeight: 700}}>Contest management interface loading...</p>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-// --- 7. STYLES (NO OMISSIONS, FIXED HERO DECORATION ERROR) ---
+// --- 7. STYLES ---
 const mainWrapper = { padding: '40px 30px', maxWidth: '1400px', margin: '0 auto', fontFamily: 'Inter, sans-serif', backgroundColor: '#fafafa', minHeight: '100vh' };
 const topNav = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '40px' };
 const logoSection = { display: 'flex', flexDirection: 'column' };
@@ -405,7 +421,7 @@ const netEarningText = { fontWeight: 950, fontSize: '16px', color: '#000' };
 const positiveValue = { color: '#16a34a', fontWeight: 800 };
 const onboardingContainer = { maxWidth: '850px', margin: '40px auto', textAlign: 'center' };
 const onboardHero = { background: '#fff', border: '1px solid #e2e8f0', borderRadius: '50px', padding: '80px 50px', marginBottom: '50px' };
-const heroDecoration = { marginBottom: '30px', display: 'inline-block' }; // FIXED MISSING PROPERTY
+const heroDecoration = { marginBottom: '30px', display: 'inline-block' }; 
 const onboardTitle = { fontSize: '42px', fontWeight: 950, letterSpacing: '-2.5px', margin: '0 0 20px' };
 const onboardSub = { color: '#64748b', fontSize: '18px', maxWidth: '550px', margin: '0 auto 40px', lineHeight: 1.6 };
 const primaryOnboardBtn = { background: '#000', color: '#fff', padding: '24px 50px', borderRadius: '25px', border: 'none', fontWeight: 900, fontSize: '16px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '15px', margin: '0 auto' };
