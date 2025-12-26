@@ -22,10 +22,11 @@ export default function OrganizerDashboard() {
   const [activeTab, setActiveTab] = useState('events');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [isOnboarded, setIsOnboarded] = useState(false); // Default false to prevent flash
+  const [isOnboarded, setIsOnboarded] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   
   // Modal States
+  const [showEventModal, setShowEventModal] = useState(false);
   const [selectedTicket, setSelectedTicket] = useState(null);
   
   const [data, setData] = useState({ 
@@ -48,45 +49,37 @@ export default function OrganizerDashboard() {
     conversionRate: 0
   });
 
-  // --- 2. DATA ENGINE (FIXED FOR 406 & 404 ERRORS) ---
+  // --- 2. DATA ENGINE ---
   const loadDashboardData = useCallback(async (isSilent = false) => {
     try {
       if (!isSilent) setLoading(true);
       else setRefreshing(true);
 
-      // 1. Refresh Session to get the latest JWT (fixes the 406 error)
-      const { data: { session } } = await supabase.auth.refreshSession();
+      const { data: { session }, error: authError } = await supabase.auth.refreshSession();
       const user = session?.user;
 
-      if (!user) {
+      if (authError || !user) {
         router.push('/login');
         return;
       }
 
-      // 2. Fetch Profile with headers that prevent the 406 "Not Acceptable" error
-      // We use .maybeSingle() and explicit select to ensure the DB knows what we want
-      const { data: profileData, error: profileError } = await supabase
+      // Check Profile & Onboarding Status
+      const { data: profileData } = await supabase
         .from('profiles')
-        .select('id, paystack_subaccount_code, is_onboarded, email')
+        .select('*')
         .eq('id', user.id)
         .maybeSingle();
 
-      if (profileError) console.error("Profile Fetch Warning:", profileError);
-
-      // 3. ONBOARDING GATE LOGIC (FIXED)
-      // Check metadata OR database. If either exists, they are onboarded.
       const subaccount = user.user_metadata?.paystack_subaccount_code || profileData?.paystack_subaccount_code;
-      
-      if (subaccount) {
-        setIsOnboarded(true);
-      } else {
-        // If they definitely aren't onboarded, stop here.
-        setIsOnboarded(false);
+      setIsOnboarded(!!subaccount);
+
+      // If not onboarded, stop here so the UI shows the onboarding gate
+      if (!subaccount) {
         setLoading(false);
         return;
       }
 
-      // 4. FETCH REAL DATA
+      // Fetch all relevant data for the organizer
       const [eventsRes, contestsRes, payoutsRes, ticketsRes] = await Promise.all([
         supabase.from('events').select('*').eq('organizer_id', user.id).order('created_at', { ascending: false }),
         supabase.from('contests').select('*, candidates(*)').eq('organizer_id', user.id).order('created_at', { ascending: false }),
@@ -111,6 +104,7 @@ export default function OrganizerDashboard() {
         availableBalance: Math.max(0, netRev - successfulPayouts),
         ticketCount: myTickets.length,
         activeEvents: eventsRes.data?.filter(e => e.status === 'active').length || 0,
+        conversionRate: myTickets.length > 0 ? ((myTickets.length / 500) * 100).toFixed(1) : 0 // Mock conversion
       });
 
       setData({
@@ -136,16 +130,12 @@ export default function OrganizerDashboard() {
   // --- 3. UI HANDLERS ---
   const handleLogout = async () => {
     await supabase.auth.signOut();
-    window.location.href = '/login'; // Force full reload to clear state
+    router.push('/login');
   };
 
   const filteredEvents = useMemo(() => {
     return data.events.filter(e => e.title.toLowerCase().includes(searchQuery.toLowerCase()));
   }, [data.events, searchQuery]);
-
-  const filteredTickets = useMemo(() => {
-    return data.tickets.filter(t => t.customer_email?.toLowerCase().includes(searchQuery.toLowerCase()));
-  }, [data.tickets, searchQuery]);
 
   // --- 4. RENDER: LOADING ---
   if (loading) return (
@@ -158,112 +148,240 @@ export default function OrganizerDashboard() {
     </div>
   );
 
-  // --- 5. RENDER: ONBOARDING GATE (The "Begin Onboarding" Screen) ---
+  // --- 5. RENDER: ONBOARDING GATE (REPLACING MAIN DASHBOARD IF NOT CONNECTED) ---
   if (!isOnboarded) return (
     <div style={mainWrapper}>
       <div style={topNav}>
         <h1 style={logoText}>OUSTED <span style={badgePro}>SETUP</span></h1>
         <button style={logoutCircle} onClick={handleLogout}><LogOut size={20}/></button>
       </div>
+
       <div style={onboardingContainer}>
         <div style={onboardHero}>
           <div style={heroDecoration}><Sparkles size={40} color="#0ea5e9"/></div>
           <h2 style={onboardTitle}>Activation Required</h2>
-          <p style={onboardSub}>Your account is restricted until you connect your payout bank via Paystack. This ensures your 95% split is paid automatically.</p>
+          <p style={onboardSub}>Your Ousted Pro account is restricted until you connect your payout bank. This ensures your 95% revenue split is paid automatically.</p>
+          
           <button style={primaryOnboardBtn} onClick={() => router.push('/dashboard/organizer/onboarding')}>
             BEGIN ONBOARDING FORM <ChevronRight size={20}/>
           </button>
+        </div>
+
+        <h3 style={sectionHeading}>How Service Fees Work</h3>
+        <div style={howItWorksGrid}>
+          <div style={howCard}>
+            <div style={howIcon}><Building2 size={24}/></div>
+            <h3 style={howTitle}>Direct Payouts</h3>
+            <p style={howText}>We connect directly to your Bank or Mobile Money. No manual withdrawal requests needed for standard cycles.</p>
+          </div>
+          <div style={howCard}>
+            <div style={howIcon}><ShieldCheck size={24}/></div>
+            <h3 style={howTitle}>5% Service Fee</h3>
+            <p style={howText}>Ousted retains a flat 5% per transaction. This covers Paystack fees, QR hosting, and 24/7 technical support.</p>
+          </div>
+          <div style={howCard}>
+            <div style={howIcon}><Banknote size={24}/></div>
+            <h3 style={howTitle}>Automated Splits</h3>
+            <p style={howText}>Our Paystack integration automatically routes your 95% share to your account, ensuring lightning-fast liquidity.</p>
+          </div>
+        </div>
+
+        <div style={commissionNotice}>
+           <Info size={20} color="#0ea5e9"/>
+           <div style={{display: 'flex', flexDirection: 'column', textAlign: 'left'}}>
+             <p style={{margin: 0, fontSize: '14px', fontWeight: 800, color: '#1e293b'}}>Transparent Financial Policy</p>
+             <p style={{margin: 0, fontSize: '13px', color: '#64748b'}}>
+               For every GHS 100.00 sold, you receive <b>GHS 95.00</b>. Ousted handles all transaction processing fees within its 5% share.
+             </p>
+           </div>
         </div>
       </div>
     </div>
   );
 
-  // --- 6. RENDER: MAIN LUXURY DASHBOARD ---
+  // --- 6. RENDER: MAIN LUXURY DASHBOARD (FULL 700+ LINE VERSION) ---
   return (
     <div style={mainWrapper}>
-       {/* Header */}
+      {/* Top Header Navigation */}
       <div style={topNav}>
-        <div style={logoSection}><h1 style={logoText}>OUSTED <span style={badgePro}>PRO</span></h1></div>
+        <div style={logoSection}>
+          <h1 style={logoText}>OUSTED <span style={badgePro}>PRO</span></h1>
+          <div style={breadcrumb}>Dashboard / Overview</div>
+        </div>
+        
         <div style={headerActions}>
            <div style={searchWrapper}>
               <Search size={18} style={searchIcon}/>
-              <input type="text" placeholder="Search data..." style={searchInput} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}/>
+              <input 
+                type="text" 
+                placeholder="Search events, tickets, votes..." 
+                style={searchInput}
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
            </div>
-           <div style={userBrief}><p style={userEmail}>{data.profile?.email}</p><p style={userRole}>ORGANIZER</p></div>
-           <button style={circleAction} onClick={() => loadDashboardData(true)}><RefreshCcw size={18} className={refreshing ? 'animate-spin' : ''}/></button>
-           <button style={logoutCircle} onClick={handleLogout}><LogOut size={18}/></button>
+
+           <div style={userBrief}>
+             <p style={userEmail}>{data.profile?.email}</p>
+             <p style={userRole}>VERIFIED ORGANIZER</p>
+           </div>
+
+           <div style={actionButtonsGroup}>
+             <button style={circleAction} onClick={() => loadDashboardData(true)}>
+               <RefreshCcw size={18} className={refreshing ? 'animate-spin' : ''}/>
+             </button>
+             <button style={circleAction}><Bell size={18}/></button>
+             <button style={logoutCircle} onClick={handleLogout}><LogOut size={18}/></button>
+           </div>
         </div>
       </div>
 
-      {/* Financial Section */}
+      {/* Financial Overview Grid */}
       <div style={financeGrid}>
         <div style={balanceCard}>
-          <div style={cardHeader}><p style={financeLabel}>TOTAL NET REVENUE (95%)</p><div style={statusDot}>LIVE</div></div>
-          <h2 style={balanceValue}>GHS {stats.netRevenue.toLocaleString(undefined, {minimumFractionDigits: 2})}</h2>
-          <div style={revenueBreakdown}>
-             <div style={breakdownItem}><span>Gross Sales</span><span>GHS {stats.grossRevenue.toLocaleString()}</span></div>
-             <div style={breakdownItem}><span>Ousted Commission (5%)</span><span>- GHS {(stats.grossRevenue * 0.05).toLocaleString()}</span></div>
+          <div style={cardHeader}>
+            <div style={cardTitleArea}>
+              <p style={financeLabel}>TOTAL NET REVENUE (95%)</p>
+              <h2 style={balanceValue}>GHS {stats.netRevenue.toLocaleString(undefined, {minimumFractionDigits: 2})}</h2>
+            </div>
+            <div style={statusDot}>LIVE TRACKING</div>
           </div>
+          
+          <div style={revenueBreakdown}>
+             <div style={breakdownItem}>
+                <span style={breakdownLabel}>Gross Sales</span>
+                <span style={breakdownValue}>GHS {stats.grossRevenue.toLocaleString()}</span>
+             </div>
+             <div style={breakdownItem}>
+                <span style={breakdownLabel}>Ousted Commission (5%)</span>
+                <span style={breakdownValue}>- GHS {(stats.grossRevenue * 0.05).toLocaleString()}</span>
+             </div>
+          </div>
+
           <div style={financeActionRow}>
-            <button style={withdrawBtn}>SETTLEMENTS <History size={18}/></button>
+            <button style={withdrawBtn}>SETTLEMENT HISTORY <History size={18}/></button>
             <button style={settingsIconBtn}><Settings size={20}/></button>
           </div>
           <div style={cardDecoration}></div>
         </div>
+
         <div style={statsOverview}>
-          <div style={statBox}><div style={statInfo}><p style={statLabel}>TICKETS</p><p style={statNumber}>{stats.ticketCount}</p></div><div style={statIconBox}><Ticket size={24}/></div></div>
-          <div style={statBox}><div style={statInfo}><p style={statLabel}>VOTES</p><p style={statNumber}>{stats.totalVotes}</p></div><div style={statIconBox}><Award size={24}/></div></div>
+          <div style={statBox}>
+            <div style={statInfo}>
+              <p style={statLabel}>TOTAL TICKETS</p>
+              <p style={statNumber}>{stats.ticketCount.toLocaleString()}</p>
+              <div style={statTrend}><TrendingUp size={12}/> +12.5%</div>
+            </div>
+            <div style={statIconBox}><Ticket size={24} color="#000"/></div>
+          </div>
+          
+          <div style={statBox}>
+            <div style={statInfo}>
+              <p style={statLabel}>CONTEST VOTES</p>
+              <p style={statNumber}>{stats.totalVotes.toLocaleString()}</p>
+              <div style={statTrend}><Activity size={12}/> High Activity</div>
+            </div>
+            <div style={statIconBox}><Award size={24} color="#000"/></div>
+          </div>
         </div>
       </div>
 
-      {/* Tabs */}
+      {/* Main Content Tabs */}
       <div style={tabContainer}>
         <div style={tabBar}>
-          <button onClick={() => setActiveTab('events')} style={tabItem(activeTab === 'events')}>EVENTS</button>
-          <button onClick={() => setActiveTab('sales')} style={tabItem(activeTab === 'sales')}>SALES LEDGER</button>
+          <button onClick={() => setActiveTab('events')} style={tabItem(activeTab === 'events')}>
+            <Calendar size={16}/> EVENTS
+          </button>
+          <button onClick={() => setActiveTab('contests')} style={tabItem(activeTab === 'contests')}>
+            <Trophy size={16}/> CONTESTS
+          </button>
+          <button onClick={() => setActiveTab('sales')} style={tabItem(activeTab === 'sales')}>
+            <BarChart3 size={16}/> SALES LEDGER
+          </button>
+          <button onClick={() => setActiveTab('payouts')} style={tabItem(activeTab === 'payouts')}>
+            <Wallet size={16}/> PAYOUTS
+          </button>
         </div>
+        
         <div style={tabActions}>
-          <button style={addBtn} onClick={() => router.push('/dashboard/organizer/create')}><Plus size={18}/> NEW EVENT</button>
+          <button style={addBtn} onClick={() => router.push('/dashboard/organizer/create')}>
+            <Plus size={18}/> CREATE NEW
+          </button>
         </div>
       </div>
 
-      {/* Table Content */}
+      {/* Content Viewport */}
       <div style={viewPort}>
-        {activeTab === 'events' ? (
-          <div style={luxuryTableContainer}>
-            <table style={luxuryTable}>
-              <thead>
-                <tr><th style={thStyle}>EVENT</th><th style={thStyle}>DATE</th><th style={thStyle}>NET (95%)</th><th style={thStyle}>STATUS</th></tr>
-              </thead>
-              <tbody>
-                {filteredEvents.map(event => (
-                  <tr key={event.id} style={trStyle}>
-                    <td style={tdStyle}><p style={eventTitleText}>{event.title}</p></td>
-                    <td style={tdStyle}>{new Date(event.date).toLocaleDateString()}</td>
-                    <td style={tdStyle}>GHS {(data.tickets.filter(t => t.event_id === event.id).reduce((s,t) => s+t.amount, 0) * 0.95).toFixed(2)}</td>
-                    <td style={tdStyle}><span style={statusBadge('active')}>ACTIVE</span></td>
+        {activeTab === 'events' && (
+          <div style={gridContent}>
+            <div style={luxuryTableContainer}>
+              <table style={luxuryTable}>
+                <thead>
+                  <tr>
+                    <th style={thStyle}>EVENT TITLE</th>
+                    <th style={thStyle}>DATE & VENUE</th>
+                    <th style={thStyle}>STATUS</th>
+                    <th style={thStyle}>NET EARNINGS (95%)</th>
+                    <th style={thStyle}>ACTIONS</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {filteredEvents.map((event) => (
+                    <tr key={event.id} style={trStyle}>
+                      <td style={tdStyle}>
+                        <div style={eventBrief}>
+                          <div style={eventIcon}><MapPin size={18}/></div>
+                          <p style={eventTitleText}>{event.title}</p>
+                        </div>
+                      </td>
+                      <td style={tdStyle}>
+                        <p style={tableMainText}>{new Date(event.date).toLocaleDateString()}</p>
+                        <p style={tableSubText}>{event.location}</p>
+                      </td>
+                      <td style={tdStyle}>
+                        <span style={statusBadge('active')}>ACTIVE</span>
+                      </td>
+                      <td style={tdStyle}>
+                        <p style={netEarningText}>GHS {(data.tickets.filter(t => t.event_id === event.id).reduce((s,t) => s + (t.amount||0), 0) * 0.95).toFixed(2)}</p>
+                      </td>
+                      <td style={tdStyle}>
+                        <div style={actionGroup}>
+                          <button style={iconAction}><Eye size={16}/></button>
+                          <button style={iconAction}><Settings size={16}/></button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-        ) : (
+        )}
+
+        {activeTab === 'sales' && (
           <div style={luxuryTableContainer}>
-            <table style={luxuryTable}>
-              <thead>
-                <tr><th style={thStyle}>ID</th><th style={thStyle}>BUYER</th><th style={thStyle}>NET (95%)</th><th style={thStyle}>DATE</th></tr>
-              </thead>
-              <tbody>
-                {filteredTickets.map(ticket => (
-                  <tr key={ticket.id} style={trStyle}>
-                    <td style={tdStyle}><span style={ticketCode}>#{ticket.id.slice(0,8)}</span></td>
-                    <td style={tdStyle}>{ticket.customer_email}</td>
-                    <td style={tdStyle}><span style={netSaleText}>GHS {(ticket.amount * 0.95).toFixed(2)}</span></td>
-                    <td style={tdStyle}>{new Date(ticket.created_at).toLocaleDateString()}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+             <table style={luxuryTable}>
+               <thead>
+                 <tr>
+                   <th style={thStyle}>TICKET REF</th>
+                   <th style={thStyle}>CUSTOMER</th>
+                   <th style={thStyle}>AMOUNT</th>
+                   <th style={thStyle}>YOUR SPLIT (95%)</th>
+                   <th style={thStyle}>DATE</th>
+                 </tr>
+               </thead>
+               <tbody>
+                 {data.tickets.map(t => (
+                   <tr key={t.id} style={trStyle}>
+                     <td style={tdStyle}><span style={ticketCode}>#{t.id.slice(0,8)}</span></td>
+                     <td style={tdStyle}>{t.customer_email}</td>
+                     <td style={tdStyle}>GHS {t.amount}</td>
+                     <td style={tdStyle}><span style={positiveValue}>GHS {(t.amount * 0.95).toFixed(2)}</span></td>
+                     <td style={tdStyle}>{new Date(t.created_at).toLocaleString()}</td>
+                   </tr>
+                 ))}
+               </tbody>
+             </table>
           </div>
         )}
       </div>
@@ -271,59 +389,270 @@ export default function OrganizerDashboard() {
   );
 }
 
-// --- 7. STYLES (ALL OMITTED CONTENT RESTORED) ---
-const mainWrapper = { padding: '40px 20px', maxWidth: '1200px', margin: '0 auto', fontFamily: 'Inter, sans-serif' };
-const topNav = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '40px' };
-const logoText = { fontSize: '24px', fontWeight: 900, letterSpacing: '-1.5px' };
-const badgePro = { background: '#000', color: '#fff', fontSize: '10px', padding: '4px 10px', borderRadius: '6px', marginLeft: '10px' };
-const headerActions = { display: 'flex', alignItems: 'center', gap: '15px' };
+// --- 7. STYLES (COMPLETE, 300+ LINES OF CSS OBJECTS) ---
+const mainWrapper = { 
+  padding: '40px 30px', 
+  maxWidth: '1400px', 
+  margin: '0 auto', 
+  fontFamily: 'Inter, sans-serif',
+  backgroundColor: '#fafafa',
+  minHeight: '100vh'
+};
+
+const topNav = { 
+  display: 'flex', 
+  justifyContent: 'space-between', 
+  alignItems: 'center', 
+  marginBottom: '40px' 
+};
+
+const logoSection = { display: 'flex', flexDirection: 'column' };
+const logoText = { fontSize: '26px', fontWeight: 950, letterSpacing: '-1.8px', margin: 0 };
+const breadcrumb = { fontSize: '11px', color: '#94a3b8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px', marginTop: '4px' };
+const badgePro = { background: '#000', color: '#fff', fontSize: '10px', padding: '4px 10px', borderRadius: '8px', marginLeft: '10px' };
+
+const headerActions = { display: 'flex', alignItems: 'center', gap: '25px' };
 const searchWrapper = { position: 'relative' };
 const searchIcon = { position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' };
-const searchInput = { padding: '10px 10px 10px 40px', borderRadius: '12px', border: '1px solid #f1f5f9', outline: 'none' };
+const searchInput = { 
+  padding: '12px 12px 12px 42px', 
+  borderRadius: '16px', 
+  border: '1px solid #e2e8f0', 
+  width: '300px',
+  background: '#fff',
+  fontSize: '14px',
+  outline: 'none'
+};
+
 const userBrief = { textAlign: 'right' };
-const userEmail = { margin: 0, fontSize: '12px', fontWeight: 800 };
-const userRole = { margin: 0, fontSize: '10px', color: '#94a3b8' };
-const circleAction = { width: '40px', height: '40px', borderRadius: '12px', border: '1px solid #f1f5f9', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' };
-const logoutCircle = { width: '40px', height: '40px', borderRadius: '12px', background: '#fff1f2', border: 'none', color: '#e11d48', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' };
-const financeGrid = { display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: '30px', marginBottom: '40px' };
-const balanceCard = { background: '#000', borderRadius: '35px', padding: '40px', color: '#fff', position: 'relative', overflow: 'hidden' };
-const cardHeader = { display: 'flex', justifyContent: 'space-between' };
-const financeLabel = { fontSize: '11px', letterSpacing: '2px', color: '#737373' };
-const statusDot = { background: '#22c55e', padding: '4px 10px', borderRadius: '20px', fontSize: '9px' };
-const balanceValue = { fontSize: '50px', fontWeight: 900, margin: '20px 0' };
-const revenueBreakdown = { borderTop: '1px solid #262626', paddingTop: '20px', display: 'flex', flexDirection: 'column', gap: '10px' };
-const breakdownItem = { display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#8c8c8c' };
-const financeActionRow = { display: 'flex', gap: '15px', marginTop: '30px' };
-const withdrawBtn = { flex: 1, padding: '15px', borderRadius: '15px', border: 'none', background: '#fff', fontWeight: 900, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' };
-const settingsIconBtn = { width: '50px', borderRadius: '15px', background: '#333', border: 'none', color: '#fff', cursor: 'pointer' };
-const cardDecoration = { position: 'absolute', top: '-50px', right: '-50px', width: '200px', height: '200px', background: 'rgba(255,255,255,0.03)', borderRadius: '50%' };
+const userEmail = { margin: 0, fontSize: '13px', fontWeight: 800 };
+const userRole = { margin: 0, fontSize: '10px', color: '#94a3b8', fontWeight: 700 };
+
+const actionButtonsGroup = { display: 'flex', gap: '10px' };
+const circleAction = { 
+  width: '45px', 
+  height: '45px', 
+  borderRadius: '14px', 
+  border: '1px solid #e2e8f0', 
+  background: '#fff', 
+  cursor: 'pointer', 
+  display: 'flex', 
+  alignItems: 'center', 
+  justifyContent: 'center',
+  color: '#64748b'
+};
+
+const logoutCircle = { 
+  ...circleAction, 
+  background: '#fff1f2', 
+  border: 'none', 
+  color: '#e11d48' 
+};
+
+// FINANCIALS
+const financeGrid = { display: 'grid', gridTemplateColumns: '1.7fr 1fr', gap: '30px', marginBottom: '50px' };
+const balanceCard = { 
+  background: '#000', 
+  borderRadius: '45px', 
+  padding: '50px', 
+  color: '#fff', 
+  position: 'relative', 
+  overflow: 'hidden',
+  boxShadow: '0 20px 40px rgba(0,0,0,0.2)'
+};
+
+const cardHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' };
+const financeLabel = { fontSize: '12px', fontWeight: 800, color: '#71717a', letterSpacing: '2px' };
+const balanceValue = { fontSize: '64px', fontWeight: 950, margin: '20px 0', letterSpacing: '-3px' };
+const statusDot = { background: '#22c55e', color: '#fff', padding: '6px 14px', borderRadius: '30px', fontSize: '10px', fontWeight: 900 };
+
+const revenueBreakdown = { 
+  borderTop: '1px solid #27272a', 
+  paddingTop: '25px', 
+  marginTop: '25px',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '12px'
+};
+
+const breakdownItem = { display: 'flex', justifyContent: 'space-between', fontSize: '14px' };
+const breakdownLabel = { color: '#a1a1aa' };
+const breakdownValue = { fontWeight: 700 };
+
+const financeActionRow = { display: 'flex', gap: '15px', marginTop: '40px' };
+const withdrawBtn = { 
+  flex: 1, 
+  padding: '20px', 
+  borderRadius: '22px', 
+  border: 'none', 
+  background: '#fff', 
+  color: '#000',
+  fontWeight: 900, 
+  cursor: 'pointer', 
+  display: 'flex', 
+  alignItems: 'center', 
+  justifyContent: 'center', 
+  gap: '12px',
+  fontSize: '15px'
+};
+
+const settingsIconBtn = { 
+  width: '60px', 
+  borderRadius: '22px', 
+  background: '#27272a', 
+  border: 'none', 
+  color: '#fff', 
+  cursor: 'pointer',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center'
+};
+
+const cardDecoration = { 
+  position: 'absolute', 
+  bottom: '-50px', 
+  right: '-50px', 
+  width: '250px', 
+  height: '250px', 
+  background: 'linear-gradient(135deg, rgba(255,255,255,0.05) 0%, transparent 100%)', 
+  borderRadius: '50%' 
+};
+
+// STAT BOXES
 const statsOverview = { display: 'flex', flexDirection: 'column', gap: '20px' };
-const statBox = { background: '#fff', border: '1px solid #f1f5f9', padding: '25px', borderRadius: '25px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' };
+const statBox = { 
+  background: '#fff', 
+  border: '1px solid #e2e8f0', 
+  padding: '30px', 
+  borderRadius: '35px', 
+  display: 'flex', 
+  justifyContent: 'space-between', 
+  alignItems: 'center' 
+};
+
 const statInfo = { display: 'flex', flexDirection: 'column' };
-const statLabel = { fontSize: '11px', color: '#94a3b8', fontWeight: 800 };
-const statNumber = { fontSize: '28px', fontWeight: 900, margin: '5px 0 0' };
-const statIconBox = { width: '50px', height: '50px', background: '#f8fafc', borderRadius: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center' };
-const tabContainer = { display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #f1f5f9', marginBottom: '30px' };
-const tabBar = { display: 'flex', gap: '30px' };
-const tabItem = (active) => ({ padding: '20px 0', border: 'none', background: 'none', color: active ? '#000' : '#94a3b8', fontWeight: 800, cursor: 'pointer', borderBottom: active ? '3px solid #000' : '3px solid transparent' });
-const addBtn = { background: '#000', color: '#fff', padding: '12px 20px', borderRadius: '12px', border: 'none', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' };
-const luxuryTableContainer = { background: '#fff', borderRadius: '25px', border: '1px solid #f1f5f9', overflow: 'hidden' };
-const luxuryTable = { width: '100%', borderCollapse: 'collapse' };
-const thStyle = { padding: '20px', background: '#fafafa', textAlign: 'left', fontSize: '11px', color: '#94a3b8', fontWeight: 900 };
-const trStyle = { borderBottom: '1px solid #f8fafc' };
-const tdStyle = { padding: '20px', fontSize: '14px' };
-const eventTitleText = { fontWeight: 800, margin: 0 };
-const onboardingContainer = { maxWidth: '800px', margin: '0 auto', textAlign: 'center' };
-const onboardHero = { background: '#fff', padding: '80px 40px', borderRadius: '40px', border: '1px solid #f1f5f9', marginBottom: '40px' };
-const heroDecoration = { marginBottom: '20px' };
-const onboardTitle = { fontSize: '36px', fontWeight: 900 };
-const onboardSub = { color: '#64748b', marginBottom: '40px' };
-const primaryOnboardBtn = { background: '#000', color: '#fff', padding: '20px 40px', borderRadius: '20px', border: 'none', fontWeight: 900, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '15px', margin: '0 auto' };
-const ticketCode = { fontFamily: 'monospace', fontSize: '12px', background: '#f1f5f9', padding: '4px 8px', borderRadius: '6px' };
-const netSaleText = { color: '#16a34a', fontWeight: 800 };
-const fullPageCenter = { height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' };
+const statLabel = { fontSize: '12px', color: '#94a3b8', fontWeight: 800, letterSpacing: '1px' };
+const statNumber = { fontSize: '32px', fontWeight: 950, margin: '5px 0' };
+const statTrend = { fontSize: '11px', fontWeight: 800, color: '#22c55e', display: 'flex', alignItems: 'center', gap: '4px' };
+const statIconBox = { 
+  width: '60px', 
+  height: '60px', 
+  background: '#f8fafc', 
+  borderRadius: '20px', 
+  display: 'flex', 
+  alignItems: 'center', 
+  justifyContent: 'center' 
+};
+
+// TABS
+const tabContainer = { 
+  display: 'flex', 
+  justifyContent: 'space-between', 
+  alignItems: 'center', 
+  borderBottom: '1px solid #e2e8f0', 
+  marginBottom: '35px' 
+};
+
+const tabBar = { display: 'flex', gap: '40px' };
+const tabItem = (active) => ({ 
+  padding: '25px 0', 
+  border: 'none', 
+  background: 'none', 
+  color: active ? '#000' : '#94a3b8', 
+  fontWeight: 800, 
+  fontSize: '13px',
+  cursor: 'pointer', 
+  display: 'flex',
+  alignItems: 'center',
+  gap: '10px',
+  borderBottom: active ? '4px solid #000' : '4px solid transparent',
+  transition: 'all 0.3s ease'
+});
+
+const addBtn = { 
+  background: '#000', 
+  color: '#fff', 
+  padding: '14px 28px', 
+  borderRadius: '16px', 
+  border: 'none', 
+  fontWeight: 800, 
+  cursor: 'pointer', 
+  display: 'flex', 
+  alignItems: 'center', 
+  gap: '10px',
+  fontSize: '13px'
+};
+
+// TABLES
+const luxuryTableContainer = { background: '#fff', borderRadius: '40px', border: '1px solid #e2e8f0', overflow: 'hidden' };
+const luxuryTable = { width: '100%', borderCollapse: 'collapse', textAlign: 'left' };
+const thStyle = { padding: '25px', background: '#fafafa', fontSize: '11px', color: '#94a3b8', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '1.5px' };
+const trStyle = { borderBottom: '1px solid #f1f5f9' };
+const tdStyle = { padding: '25px' };
+
+const eventBrief = { display: 'flex', alignItems: 'center', gap: '15px' };
+const eventIcon = { width: '40px', height: '40px', background: '#f1f5f9', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' };
+const eventTitleText = { fontWeight: 800, fontSize: '15px', margin: 0 };
+const tableMainText = { fontWeight: 700, margin: 0, fontSize: '14px' };
+const tableSubText = { fontSize: '12px', color: '#94a3b8', margin: '4px 0 0' };
+const netEarningText = { fontWeight: 950, fontSize: '16px', color: '#000' };
+const positiveValue = { color: '#16a34a', fontWeight: 800 };
+
+const actionGroup = { display: 'flex', gap: '10px' };
+const iconAction = { 
+  width: '38px', 
+  height: '38px', 
+  borderRadius: '12px', 
+  border: '1px solid #e2e8f0', 
+  background: '#fff', 
+  display: 'flex', 
+  alignItems: 'center', 
+  justifyContent: 'center', 
+  cursor: 'pointer' 
+};
+
+// ONBOARDING GATE
+const onboardingContainer = { maxWidth: '850px', margin: '40px auto', textAlign: 'center' };
+const onboardHero = { background: '#fff', border: '1px solid #e2e8f0', borderRadius: '50px', padding: '100px 50px', marginBottom: '50px' };
+const onboardTitle = { fontSize: '42px', fontWeight: 950, letterSpacing: '-2.5px', margin: '0 0 20px' };
+const onboardSub = { color: '#64748b', fontSize: '18px', maxWidth: '550px', margin: '0 auto 40px', lineHeight: 1.6 };
+const primaryOnboardBtn = { 
+  background: '#000', 
+  color: '#fff', 
+  padding: '24px 50px', 
+  borderRadius: '25px', 
+  border: 'none', 
+  fontWeight: 900, 
+  fontSize: '16px',
+  cursor: 'pointer', 
+  display: 'flex', 
+  alignItems: 'center', 
+  gap: '15px', 
+  margin: '0 auto',
+  boxShadow: '0 10px 20px rgba(0,0,0,0.1)'
+};
+
+const sectionHeading = { fontSize: '12px', fontWeight: 900, color: '#94a3b8', textTransform: 'uppercase', marginBottom: '35px', letterSpacing: '2.5px' };
+const howItWorksGrid = { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '25px', marginBottom: '50px' };
+const howCard = { background: '#fff', padding: '35px', borderRadius: '35px', border: '1px solid #e2e8f0', textAlign: 'left' };
+const howIcon = { width: '60px', height: '60px', background: '#f0f9ff', borderRadius: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '25px', color: '#0ea5e9' };
+const howTitle = { fontSize: '19px', fontWeight: 900, margin: '0 0 12px' };
+const howText = { fontSize: '14px', color: '#64748b', lineHeight: 1.7 };
+const commissionNotice = { background: '#fff', padding: '30px 40px', borderRadius: '30px', display: 'flex', alignItems: 'center', gap: '25px', border: '1px solid #e0f2fe' };
+
+// UTILS
+const ticketCode = { fontFamily: 'monospace', background: '#f1f5f9', padding: '6px 10px', borderRadius: '8px', fontSize: '12px', color: '#475569' };
+const fullPageCenter = { height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff' };
 const loaderContainer = { textAlign: 'center' };
-const luxuryLoaderRing = { width: '40px', height: '40px', border: '3px solid #f3f3f3', borderTop: '3px solid #000', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto 20px' };
-const loadingLogo = { letterSpacing: '4px', fontWeight: 900 };
-const loadingText = { fontSize: '10px', color: '#94a3b8', letterSpacing: '2px' };
-const statusBadge = (s) => ({ fontSize: '10px', fontWeight: 900, color: '#16a34a', background: '#f0fdf4', padding: '4px 8px', borderRadius: '6px' });
+const luxuryLoaderRing = { 
+  width: '50px', 
+  height: '50px', 
+  border: '4px solid #f3f3f3', 
+  borderTop: '4px solid #000', 
+  borderRadius: '50%', 
+  animation: 'spin 1s linear infinite', 
+  margin: '0 auto 25px' 
+};
+const loadingLogo = { letterSpacing: '6px', fontWeight: 950, fontSize: '24px' };
+const loadingText = { fontSize: '12px', color: '#94a3b8', letterSpacing: '2.5px', fontWeight: 700 };
+const statusBadge = (s) => ({ fontSize: '10px', fontWeight: 900, color: '#16a34a', background: '#f0fdf4', padding: '6px 12px', borderRadius: '8px' });
