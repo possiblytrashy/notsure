@@ -3,274 +3,221 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import { 
-  Trash2, Plus, Upload, X, UserPlus, 
-  Layers, Trophy, ArrowLeft, Loader2, 
-  Sparkles, ShieldCheck, Info 
+  Layers, Plus, Trash2, Upload, ChevronDown, 
+  ChevronUp, Sparkles, Trophy, Loader2, ArrowLeft 
 } from 'lucide-react';
 
-export default function AdvancedContestCreator() {
+export default function NestedCompetitionCreator() {
   const router = useRouter();
+  const [loading, setLoading] = useState(false);
   const [user, setUser] = useState(null);
-  const [uploading, setUploading] = useState(false);
-  
-  // 1. STATE MANAGEMENT
-  const [contestData, setContestData] = useState({ 
-    title: '', 
-    vote_price: 1.00, // Explicitly named for Supabase schema
-    description: '' 
-  });
-  
-  const [candidates, setCandidates] = useState([
-    { name: '', category: '', description: '', file: null, preview: null }
+
+  // 1. STATE: Parent Competition + Nested Contests
+  const [compData, setCompData] = useState({ title: '', description: '' });
+  const [contests, setContests] = useState([
+    { 
+      title: '', 
+      vote_price: 1.0, 
+      isOpen: true,
+      candidates: [{ name: '', category: '', file: null, preview: null }] 
+    }
   ]);
 
-  // 2. AUTH CHECK ON LOAD
   useEffect(() => {
-    async function checkUser() {
+    async function getAuth() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) router.push('/login');
       else setUser(user);
     }
-    checkUser();
+    getAuth();
   }, [router]);
 
-  // 3. HANDLERS
-  const addCandidate = () => setCandidates([...candidates, { name: '', category: '', description: '', file: null, preview: null }]);
-  
-  const removeCandidate = (index) => {
-    if (candidates.length > 1) {
-      setCandidates(candidates.filter((_, i) => i !== index));
-    }
+  // 2. NESTED LOGIC HANDLERS
+  const addContest = () => setContests([...contests, { 
+    title: '', vote_price: 1.0, isOpen: true, candidates: [{ name: '', category: '', file: null, preview: null }] 
+  }]);
+
+  const addCandidate = (cIdx) => {
+    const newContests = [...contests];
+    newContests[cIdx].candidates.push({ name: '', category: '', file: null, preview: null });
+    setContests(newContests);
   };
 
-  const handleImgChange = (index, e) => {
-    const file = e.target.files[0];
-    if (file) {
-      const newCands = [...candidates];
-      newCands[index].file = file;
-      newCands[index].preview = URL.createObjectURL(file);
-      setCandidates(newCands);
-    }
+  const updateCandidate = (cIdx, candIdx, field, value) => {
+    const newContests = [...contests];
+    newContests[cIdx].candidates[candIdx][field] = value;
+    setContests(newContests);
   };
 
-  const handleSave = async () => {
-    if (!user) return alert("Session expired. Please login again.");
-    if (!contestData.title) return alert("Please enter a contest title.");
-
-    setUploading(true);
+  const handleSaveAll = async () => {
+    if (!user) return;
+    setLoading(true);
     try {
-      // STEP A: Insert Contest Header
-      const { data: contest, error: contestError } = await supabase
-        .from('contests')
-        .insert([{ 
-          title: contestData.title,
-          description: contestData.description,
-          vote_price: parseFloat(contestData.vote_price),
-          organizer_id: user.id 
-        }])
-        .select()
-        .single();
+      // STEP 1: Create Grand Competition
+      const { data: grandComp, error: compErr } = await supabase
+        .from('competitions')
+        .insert([{ ...compData, organizer_id: user.id }])
+        .select().single();
+      if (compErr) throw compErr;
 
-      if (contestError) throw contestError;
+      // STEP 2: Loop through Contests
+      for (const ct of contests) {
+        const { data: insertedContest, error: ctErr } = await supabase
+          .from('contests')
+          .insert([{ 
+            title: ct.title, 
+            vote_price: ct.vote_price, 
+            competition_id: grandComp.id, // THE NESTING LINK
+            organizer_id: user.id 
+          }])
+          .select().single();
+        if (ctErr) throw ctErr;
 
-      // STEP B: Loop through Candidates
-      for (const cand of candidates) {
-        if (!cand.name) continue; // Skip empty candidate rows
-
-        let publicUrl = '';
-        if (cand.file) {
-          const fileExt = cand.file.name.split('.').pop();
-          const fileName = `${Math.random()}.${fileExt}`;
-          const path = `${user.id}/contestants/${Date.now()}-${fileName}`;
-          
-          const { error: uploadError } = await supabase.storage
-            .from('event-images')
-            .upload(path, cand.file);
-
-          if (uploadError) console.error("Upload error:", uploadError);
-          else {
-            publicUrl = supabase.storage.from('event-images').getPublicUrl(path).data.publicUrl;
+        // STEP 3: Loop through Candidates per Contest
+        for (const cand of ct.candidates) {
+          let url = '';
+          if (cand.file) {
+            const path = `${user.id}/nested/${Date.now()}-${cand.name}`;
+            await supabase.storage.from('event-images').upload(path, cand.file);
+            url = supabase.storage.from('event-images').getPublicUrl(path).data.publicUrl;
           }
+
+          await supabase.from('candidates').insert([{
+            contest_id: insertedContest.id,
+            name: cand.name,
+            image_url: url,
+            vote_count: 0
+          }]);
         }
-
-        const { error: candError } = await supabase.from('candidates').insert([{
-          contest_id: contest.id,
-          name: cand.name,
-          category: cand.category,
-          description: cand.description,
-          image_url: publicUrl,
-          vote_count: 0
-        }]);
-
-        if (candError) throw candError;
       }
-
       router.push('/dashboard/organizer');
     } catch (err) {
-      console.error("Critical Error:", err);
-      alert(`Error: ${err.message}`);
+      alert(err.message);
     } finally {
-      setUploading(false);
+      setLoading(false);
     }
   };
 
   return (
     <div style={container}>
-      {/* HEADER ACTIONS */}
-      <div style={topBar}>
-        <button onClick={() => router.back()} style={backBtn}>
-          <ArrowLeft size={18}/> BACK
-        </button>
-        <div style={badgeLuxury}>LUXURY ENGINE</div>
+      <header style={header}>
+        <button onClick={() => router.back()} style={backBtn}><ArrowLeft size={16}/> BACK</button>
+        <h1 style={mainTitle}>Grand Competition Builder</h1>
+        <p style={subTitle}>Create one event, nest multiple voting categories inside.</p>
+      </header>
+
+      {/* PARENT DETAILS */}
+      <div style={grandCard}>
+        <label style={label}>GRAND COMPETITION TITLE</label>
+        <input 
+          style={luxuryInput} 
+          placeholder="e.g. West Africa Excellence Awards 2026" 
+          onChange={e => setCompData({...compData, title: e.target.value})}
+        />
       </div>
 
-      <div style={mainCard}>
-        <header style={headerSection}>
-          <div style={iconCircle}><Trophy size={32} color="#d4af37"/></div>
-          <h1 style={mainTitle}>New Contest</h1>
-          <p style={subTitle}>Structure your categories and assign contestants.</p>
-        </header>
-
-        {/* CONTEST CORE INFO */}
-        <section style={formSection}>
-          <div style={inputRow}>
-            <div style={inputGroup}>
-              <label style={labelStyle}>CONTEST TITLE</label>
-              <input 
-                placeholder="e.g. Best Dressed Male" 
-                style={luxuryInput} 
-                onChange={e => setContestData({...contestData, title: e.target.value})} 
-              />
-            </div>
-            <div style={inputGroup}>
-              <label style={labelStyle}>VOTE PRICE (GHS)</label>
-              <input 
-                type="number" 
-                placeholder="1.00" 
-                style={luxuryInput} 
-                onChange={e => setContestData({...contestData, vote_price: e.target.value})} 
-              />
-            </div>
-          </div>
-          <div style={inputGroup}>
-            <label style={labelStyle}>GLOBAL DESCRIPTION</label>
-            <textarea 
-              placeholder="Contest rules or details..." 
-              style={{...luxuryInput, minHeight: '80px', resize: 'none'}} 
-              onChange={e => setContestData({...contestData, description: e.target.value})} 
-            />
-          </div>
-        </section>
-
-        <div style={divider}></div>
-
-        {/* CANDIDATES LIST */}
-        <section>
-          <div style={sectionHeader}>
-            <h3 style={sectionTitle}><UserPlus size={18}/> Contestants</h3>
-            <span style={countTag}>{candidates.length} slots</span>
-          </div>
-          
-          {candidates.map((cand, i) => (
-            <div key={i} style={candidateCard}>
-              <div style={cardTop}>
-                <span style={candNum}>CONTESTANT #{String(i + 1).padStart(2, '0')}</span>
-                <button onClick={() => removeCandidate(i)} style={deleteBtn}><X size={16}/></button>
+      {/* NESTED CONTESTS LIST */}
+      <div style={nestedSection}>
+        {contests.map((ct, cIdx) => (
+          <div key={cIdx} style={contestWrapper}>
+            <div style={contestHead} onClick={() => {
+              const n = [...contests]; n[cIdx].isOpen = !n[cIdx].isOpen; setContests(n);
+            }}>
+              <div style={flexRow}>
+                <Trophy size={18} color="#d4af37"/>
+                <input 
+                  placeholder="Category Name (e.g. Best Female Vocalist)" 
+                  style={ghostInput}
+                  onClick={e => e.stopPropagation()}
+                  onChange={e => {const n = [...contests]; n[cIdx].title = e.target.value; setContests(n);}}
+                />
               </div>
+              {ct.isOpen ? <ChevronUp/> : <ChevronDown/>}
+            </div>
 
-              <div style={candGrid}>
-                {/* IMAGE UPLOAD */}
-                <div style={uploadZone}>
-                  <input type="file" id={`file-${i}`} style={{ display: 'none' }} onChange={(e) => handleImgChange(i, e)} />
-                  <label htmlFor={`file-${i}`} style={uploadLabel}>
-                    {cand.preview ? (
-                      <img src={cand.preview} style={previewImg} />
-                    ) : (
-                      <div style={uploadPlaceholder}>
-                        <Upload size={20} color="#94a3b8" />
-                        <span>PHOTO</span>
+            {ct.isOpen && (
+              <div style={contestBody}>
+                <div style={priceRow}>
+                  <label style={label}>VOTE PRICE (GHS)</label>
+                  <input 
+                    type="number" 
+                    style={smallInput} 
+                    value={ct.vote_price}
+                    onChange={e => {const n = [...contests]; n[cIdx].vote_price = e.target.value; setContests(n);}}
+                  />
+                </div>
+
+                <div style={candList}>
+                  {ct.candidates.map((cand, candIdx) => (
+                    <div key={candIdx} style={candRow}>
+                      <div style={miniUpload}>
+                        <input 
+                          type="file" 
+                          id={`f-${cIdx}-${candIdx}`} 
+                          style={{display:'none'}} 
+                          onChange={e => {
+                            const file = e.target.files[0];
+                            updateCandidate(cIdx, candIdx, 'file', file);
+                            updateCandidate(cIdx, candIdx, 'preview', URL.createObjectURL(file));
+                          }}
+                        />
+                        <label htmlFor={`f-${cIdx}-${candIdx}`} style={uploadCircle}>
+                          {cand.preview ? <img src={cand.preview} style={imgFill}/> : <Plus size={14}/>}
+                        </label>
                       </div>
-                    )}
-                  </label>
-                </div>
-
-                <div style={candInputs}>
-                  <input 
-                    placeholder="Full Name" 
-                    style={luxuryInput} 
-                    onChange={e => {
-                      const n = [...candidates]; n[i].name = e.target.value; setCandidates(n);
-                    }} 
-                  />
-                  <input 
-                    placeholder="Category (e.g. Best DJ)" 
-                    style={luxuryInput} 
-                    onChange={e => {
-                      const n = [...candidates]; n[i].category = e.target.value; setCandidates(n);
-                    }} 
-                  />
-                  <textarea 
-                    placeholder="Bio..." 
-                    style={{...luxuryInput, height: '100%'}} 
-                    onChange={e => {
-                      const n = [...candidates]; n[i].description = e.target.value; setCandidates(n);
-                    }} 
-                  />
+                      <input 
+                        placeholder="Candidate Name" 
+                        style={candInput}
+                        onChange={e => updateCandidate(cIdx, candIdx, 'name', e.target.value)}
+                      />
+                      <button style={delBtn} onClick={() => {
+                        const n = [...contests]; n[cIdx].candidates.splice(candIdx, 1); setContests(n);
+                      }}><Trash2 size={14}/></button>
+                    </div>
+                  ))}
+                  <button style={addCandBtn} onClick={() => addCandidate(cIdx)}>+ ADD CANDIDATE</button>
                 </div>
               </div>
-            </div>
-          ))}
-
-          <button onClick={addCandidate} style={addBtn}>
-            <Plus size={18}/> ADD ANOTHER SLOT
-          </button>
-        </section>
-
-        {/* FOOTER ACTION */}
-        <div style={footerSection}>
-          <div style={payoutNote}>
-            <ShieldCheck size={18} color="#16a34a"/>
-            <p>5% Platform fee applies. 95% is routed to your subaccount.</p>
+            )}
           </div>
-          <button onClick={handleSave} disabled={uploading} style={submitBtn(uploading)}>
-            {uploading ? <Loader2 className="animate-spin"/> : <><Sparkles size={18}/> PUBLISH CONTEST</>}
-          </button>
-        </div>
+        ))}
       </div>
+
+      <button style={addContestBtn} onClick={addContest}>+ ADD NEW CATEGORY</button>
+
+      <footer style={footer}>
+        <button style={submitBtn(loading)} onClick={handleSaveAll} disabled={loading}>
+          {loading ? <Loader2 className="animate-spin"/> : <><Sparkles size={18}/> PUBLISH COMPETITION</>}
+        </button>
+      </footer>
     </div>
   );
 }
 
-// --- LUXURY STYLING SYSTEM ---
-const container = { maxWidth: '1000px', margin: '0 auto', padding: '60px 20px', fontFamily: 'Inter, sans-serif', background: '#fcfcfc', minHeight: '100vh' };
-const topBar = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '40px' };
-const backBtn = { background: 'none', border: 'none', color: '#94a3b8', fontWeight: 800, fontSize: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' };
-const badgeLuxury = { background: '#000', color: '#fff', fontSize: '10px', padding: '6px 15px', borderRadius: '30px', fontWeight: 900, letterSpacing: '1px' };
-const mainCard = { background: '#fff', padding: '50px', borderRadius: '40px', border: '1px solid #f0f0f0', boxShadow: '0 30px 60px rgba(0,0,0,0.03)' };
-const headerSection = { textAlign: 'center', marginBottom: '50px' };
-const iconCircle = { width: '80px', height: '80px', background: '#000', borderRadius: '25px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px', boxShadow: '0 15px 30px rgba(0,0,0,0.2)' };
-const mainTitle = { fontSize: '32px', fontWeight: 950, margin: '0 0 10px', letterSpacing: '-1.5px' };
-const subTitle = { fontSize: '15px', color: '#94a3b8', fontWeight: 500 };
-const formSection = { display: 'flex', flexDirection: 'column', gap: '20px' };
-const inputRow = { display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '20px' };
-const inputGroup = { display: 'flex', flexDirection: 'column', gap: '10px' };
-const labelStyle = { fontSize: '10px', fontWeight: 900, color: '#94a3b8', letterSpacing: '1px' };
-const luxuryInput = { width: '100%', padding: '16px', borderRadius: '16px', border: '1px solid #eee', background: '#fafafa', fontSize: '14px', fontWeight: 600, outline: 'none', transition: '0.3s' };
-const divider = { height: '1px', background: '#eee', margin: '40px 0' };
-const sectionHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px' };
-const sectionTitle = { fontSize: '18px', fontWeight: 900, display: 'flex', alignItems: 'center', gap: '10px' };
-const countTag = { fontSize: '12px', fontWeight: 700, color: '#94a3b8', background: '#f5f5f5', padding: '4px 12px', borderRadius: '10px' };
-const candidateCard = { padding: '30px', borderRadius: '30px', border: '1px solid #f0f0f0', background: '#fff', marginBottom: '25px', transition: '0.3s' };
-const cardTop = { display: 'flex', justifyContent: 'space-between', marginBottom: '20px', alignItems: 'center' };
-const candNum = { fontSize: '11px', fontWeight: 900, color: '#000', background: '#f0f0f0', padding: '5px 12px', borderRadius: '8px' };
-const deleteBtn = { background: '#fff1f2', color: '#e11d48', border: 'none', padding: '8px', borderRadius: '10px', cursor: 'pointer' };
-const candGrid = { display: 'grid', gridTemplateColumns: '140px 1fr', gap: '25px' };
-const uploadZone = { position: 'relative' };
-const uploadLabel = { cursor: 'pointer', width: '140px', height: '180px', borderRadius: '20px', border: '2px dashed #eee', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fafafa', overflow: 'hidden' };
-const uploadPlaceholder = { textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', fontSize: '10px', fontWeight: 900, color: '#94a3b8' };
-const previewImg = { width: '100%', height: '100%', objectFit: 'cover' };
-const candInputs = { display: 'flex', flexDirection: 'column', gap: '12px' };
-const addBtn = { width: '100%', padding: '18px', borderRadius: '18px', border: '2px dashed #eee', background: 'none', fontWeight: 800, cursor: 'pointer', marginBottom: '40px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', color: '#94a3b8' };
-const footerSection = { borderTop: '1px solid #eee', paddingTop: '40px', display: 'flex', flexDirection: 'column', gap: '20px' };
-const payoutNote = { background: '#f0fdf4', padding: '15px', borderRadius: '15px', display: 'flex', alignItems: 'center', gap: '12px', fontSize: '12px', fontWeight: 600, color: '#166534' };
-const submitBtn = (up) => ({ width: '100%', padding: '22px', background: up ? '#eee' : '#000', color: '#fff', border: 'none', borderRadius: '22px', fontWeight: 900, fontSize: '16px', cursor: up ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '15px', transition: '0.4s' });
+// STYLES (Luxury Theme)
+const container = { maxWidth: '800px', margin: '0 auto', padding: '80px 20px' };
+const header = { marginBottom: '40px' };
+const backBtn = { background: 'none', border: 'none', color: '#94a3b8', fontWeight: 800, fontSize: '11px', cursor: 'pointer', marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '5px' };
+const mainTitle = { fontSize: '32px', fontWeight: 950, letterSpacing: '-1.5px', margin: 0 };
+const subTitle = { color: '#94a3b8', fontSize: '14px', marginTop: '5px' };
+const grandCard = { background: '#000', padding: '40px', borderRadius: '30px', color: '#fff', marginBottom: '40px' };
+const label = { fontSize: '10px', fontWeight: 900, letterSpacing: '1px', color: '#94a3b8', display: 'block', marginBottom: '10px' };
+const luxuryInput = { width: '100%', padding: '18px', borderRadius: '15px', border: 'none', background: '#1a1a1a', color: '#fff', fontSize: '16px', fontWeight: 700, outline: 'none' };
+const nestedSection = { display: 'flex', flexDirection: 'column', gap: '20px' };
+const contestWrapper = { background: '#fff', borderRadius: '24px', border: '1px solid #f0f0f0', overflow: 'hidden' };
+const contestHead = { padding: '25px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', background: '#fafafa' };
+const flexRow = { display: 'flex', alignItems: 'center', gap: '15px', flex: 1 };
+const ghostInput = { background: 'none', border: 'none', fontSize: '18px', fontWeight: 850, outline: 'none', width: '80%' };
+const contestBody = { padding: '25px', borderTop: '1px solid #f0f0f0' };
+const priceRow = { marginBottom: '25px', width: '150px' };
+const smallInput = { width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #eee', fontWeight: 800 };
+const candList = { display: 'flex', flexDirection: 'column', gap: '12px' };
+const candRow = { display: 'flex', alignItems: 'center', gap: '15px', background: '#fcfcfc', padding: '10px', borderRadius: '15px', border: '1px solid #f5f5f5' };
+const uploadCircle = { width: '45px', height: '45px', borderRadius: '12px', border: '1px dashed #ccc', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', overflow: 'hidden' };
+const imgFill = { width: '100%', height: '100%', objectFit: 'cover' };
+const candInput = { flex: 1, background: 'none', border: 'none', outline: 'none', fontWeight: 600, fontSize: '14px' };
+const delBtn = { color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer' };
+const addCandBtn = { padding: '10px', background: 'none', border: '1px dashed #eee', borderRadius: '10px', fontSize: '11px', fontWeight: 800, color: '#94a3b8', cursor: 'pointer' };
+const addContestBtn = { width: '100%', padding: '20px', borderRadius: '20px', border: '2px dashed #eee', background: 'none', color: '#94a3b8', fontWeight: 800, marginTop: '20px', cursor: 'pointer' };
+const footer = { marginTop: '50px' };
+const submitBtn = (l) => ({ width: '100%', padding: '25px', background: l ? '#eee' : '#000', color: '#fff', border: 'none', borderRadius: '25px', fontWeight: 900, fontSize: '16px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' });
