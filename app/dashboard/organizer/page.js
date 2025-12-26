@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback } from 'react';
-\import { supabase } from '../../../lib/supabase'; // Adjust this path to match your project structure
+import { supabase } from '../../../lib/supabase'; // Adjust this path to match your project structure
 import { useRouter } from 'next/navigation';
 import { 
   Plus, BarChart3, Users, Ticket, Calendar, 
