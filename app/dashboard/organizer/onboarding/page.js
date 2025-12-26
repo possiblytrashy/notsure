@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { supabase } from '../../../lib/supabase'; // Ensure this path is correct for your project
+import { supabase } from '../../../../lib/supabase'; // Ensure this path is correct for your project
 import { Landmark, Smartphone, CheckCircle, AlertCircle, Loader2, ArrowRight } from 'lucide-react';
 
 export default function Onboarding() {
