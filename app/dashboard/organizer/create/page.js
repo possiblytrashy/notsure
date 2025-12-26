@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../../../../lib/supabase';
 import { useRouter } from 'next/navigation';
 import { 
@@ -21,6 +21,7 @@ export default function CreateEvent() {
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [user, setUser] = useState(null);
+  const [organizerSubaccount, setOrganizerSubaccount] = useState(null);
   const [dragActive, setDragActive] = useState(false);
   const [formError, setFormError] = useState(null);
 
@@ -34,7 +35,7 @@ export default function CreateEvent() {
     period: 'PM',
     location: '',
     category: 'Entertainment',
-    image_urls: [], // Array for multiple images
+    image_urls: [], 
     is_published: true,
   });
 
@@ -49,17 +50,30 @@ export default function CreateEvent() {
     }
   ]);
 
-  // --- 2. AUTHENTICATION & SECURITY CHECK ---
+  // --- 2. AUTHENTICATION & SUBACCOUNT SECURITY CHECK ---
   useEffect(() => {
-    const checkUser = async () => {
+    const checkUserAndPayouts = async () => {
       const { data: { user }, error } = await supabase.auth.getUser();
       if (error || !user) {
         router.push('/login');
+        return;
+      }
+      setUser(user);
+
+      // Verify the organizer has a payout account for the 5% split
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('paystack_subaccount_code')
+        .eq('id', user.id)
+        .single();
+
+      if (!profile?.paystack_subaccount_code) {
+        setFormError("No Payout Account detected. Visit Settings to link your Bank/MoMo before publishing.");
       } else {
-        setUser(user);
+        setOrganizerSubaccount(profile.paystack_subaccount_code);
       }
     };
-    checkUser();
+    checkUserAndPayouts();
   }, [router]);
 
   // --- 3. MULTI-IMAGE STORAGE LOGIC ---
@@ -151,9 +165,15 @@ export default function CreateEvent() {
     setTiers(tiers.map(t => t.id === id ? { ...t, [field]: value } : t));
   };
 
-  // --- 5. SUBMISSION ENGINE ---
+  // --- 5. SUBMISSION ENGINE (WITH 5% SPLIT LOGIC) ---
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
+    if (!organizerSubaccount) {
+      setFormError("Payout account missing. 5% Split cannot be initialized.");
+      return;
+    }
+
     if (!eventData.title.trim() || !eventData.date || eventData.image_urls.length === 0) {
       setFormError("Missing required fields or images.");
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -168,6 +188,7 @@ export default function CreateEvent() {
         .from('events')
         .insert([{
           organizer_id: user.id,
+          organizer_subaccount: organizerSubaccount, // Linked for payments
           title: eventData.title,
           description: eventData.description,
           date: eventData.date,
@@ -214,7 +235,6 @@ export default function CreateEvent() {
     iconBox: (color) => ({ width: '44px', height: '44px', borderRadius: '14px', backgroundColor: `${color}10`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: color }),
     sectionHeading: { fontSize: '20px', fontWeight: '800', margin: '0' },
     
-    // Multi-Image Styles
     dropZone: (active) => ({
       width: '100%',
       minHeight: '220px',
@@ -235,23 +255,20 @@ export default function CreateEvent() {
     thumbImg: { width: '100%', height: '100%', objectFit: 'cover' },
     removeBtnSmall: { position: 'absolute', top: '5px', right: '5px', background: 'rgba(0,0,0,0.6)', color: '#fff', border: 'none', borderRadius: '5px', padding: '4px', cursor: 'pointer' },
 
-    // Custom Time Picker Styles
     timePickerContainer: { display: 'flex', gap: '12px', alignItems: 'center' },
     timeSelectBox: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' },
     timeInput: { width: '60px', textAlign: 'center', padding: '12px', borderRadius: '12px', border: '2px solid #f1f5f9', fontSize: '18px', fontWeight: '800', backgroundColor: '#f8fafc', outline: 'none' },
     periodToggle: (active) => ({ padding: '12px 16px', borderRadius: '12px', border: 'none', backgroundColor: active ? '#000' : '#f1f5f9', color: active ? '#fff' : '#64748b', fontWeight: '800', cursor: 'pointer', transition: '0.2s' }),
 
-    // Inputs
     inputGroup: { display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '24px' },
     label: { fontSize: '12px', fontWeight: '800', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' },
     input: { width: '100%', backgroundColor: '#f8fafc', border: '2px solid #f1f5f9', borderRadius: '16px', padding: '16px', fontSize: '16px', fontWeight: '600', outline: 'none' },
     textarea: { width: '100%', backgroundColor: '#f8fafc', border: '2px solid #f1f5f9', borderRadius: '16px', padding: '16px', fontSize: '16px', fontWeight: '600', outline: 'none', minHeight: '100px' },
     
-    // Tier cards
     tierCard: { backgroundColor: '#f8fafc', borderRadius: '24px', padding: '24px', border: '1px solid #f1f5f9', marginBottom: '16px' },
     tierInput: { background: 'none', border: 'none', borderBottom: '2px solid #e2e8f0', fontSize: '18px', fontWeight: '900', padding: '4px 0', outline: 'none', width: '100%', marginBottom: '15px' },
+    addTierBtn: { width: '100%', padding: '18px', borderRadius: '18px', border: '2px dashed #e2e8f0', background: 'none', color: '#64748b', fontWeight: '800', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' },
     
-    // Publish Card
     publishCard: { position: 'sticky', top: '40px', backgroundColor: '#0f172a', borderRadius: '32px', padding: '40px', color: '#fff' },
     submitBtn: { width: '100%', backgroundColor: '#fff', color: '#0f172a', border: 'none', padding: '20px', borderRadius: '20px', fontSize: '16px', fontWeight: '900', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', cursor: 'pointer' }
   };
@@ -263,7 +280,20 @@ export default function CreateEvent() {
         <h1 style={styles.mainTitle}>New Experience</h1>
       </div>
 
-      {formError && <div style={styles.errorBanner}><AlertCircle size={20} />{formError}</div>}
+      {formError && (
+        <div style={styles.errorBanner}>
+          <AlertCircle size={20} />
+          {formError}
+          {!organizerSubaccount && (
+            <button 
+              onClick={() => router.push('/dashboard/onboarding')} 
+              style={{ marginLeft: 'auto', background: '#991b1b', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '8px', cursor: 'pointer' }}
+            >
+              Link Now
+            </button>
+          )}
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} style={styles.formLayout}>
         <div style={styles.formColumn}>
@@ -280,7 +310,7 @@ export default function CreateEvent() {
               onClick={() => fileInputRef.current.click()}
             >
               {uploading ? (
-                <div style={styles.uploadStatus}><Loader2 className="animate-spin" size={32} /> <p>Syncing Media... {uploadProgress}%</p></div>
+                <div style={{textAlign: 'center'}}><Loader2 className="animate-spin" size={32} /> <p>Syncing Media... {uploadProgress}%</p></div>
               ) : (
                 <div style={{textAlign: 'center'}}>
                   <Upload size={30} color="#94a3b8" style={{marginBottom: '10px'}}/>
@@ -319,7 +349,6 @@ export default function CreateEvent() {
                 <input type="date" style={styles.input} value={eventData.date} onChange={(e) => setEventData({...eventData, date: e.target.value})} />
               </div>
 
-              {/* ADVANCED TIME PICKER UI */}
               <div style={styles.inputGroup}>
                 <label style={styles.label}>Start Time</label>
                 <div style={styles.timePickerContainer}>
