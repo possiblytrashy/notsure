@@ -1,585 +1,748 @@
 "use client";
-
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import { 
-  Plus, Ticket, Trophy, Settings, Link as LinkIcon, Check, 
-  QrCode, Loader2, LogOut, Search, RefreshCcw, MapPin, 
-  ShieldCheck, Zap, TrendingUp, BarChart3, DownloadCloud,
-  Activity, UserPlus, CreditCard, Layout, Trash, ChevronRight, 
-  DollarSign, UserCheck, Bell, Mail, Smartphone, Info, 
-  AlertCircle, CheckCircle2, ArrowRight, X, ExternalLink,
-  MoreVertical, Eye, Filter, Share2, Calendar, Users,
-  ArrowUpRight, PieChart, Wallet, ShieldAlert, Clock,
-  ChevronDown, Copy, SmartphoneNfc, Globe, Heart, Star,
-  Send, Layers, Fingerprint, Landmark, Sparkles
+  Plus, Ticket, Calendar, Trophy, Wallet, Settings, 
+  Link as LinkIcon, Check, QrCode, Download, X,
+  Loader2, LogOut, Search, RefreshCcw, MoreHorizontal,
+  ChevronRight, MapPin, Award, AlertCircle, Info,
+  ShieldCheck, History, Zap, TrendingUp, Users, 
+  BarChart3, ArrowUpRight, Filter, DownloadCloud,
+  Eye, MousePointer2, Share2, Star, Clock, Trash2, Edit3,
+  Layers, Activity, Sparkles, ChevronDown, UserPlus,
+  BarChart, PieChart, CreditCard, Layout, Trash
 } from 'lucide-react';
-
-/**
- * OUSTED ULTIMATE ORGANIZER COMMAND CENTER
- * Version: 2.4.0 (Luxury Dark/Light Hybrid)
- */
 
 export default function OrganizerDashboard() {
   const router = useRouter();
 
-  // --- 1. SYSTEM STATE ---
+  // --- 1. CORE STATE ---
+  const [activeTab, setActiveTab] = useState('events'); 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [activeTab, setActiveTab] = useState('performance'); 
-  const [showOnboarding, setShowOnboarding] = useState(false);
-  const [copying, setCopying] = useState(null);
-  
-  // --- 2. DATA STATE ---
   const [data, setData] = useState({ 
     events: [], 
+    competitions: [], 
     tickets: [], 
-    profile: null,
-    payouts: [],
-    recentSales: []
+    profile: null 
   });
 
-  // --- 3. FORM STATE (ONBOARDING) ---
-  const [bizForm, setBizForm] = useState({ 
-    businessName: '', 
-    bankName: '', 
-    accountNumber: '', 
-    accountName: '',
-    agreedToTerms: false 
+  // --- 2. UI & MODAL STATE ---
+  const [copying, setCopying] = useState(null);
+  const [showQR, setShowQR] = useState(null);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [ticketSearch, setTicketSearch] = useState('');
+  const [selectedEventFilter, setSelectedEventFilter] = useState('all');
+  const [showCandidateModal, setShowCandidateModal] = useState(null); 
+  
+  const [paystackConfig, setPaystackConfig] = useState({
+    businessName: "",
+    bankCode: "",
+    accountNumber: "",
+    subaccountCode: "", 
+    isVerified: false
   });
 
-  // --- 4. THE DATA ENGINE ---
-  const refreshDashboard = useCallback(async (isSilent = false) => {
+  const [newCandidate, setNewCandidate] = useState({ name: '', image_url: '' });
+
+  // --- 3. DATA ENGINE (MULTI-LEVEL FETCH) ---
+  const loadDashboardData = useCallback(async (isSilent = false) => {
     try {
       if (!isSilent) setLoading(true);
       else setRefreshing(true);
 
       const { data: { user }, error: authError } = await supabase.auth.getUser();
-      if (authError || !user) return router.push('/login');
-
-      // Step A: Fetch Profile & Event IDs
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single();
-
-      const { data: events } = await supabase
-        .from('events')
-        .select('*, ticket_tiers(*)')
-        .eq('organizer_id', user.id)
-        .order('created_at', { ascending: false });
-
-      const eventIds = events?.map(e => e.id) || [];
-
-      // Step B: Fetch Tickets (Fixed Multi-Tier Join)
-let tickets = [];
-if (eventIds.length > 0) {
-  const { data: ticketData, error: ticketError } = await supabase
-    .from('tickets')
-    .select(`
-      *,
-      events!inner (title, currency),
-      ticket_tiers!inner (name, price)
-    `)
-    .in('event_id', eventIds)
-    .order('created_at', { ascending: false });
-    
-  if (ticketError) console.error("Ticket Fetch Error:", ticketError);
-  tickets = ticketData || [];
-}
-      setData({
-        profile: profile,
-        events: events || [],
-        tickets: tickets,
-        recentSales: tickets.slice(0, 15)
-      });
-
-      // Step C: Check Onboarding Status
-      if (!profile?.paystack_subaccount_code || !profile?.onboarding_completed) {
-        setShowOnboarding(true);
+      if (authError || !user) {
+        router.push('/login');
+        return;
       }
 
+      // Parallel Fetch with explicit joins for the Nested Model
+      const [profileRes, eventsRes, compsRes, ticketsRes] = await Promise.all([
+        supabase.from('profiles').select('*').eq('id', user.id).single(),
+        supabase.from('events').select('*').eq('organizer_id', user.id).order('created_at', { ascending: false }),
+        supabase.from('competitions').select(`
+            *,
+            contests (
+              *,
+              candidates (*)
+            )
+        `).eq('organizer_id', user.id).order('created_at', { ascending: false }),
+        supabase.from('tickets').select('*, events(title, organizer_id)').order('created_at', { ascending: false }),
+      ]);
+
+      const myTickets = ticketsRes.data?.filter(t => t.events?.organizer_id === user.id) || [];
+      
+      setData({
+        events: eventsRes.data || [],
+        competitions: compsRes.data || [],
+        tickets: myTickets,
+        profile: { ...user, ...profileRes.data }
+      });
+
+      if (profileRes.data?.paystack_subaccount_code) {
+        setPaystackConfig({
+          businessName: profileRes.data.business_name || "",
+          bankCode: profileRes.data.bank_code || "",
+          accountNumber: profileRes.data.account_number || "",
+          subaccountCode: profileRes.data.paystack_subaccount_code,
+          isVerified: true
+        });
+      }
     } catch (err) {
-      console.error("DASHBOARD_LOAD_ERROR", err);
+      console.error("Dashboard Engine Failure:", err);
     } finally {
-      setTimeout(() => {
-        setLoading(false);
-        setRefreshing(false);
-      }, 600);
+      setLoading(false);
+      setRefreshing(false);
     }
   }, [router]);
 
   useEffect(() => {
-    refreshDashboard();
-  }, [refreshDashboard]);
+    loadDashboardData();
+  }, [loadDashboardData]);
 
-  // --- 5. FINANCIAL CALCULATIONS (5% SPLIT LOGIC) ---
-  const analytics = useMemo(() => {
-    const gross = data.tickets.reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
-    const commission = gross * 0.05;
-    const net = gross - commission;
-    const checkIns = data.tickets.filter(t => t.is_scanned).length;
-    
-    return { gross, commission, net, checkIns };
-  }, [data.tickets]);
-
-  // --- 6. ACTIONS ---
-  const handleCopyLink = (eventId) => {
-    const url = `${window.location.origin}/book/${eventId}`;
-    navigator.clipboard.writeText(url);
-    setCopying(eventId);
-    setTimeout(() => setCopying(null), 2000);
+  // --- 4. DELETION HANDLERS (CASCADE SIMULATION) ---
+  const handleDeleteCandidate = async (candId) => {
+    if (!confirm("Are you sure you want to remove this contestant?")) return;
+    const { error } = await supabase.from('candidates').delete().eq('id', candId);
+    if (!error) loadDashboardData(true);
   };
 
-  const handleOnboardingSubmit = async () => {
-    if (!bizForm.accountNumber || !bizForm.bankName) return alert("Please fill all details.");
-    
-    setRefreshing(true);
-    // Simulate Paystack Subaccount Creation Logic
-    const subaccountCode = `ACCT_${Math.random().toString(36).toUpperCase().substring(2, 10)}`;
-    
-    const { error } = await supabase
-      .from('profiles')
-      .update({
-        business_name: bizForm.businessName,
-        paystack_subaccount_code: subaccountCode,
-        onboarding_completed: true,
-        bank_details: {
-            bank: bizForm.bankName,
-            acc_no: bizForm.accountNumber,
-            acc_name: bizForm.accountName
-        }
-      })
-      .eq('id', data.profile.id);
-
-    if (!error) {
-      setShowOnboarding(false);
-      refreshDashboard(true);
-    }
+  const handleDeleteContest = async (contestId) => {
+    if (!confirm("Delete this category? All contestants within it will be removed.")) return;
+    const { error } = await supabase.from('contests').delete().eq('id', contestId);
+    if (!error) loadDashboardData(true);
   };
 
-  // --- 7. UI COMPONENTS ---
+  const handleDeleteCompetition = async (compId) => {
+    if (!confirm("CRITICAL: Delete entire Grand Competition? This removes all categories and data.")) return;
+    const { error } = await supabase.from('competitions').delete().eq('id', compId);
+    if (!error) loadDashboardData(true);
+  };
 
-  if (loading) return <LuxuryLoader />;
+  // --- 5. ANALYTICS ENGINE (CALCULATED) ---
+  const stats = useMemo(() => {
+    const ticketGross = data.tickets.reduce((acc, t) => acc + (parseFloat(t.amount) || 0), 0);
+    
+    // Aggregating Nested Voting Revenue
+    let totalVotes = 0;
+    let voteGross = 0;
+    const compPerformance = data.competitions.map(comp => {
+        let compVotes = 0;
+        let compRev = 0;
+        comp.contests?.forEach(ct => {
+            const ctVotes = ct.candidates?.reduce((s, c) => s + (parseInt(c.vote_count) || 0), 0) || 0;
+            compVotes += ctVotes;
+            compRev += (ctVotes * (ct.vote_price || 0));
+        });
+        totalVotes += compVotes;
+        voteGross += compRev;
+        return { id: comp.id, title: comp.title, votes: compVotes, revenue: compRev };
+    });
+
+    const totalGross = ticketGross + voteGross;
+    const scannedCount = data.tickets.filter(t => t.is_scanned).length;
+    
+    return {
+      totalGross,
+      organizerShare: totalGross * 0.95,
+      platformFee: totalGross * 0.05,
+      ticketCount: data.tickets.length,
+      voteCount: totalVotes,
+      voteRevenue: voteGross,
+      ticketRevenue: ticketGross,
+      compPerformance,
+      checkInRate: data.tickets.length ? Math.round((scannedCount / data.tickets.length) * 100) : 0
+    };
+  }, [data]);
+
+  // --- 6. VIEWPORT COMPONENTS ---
+  
+  if (loading) return (
+    <div style={fullPageCenter}>
+      <Loader2 className="animate-spin" size={32} color="#000"/>
+      <p style={loadingText}>SYNCING LUXURY ASSETS...</p>
+    </div>
+  );
 
   return (
-    <div style={dashboardWrapper}>
-      
+    <div style={mainWrapper}>
       {/* HEADER SECTION */}
-      <header style={headerNav}>
-        <div style={logoArea}>
-          <div style={logoIcon}><Fingerprint size={28} color="#000"/></div>
-          <div>
-            <h1 style={logoText}>OUSTED</h1>
-            <p style={subText}>Organiser Intelligence</p>
-          </div>
+      <div style={topNav}>
+        <div>
+          <h1 style={logoText}>OUSTED <span style={badgeLuxury}>PLATINUM</span></h1>
+          <p style={subLabel}>Consolidated Organizer Hub v2.5</p>
         </div>
-
-        <div style={tabSwitcher}>
-          <button style={tabBtn(activeTab === 'performance')} onClick={() => setActiveTab('performance')}>Performance</button>
-          <button style={tabBtn(activeTab === 'events')} onClick={() => setActiveTab('events')}>Events</button>
-          <button style={tabBtn(activeTab === 'tickets')} onClick={() => setActiveTab('tickets')}>Tickets</button>
+        <div style={headerActions}>
+           <div style={userBrief}>
+             <p style={userEmail}>{data.profile?.email}</p>
+             <div style={onboardingBadge(paystackConfig.subaccountCode)}>
+               <div style={dot(paystackConfig.subaccountCode)}></div>
+               {paystackConfig.subaccountCode ? 'SPLITS ACTIVE' : 'PAYOUTS PENDING'}
+             </div>
+           </div>
+           <button style={circleAction} onClick={() => loadDashboardData(true)}>
+             <RefreshCcw size={18} className={refreshing ? 'animate-spin' : ''}/>
+           </button>
+           <button style={logoutCircle} onClick={handleLogout}>
+             <LogOut size={18}/>
+           </button>
         </div>
+      </div>
 
-        <div style={userControl}>
-          <button style={iconBtn} onClick={() => refreshDashboard(true)}>
-            <RefreshCcw size={18} className={refreshing ? 'animate-spin' : ''}/>
-          </button>
-          <div style={profilePill}>
-             <div style={avatar}>{data.profile?.business_name?.[0] || 'A'}</div>
-             <span>{data.profile?.business_name || 'Admin'}</span>
-          </div>
-          <button style={logoutBtn} onClick={() => supabase.auth.signOut().then(() => router.push('/login'))}>
-            <LogOut size={18}/>
-          </button>
-        </div>
-      </header>
-
-      {/* PERFORMANCE OVERVIEW (ACTIVE TAB) */}
-      {activeTab === 'performance' && (
-        <div style={contentFadeIn}>
-          {/* WEALTH CARD */}
-          <div style={wealthSection}>
-            <div style={mainWealthCard}>
-              <div style={wealthHeader}>
-                <span style={wealthLabel}>SETTLED REVENUE (GHS)</span>
-                <div style={statusPill}><div style={pulseDot}/> LIVE SYSTEM</div>
-              </div>
-              <h2 style={wealthAmount}>{analytics.net.toLocaleString(undefined, {minimumFractionDigits: 2})}</h2>
-              
-              <div style={wealthBreakdown}>
-                <div style={breakdownItem}>
-                  <p style={bLabel}>Gross Sales</p>
-                  <p style={bValue}>GHS {analytics.gross.toLocaleString()}</p>
-                </div>
-                <div style={breakdownItem}>
-                  <p style={bLabel}>Platform Fee (5%)</p>
-                  <p style={bValue}>- GHS {analytics.commission.toLocaleString()}</p>
-                </div>
-                <div style={wealthActions}>
-                  <button style={withdrawBtn}><Wallet size={16}/> SETTLEMENT HISTORY</button>
-                  <button style={settingsBtn}><Settings size={18}/></button>
-                </div>
-              </div>
+      {/* FINANCE HERO */}
+      <div style={financeGrid}>
+        <div style={balanceCard}>
+          <div style={cardHeader}>
+            <div style={balanceInfo}>
+              <p style={financeLabel}>NET SETTLEMENT (95%)</p>
+              <h2 style={balanceValue}>GHS {stats.organizerShare.toLocaleString(undefined, {minimumFractionDigits: 2})}</h2>
             </div>
-
-            <div style={secondaryStats}>
-              <div style={statBox}>
-                <div style={statIcon}><Users size={20} color="#6366f1"/></div>
-                <div>
-                  <h3 style={statNum}>{data.tickets.length}</h3>
-                  <p style={statLab}>Total Attendees</p>
-                </div>
-              </div>
-              <div style={statBox}>
-                <div style={statIcon}><UserCheck size={20} color="#10b981"/></div>
-                <div>
-                  <h3 style={statNum}>{analytics.checkIns}</h3>
-                  <p style={statLab}>Checked In</p>
-                </div>
-              </div>
-              <div style={statBox}>
-                <div style={statIcon}><TrendingUp size={20} color="#f59e0b"/></div>
-                <div>
-                  <h3 style={statNum}>{data.events.length}</h3>
-                  <p style={statLab}>Experiences</p>
-                </div>
-              </div>
-            </div>
+            <div style={iconCircleGold}><Sparkles size={24} color="#d4af37"/></div>
           </div>
+          <div style={statsRow}>
+            <div style={miniStat}><ArrowUpRight size={14}/> <span>Tickets: GHS {stats.ticketRevenue.toFixed(2)}</span></div>
+            <div style={miniStat} style={{color: '#0ea5e9'}}><Zap size={14}/> <span>Votes: GHS {stats.voteRevenue.toFixed(2)}</span></div>
+          </div>
+          <button style={settingsIconBtn} onClick={() => setShowSettingsModal(true)}>
+            <Wallet size={16}/> SETTINGS & BANK SETUP
+          </button>
+        </div>
 
-          <div style={bottomGrid}>
-            {/* RECENT SALES */}
-            <div style={salesCol}>
-              <div style={secHeader}>
-                <h3 style={secTitle}>Recent Transactions</h3>
-                <button style={utilBtn}><DownloadCloud size={16}/> CSV</button>
-              </div>
-              <div style={salesList}>
-                {data.recentSales.map(ticket => (
-                  <div key={ticket.id} style={saleItem}>
-                    <div style={saleAvatar}><CreditCard size={16}/></div>
-                    <div style={saleInfo}>
-                      <p style={saleName}>{ticket.guest_name || 'Anonymous Guest'}</p>
-                      <p style={saleMeta}>{ticket.events?.title} • {ticket.ticket_tiers?.name}</p>
+        <div style={quickStatsGrid}>
+          <div style={glassStatCard}>
+            <p style={statLabel}>TICKETS ISSUED</p>
+            <h3 style={statVal}>{stats.ticketCount}</h3>
+            <div style={statProgress}><div style={statBar(stats.checkInRate, '#0ea5e9')}></div></div>
+          </div>
+          <div style={glassStatCard}>
+            <p style={statLabel}>TOTAL VOTES CAST</p>
+            <h3 style={statVal}>{stats.voteCount.toLocaleString()}</h3>
+            <div style={statProgress}><div style={statBar(100, '#8b5cf6')}></div></div>
+          </div>
+        </div>
+      </div>
+
+      {/* NAVIGATION */}
+      <div style={tabBar}>
+        {['events', 'sales', 'competitions', 'analytics'].map((tab) => (
+          <button key={tab} onClick={() => setActiveTab(tab)} style={tabItem(activeTab === tab)}>
+            {tab.toUpperCase()}
+          </button>
+        ))}
+      </div>
+
+      <div style={viewPort}>
+        
+        {/* --- 1. EVENTS VIEW --- */}
+        {activeTab === 'events' && (
+          <div style={fadeAnim}>
+            <div style={viewHeader}>
+              <h2 style={viewTitle}>Event Portfolio</h2>
+              <button style={addBtn} onClick={() => router.push('/dashboard/organizer/create')}>
+                <Plus size={18}/> NEW EVENT
+              </button>
+            </div>
+            <div style={cardGrid}>
+              {data.events.map(event => (
+                <div key={event.id} style={itemCard}>
+                  <div style={itemImage(event.images?.[0])}>
+                    <div style={imageOverlay}>
+                      <div style={cardQuickActions}>
+                        <button style={miniAction} onClick={() => copyLink('events', event.id)}>
+                          <LinkIcon size={14}/>
+                        </button>
+                        <button style={deleteAction} onClick={async () => {
+                            if(confirm("Delete Event?")) await supabase.from('events').delete().eq('id', event.id);
+                            loadDashboardData(true);
+                        }}>
+                          <Trash2 size={14}/>
+                        </button>
+                      </div>
                     </div>
-                    <div style={salePrice}>+GHS {(ticket.amount * 0.95).toFixed(2)}</div>
                   </div>
-                ))}
-              </div>
-            </div>
-
-            {/* QUICK ACTIONS */}
-            <div style={actionCol}>
-               <h3 style={secTitle}>Management</h3>
-               <div style={actionGrid}>
-                  <button style={actionCard} onClick={() => router.push('/dashboard/create')}>
-                    <Plus size={24}/>
-                    <span>New Event</span>
-                  </button>
-                  <button style={actionCard}>
-                    <Trophy size={24}/>
-                    <span>Contests</span>
-                  </button>
-                  <button style={actionCard}>
-                    <Mail size={24}/>
-                    <span>Broadcaster</span>
-                  </button>
-                  <button style={actionCard}>
-                    <BarChart3 size={24}/>
-                    <span>Insights</span>
-                  </button>
-               </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* EVENTS TAB */}
-      {activeTab === 'events' && (
-        <div style={contentFadeIn}>
-          <div style={secHeader}>
-            <h3 style={secTitle}>Curated Experiences</h3>
-            <button style={primaryBtn} onClick={() => router.push('/dashboard/create')}>
-              <Plus size={18}/> CREATE NEW
-            </button>
-          </div>
-          
-          <div style={eventGrid}>
-            {data.events.map(event => (
-              <div key={event.id} style={eventCard}>
-                <div style={eventImg(event.image_url)}>
-                  <div style={eventBadge}>{event.status?.toUpperCase()}</div>
-                </div>
-                <div style={eventBody}>
-                  <h4 style={eTitle}>{event.title}</h4>
-                  <p style={eDate}><Calendar size={12}/> {new Date(event.date).toLocaleDateString()}</p>
-                  
-                  <div style={eTiers}>
-                    {event.ticket_tiers?.map(tier => (
-                      <span key={tier.id} style={tierPill}>{tier.name}</span>
-                    ))}
-                  </div>
-
-                  <div style={eFooter}>
-                    <button style={manageBtn} onClick={() => router.push(`/dashboard/events/${event.id}`)}>MANAGE</button>
-                    <button style={copyBtn} onClick={() => handleCopyLink(event.id)}>
-                      {copying === event.id ? <Check size={16} color="#10b981"/> : <LinkIcon size={16}/>}
+                  <div style={itemBody}>
+                    <h3 style={itemTitle}>{event.title}</h3>
+                    <p style={metaLine}><MapPin size={14}/> {event.location}</p>
+                    <button style={fullWidthBtn} onClick={() => { setSelectedEventFilter(event.id); setActiveTab('sales'); }}>
+                        VIEW SALES
                     </button>
                   </div>
                 </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* --- 2. SALES LEDGER --- */}
+        {activeTab === 'sales' && (
+          <div style={fadeAnim}>
+             <div style={viewHeader}>
+              <h2 style={viewTitle}>Transaction Ledger</h2>
+              <div style={filterGroup}>
+                <div style={searchBox}>
+                  <Search size={18} color="#94a3b8"/>
+                  <input style={searchInputField} placeholder="Ref or Guest..." value={ticketSearch} onChange={(e) => setTicketSearch(e.target.value)}/>
+                </div>
               </div>
-            ))}
+            </div>
+            <div style={tableWrapper}>
+              <table style={dataTable}>
+                <thead>
+                  <tr>
+                    <th style={tableTh}>GUEST / REF</th>
+                    <th style={tableTh}>EVENT</th>
+                    <th style={tableTh}>GROSS</th>
+                    <th style={tableTh}>NET (95%)</th>
+                    <th style={tableTh}>STATUS</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredTickets.map((t) => (
+                    <tr key={t.id} style={tableTr}>
+                      <td style={tableTd}>
+                        <p style={guestBold}>{t.guest_name}</p>
+                        <p style={guestMuted}>{t.reference}</p>
+                      </td>
+                      <td style={tableTd}>{t.events?.title}</td>
+                      <td style={tableTd}>GHS {t.amount}</td>
+                      <td style={tableTd} style={{fontWeight: 900, color: '#16a34a'}}>GHS {(t.amount * 0.95).toFixed(2)}</td>
+                      <td style={tableTd}>{t.is_scanned ? <span style={scannedPill}>USED</span> : <span style={activePill}>VALID</span>}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* --- 3. DETAILED COMPETITION MANAGEMENT --- */}
+        {activeTab === 'competitions' && (
+          <div style={fadeAnim}>
+             <div style={viewHeader}>
+                <h2 style={viewTitle}>Competition Hierarchy</h2>
+                <button style={addBtn} onClick={() => router.push('/dashboard/organizer/contests/create')}>
+                  <Plus size={18}/> CREATE GRAND COMPETITION
+                </button>
+             </div>
+             
+             <div style={compListStack}>
+                {data.competitions.map(comp => (
+                  <div key={comp.id} style={grandCompCard}>
+                     <div style={grandHeader}>
+                        <div>
+                           <h3 style={grandTitle}>{comp.title}</h3>
+                           <p style={grandSub}>Grand Competition • {comp.contests?.length || 0} Categories</p>
+                        </div>
+                        <div style={actionRow}>
+                           <button style={deleteTextBtn} onClick={() => handleDeleteCompetition(comp.id)}>
+                              <Trash size={16}/> DELETE GRAND COMPETITION
+                           </button>
+                        </div>
+                     </div>
+
+                     <div style={nestedContestGrid}>
+                        {comp.contests?.map(ct => (
+                          <div key={ct.id} style={contestContainer}>
+                             <div style={contestHead}>
+                                <div>
+                                   <h4 style={contestTitle}>{ct.title}</h4>
+                                   <p style={contestPrice}>GHS {ct.vote_price} per vote</p>
+                                </div>
+                                <div style={miniActionGroup}>
+                                   <button style={iconBtn} onClick={() => setShowCandidateModal(ct)}><UserPlus size={16}/></button>
+                                   <button style={iconBtnDelete} onClick={() => handleDeleteContest(ct.id)}><Trash2 size={16}/></button>
+                                </div>
+                             </div>
+
+                             <div style={candidateTable}>
+                                {ct.candidates?.length > 0 ? ct.candidates.map(cand => (
+                                  <div key={cand.id} style={candRow}>
+                                     <div style={candMain}>
+                                        <div style={candAvatar(cand.image_url)}></div>
+                                        <span style={candNameText}>{cand.name}</span>
+                                     </div>
+                                     <div style={candStats}>
+                                        <span style={voteBadge}>{cand.vote_count} Votes</span>
+                                        <button style={candDelete} onClick={() => handleDeleteCandidate(cand.id)}><X size={14}/></button>
+                                     </div>
+                                  </div>
+                                )) : <p style={emptyText}>No contestants yet.</p>}
+                             </div>
+                          </div>
+                        ))}
+                     </div>
+                  </div>
+                ))}
+                {data.competitions.length === 0 && <div style={emptyState}>No Grand Competitions active.</div>}
+             </div>
+          </div>
+        )}
+
+        {/* --- 4. ANALYTICS ENGINE --- */}
+        {activeTab === 'analytics' && (
+          <div style={fadeAnim}>
+             <div style={viewHeader}>
+                <h2 style={viewTitle}>Revenue Intelligence</h2>
+                <div style={liveBadge}><Activity size={14}/> LIVE DATA</div>
+             </div>
+             
+             <div style={analyticsGrid}>
+                {/* Voting Analytics */}
+                <div style={analyticsCard}>
+                   <div style={anaHeader}>
+                      <Trophy size={20} color="#d4af37"/>
+                      <h3 style={anaTitle}>Voting Performance</h3>
+                   </div>
+                   <div style={anaBody}>
+                      {stats.compPerformance.map(cp => (
+                        <div key={cp.id} style={anaRow}>
+                           <div style={anaInfo}>
+                              <p style={anaName}>{cp.title}</p>
+                              <p style={anaMeta}>{cp.votes} Votes</p>
+                           </div>
+                           <p style={anaVal}>GHS {cp.revenue.toFixed(2)}</p>
+                        </div>
+                      ))}
+                      {stats.compPerformance.length === 0 && <p style={emptyText}>Waiting for voting data...</p>}
+                   </div>
+                </div>
+
+                {/* Event Analytics */}
+                <div style={analyticsCard}>
+                   <div style={anaHeader}>
+                      <Ticket size={20} color="#0ea5e9"/>
+                      <h3 style={anaTitle}>Ticket Sales Performance</h3>
+                   </div>
+                   <div style={anaBody}>
+                      {data.events.map(ev => {
+                         const evSales = data.tickets.filter(t => t.event_id === ev.id);
+                         const evRev = evSales.reduce((a, b) => a + (parseFloat(b.amount) || 0), 0);
+                         return (
+                            <div key={ev.id} style={anaRow}>
+                               <div style={anaInfo}>
+                                  <p style={anaName}>{ev.title}</p>
+                                  <p style={anaMeta}>{evSales.length} Sold</p>
+                               </div>
+                               <p style={anaVal}>GHS {evRev.toFixed(2)}</p>
+                            </div>
+                         );
+                      })}
+                   </div>
+                </div>
+             </div>
+          </div>
+        )}
+      </div>
+
+      {/* --- MODALS --- */}
+      {showCandidateModal && (
+        <div style={overlay} onClick={() => setShowCandidateModal(null)}>
+          <div style={modal} onClick={e => e.stopPropagation()}>
+            <div style={modalHead}>
+              <h2 style={modalTitle}>New Contestant</h2>
+              <button style={closeBtn} onClick={() => setShowCandidateModal(null)}><X size={20}/></button>
+            </div>
+            <div style={modalBody}>
+               <div style={inputStack}>
+                  <label style={fieldLabel}>CANDIDATE NAME</label>
+                  <input style={modalInput} value={newCandidate.name} onChange={(e) => setNewCandidate({...newCandidate, name: e.target.value})} placeholder="e.g. John Doe"/>
+               </div>
+               <div style={inputStack}>
+                  <label style={fieldLabel}>IMAGE URL (SQUARE PREFERRED)</label>
+                  <input style={modalInput} value={newCandidate.image_url} onChange={(e) => setNewCandidate({...newCandidate, image_url: e.target.value})} placeholder="https://..."/>
+               </div>
+               <button style={actionSubmitBtn(isProcessing)} onClick={() => addCandidate(showCandidateModal.id)} disabled={isProcessing}>
+                  {isProcessing ? 'REGISTERING...' : 'ADD TO CATEGORY'}
+               </button>
+            </div>
           </div>
         </div>
       )}
 
-      {/* TICKETS TAB */}
-      {activeTab === 'tickets' && (
-         <div style={contentFadeIn}>
-            <div style={secHeader}>
-              <h3 style={secTitle}>Audience Ledger</h3>
-              <div style={searchBox}>
-                <Search size={16} color="#94a3b8"/>
-                <input style={searchInput} placeholder="Search by name, email or ID..."/>
-              </div>
+
+      {/* MODALS SECTION */}
+
+
+
+      {/* 1. SETTINGS MODAL (Onboarding) */}
+
+      {showSettingsModal && (
+
+        <div style={overlay} onClick={() => setShowSettingsModal(false)}>
+
+          <div style={modal} onClick={e => e.stopPropagation()}>
+
+            <div style={modalHead}>
+
+              <h2 style={modalTitle}>Payout Config</h2>
+
+              <button style={closeBtn} onClick={() => setShowSettingsModal(false)}><X size={20}/></button>
+
             </div>
 
-            <div style={tableContainer}>
-               <table style={luxuryTable}>
-                  <thead>
-                    <tr>
-                      <th style={th}>GUEST</th>
-                      <th style={th}>EVENT</th>
-                      <th style={th}>TIER</th>
-                      <th style={th}>NET REVENUE</th>
-                      <th style={th}>STATUS</th>
-                      <th style={th}>DATE</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.tickets.map(t => (
-                      <tr key={t.id} style={tr}>
-                        <td style={td}>
-                          <p style={tdName}>{t.guest_name}</p>
-                          <p style={tdEmail}>{t.guest_email}</p>
-                        </td>
-                        <td style={td}>{t.events?.title}</td>
-                        <td style={td}><span style={tierBadge}>{t.ticket_tiers?.name}</span></td>
-                        <td style={td}>GHS {(t.amount * 0.95).toFixed(2)}</td>
-                        <td style={td}>
-                          {t.is_scanned ? 
-                            <span style={scanBadge(true)}><Check size={10}/> ADMITTED</span> : 
-                            <span style={scanBadge(false)}><Clock size={10}/> PENDING</span>
-                          }
-                        </td>
-                        <td style={td}>{new Date(t.created_at).toLocaleDateString()}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-               </table>
+            <div style={onboardingPromo}>
+
+              <CreditCard size={20} color="#0ea5e9"/>
+
+              <p style={{margin:0, fontSize: '13px'}}>Ensure bank details match your Paystack dashboard for 95% automated settlement.</p>
+
             </div>
-         </div>
-      )}
 
-      {/* ONBOARDING OVERLAY */}
-      {showOnboarding && (
-        <div style={overlay}>
-           <div style={modal}>
-              <div style={modalDeco}><Sparkles size={32} color="#0ea5e9"/></div>
-              <h2 style={modalTitle}>Finalize Your Account</h2>
-              <p style={modalSub}>Link your business bank account to enable Paystack-powered payouts. We handle the 5% split automatically.</p>
-              
-              <div style={form}>
-                 <div style={inputGroup}>
-                    <label style={label}>Business / Legal Name</label>
-                    <input style={input} placeholder="Ousted Luxury Events" onChange={e => setBizForm({...bizForm, businessName: e.target.value})}/>
-                 </div>
-                 
-                 <div style={row}>
-                    <div style={inputGroup}>
-                        <label style={label}>Bank Name</label>
-                        <select style={input} onChange={e => setBizForm({...bizForm, bankName: e.target.value})}>
-                           <option>Select Bank</option>
-                           <option value="access">Access Bank</option>
-                           <option value="gtb">GT Bank</option>
-                           <option value="ecobank">Ecobank</option>
-                        </select>
-                    </div>
-                    <div style={inputGroup}>
-                        <label style={label}>Account Number</label>
-                        <input style={input} placeholder="0123456789" onChange={e => setBizForm({...bizForm, accountNumber: e.target.value})}/>
-                    </div>
-                 </div>
+            <div style={modalBody}>
 
-                 <div style={infoBox}>
-                    <ShieldCheck size={18} color="#0ea5e9"/>
-                    <p>Settlements are disbursed every 24 hours to this account.</p>
-                 </div>
+              <div style={inputStack}>
 
-                 <button style={submitBtn} onClick={handleOnboardingSubmit}>
-                    ACTIVATE COMMAND CENTER <ChevronRight size={18}/>
-                 </button>
+                <label style={fieldLabel}>BUSINESS LEGAL NAME</label>
+
+                <input style={modalInput} value={paystackConfig.businessName} onChange={(e) => setPaystackConfig({...paystackConfig, businessName: e.target.value})} placeholder="e.g. Ousted Events Ltd"/>
+
               </div>
-           </div>
+
+              <div style={inputStack}>
+
+                <label style={fieldLabel}>SETTLEMENT DESTINATION</label>
+
+                <select style={modalInput} value={paystackConfig.bankCode} onChange={(e) => setPaystackConfig({...paystackConfig, bankCode: e.target.value})}>
+
+                  <option value="">Select Network</option>
+
+                  <option value="MTN">MTN Mobile Money</option>
+
+                  <option value="VOD">Telecel (Vodafone) Cash</option>
+
+                  <option value="058">GT Bank</option>
+
+                  <option value="044">Access Bank</option>
+
+                </select>
+
+              </div>
+
+              <div style={inputStack}>
+
+                <label style={fieldLabel}>ACCOUNT / WALLET NUMBER</label>
+
+                <input style={modalInput} value={paystackConfig.accountNumber} onChange={(e) => setPaystackConfig({...paystackConfig, accountNumber: e.target.value})} placeholder="055XXXXXXX"/>
+
+              </div>
+
+              <button style={actionSubmitBtn(isProcessing)} onClick={saveOnboardingDetails} disabled={isProcessing}>
+
+                {isProcessing ? 'UPDATING...' : 'CONFIRM SETTINGS'}
+
+              </button>
+
+            </div>
+
+          </div>
+
         </div>
+
       )}
 
+
+
+      {/* 2. ADD CANDIDATE MODAL */}
+
+      {showCandidateModal && (
+
+        <div style={overlay} onClick={() => setShowCandidateModal(null)}>
+
+          <div style={modal} onClick={e => e.stopPropagation()}>
+
+            <div style={modalHead}>
+
+              <h2 style={modalTitle}>Add Candidate</h2>
+
+              <button style={closeBtn} onClick={() => setShowCandidateModal(null)}><X size={20}/></button>
+
+            </div>
+
+            <p style={{fontSize: '13px', color: '#64748b', marginBottom: '20px'}}>Adding to: <strong>{showCandidateModal.title}</strong></p>
+
+            <div style={modalBody}>
+
+               <div style={inputStack}>
+
+                  <label style={fieldLabel}>FULL NAME</label>
+
+                  <input style={modalInput} value={newCandidate.name} onChange={(e) => setNewCandidate({...newCandidate, name: e.target.value})} placeholder="Candidate Name"/>
+
+               </div>
+
+               <div style={inputStack}>
+
+                  <label style={fieldLabel}>IMAGE URL (OPTIONAL)</label>
+
+                  <input style={modalInput} value={newCandidate.image_url} onChange={(e) => setNewCandidate({...newCandidate, image_url: e.target.value})} placeholder="https://..."/>
+
+               </div>
+
+               <button style={actionSubmitBtn(isProcessing)} onClick={() => addCandidate(showCandidateModal.id)} disabled={isProcessing}>
+
+                  {isProcessing ? 'ADDING...' : 'ADD TO CONTEST'}
+
+               </button>
+
+            </div>
+
+          </div>
+
+        </div>
+
+      )}
+
+
+
+      {/* 3. QR PREVIEW MODAL */}
+
+      {showQR && (
+
+        <div style={overlay} onClick={() => setShowQR(null)}>
+
+          <div style={modal} onClick={e => e.stopPropagation()}>
+
+            <div style={modalHead}>
+
+               <h2 style={modalTitle}>Portal QR</h2>
+
+               <button style={closeBtn} onClick={() => setShowQR(null)}><X size={20}/></button>
+
+            </div>
+
+            <div style={{display: 'flex', justifyContent: 'center', padding: '20px'}}>
+
+              <img src={showQR} alt="QR Code" style={{width: '250px', height: '250px', borderRadius: '20px'}} />
+
+            </div>
+
+            <p style={{textAlign: 'center', fontSize: '12px', color: '#64748b'}}>Scan this to open the event portal.</p>
+
+          </div>
+
+        </div>
+
+      )}
+
+    </div>
+
+  );
+
+}
     </div>
   );
 }
 
-// --- 8. LUXURY STYLING ENGINE ---
+// --- TRIPLE CHECKED LUXURY STYLES ---
+const mainWrapper = { padding: '40px', maxWidth: '1400px', margin: '0 auto', background: '#fcfcfc', minHeight: '100vh', fontFamily: 'Inter, sans-serif' };
+const fullPageCenter = { height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' };
+const loadingText = { fontSize: '12px', fontWeight: 800, color: '#94a3b8', letterSpacing: '2px', marginTop: '15px' };
+const topNav = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '40px' };
+const logoText = { fontSize: '28px', fontWeight: 950, letterSpacing: '-1.5px', margin: 0 };
+const badgeLuxury = { background: '#000', color: '#fff', fontSize: '9px', padding: '4px 10px', borderRadius: '4px', verticalAlign: 'middle', marginLeft: '10px', fontWeight: 900 };
+const subLabel = { fontSize: '12px', color: '#94a3b8', margin: '4px 0 0', fontWeight: 600 };
+const headerActions = { display: 'flex', gap: '15px', alignItems: 'center' };
+const userBrief = { textAlign: 'right' };
+const userEmail = { margin: 0, fontSize: '13px', fontWeight: 700 };
+const onboardingBadge = (on) => ({ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '9px', fontWeight: 900, color: on ? '#16a34a' : '#ef4444', marginTop: '4px' });
+const dot = (on) => ({ width: '5px', height: '5px', borderRadius: '50%', background: on ? '#16a34a' : '#ef4444' });
+const circleAction = { width: '44px', height: '44px', borderRadius: '50%', border: '1px solid #eee', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
+const logoutCircle = { width: '44px', height: '44px', borderRadius: '50%', border: 'none', background: '#000', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
 
-const dashboardWrapper = { 
-  minHeight: '100vh', 
-  background: '#f8fafc', 
-  padding: '40px 60px', 
-  fontFamily: '"Inter", sans-serif',
-  color: '#0f172a'
-};
+const financeGrid = { display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '25px', marginBottom: '40px' };
+const balanceCard = { background: '#000', borderRadius: '24px', padding: '40px', color: '#fff', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' };
+const cardHeader = { display: 'flex', justifyContent: 'space-between' };
+const balanceInfo = { display: 'flex', flexDirection: 'column' };
+const financeLabel = { fontSize: '10px', fontWeight: 800, color: '#94a3b8', letterSpacing: '1px' };
+const balanceValue = { fontSize: '48px', fontWeight: 950, margin: '15px 0', letterSpacing: '-2px' };
+const iconCircleGold = { width: '50px', height: '50px', borderRadius: '15px', background: 'rgba(212, 175, 55, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' };
+const statsRow = { display: 'flex', gap: '20px', marginBottom: '25px' };
+const miniStat = { display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: 700, color: '#16a34a' };
+const settingsIconBtn = { padding: '12px 20px', background: 'rgba(255,255,255,0.08)', border: 'none', borderRadius: '10px', color: '#fff', cursor: 'pointer', fontWeight: 800, fontSize: '11px', alignSelf: 'flex-start' };
+const quickStatsGrid = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' };
+const glassStatCard = { background: '#fff', padding: '25px', borderRadius: '24px', border: '1px solid #f0f0f0', display: 'flex', flexDirection: 'column', justifyContent: 'center' };
+const statLabel = { fontSize: '10px', fontWeight: 900, color: '#94a3b8', marginBottom: '8px' };
+const statVal = { fontSize: '32px', fontWeight: 950, margin: 0 };
+const statProgress = { height: '4px', background: '#f1f5f9', borderRadius: '10px', marginTop: '15px', overflow: 'hidden' };
+const statBar = (w, c) => ({ width: `${w}%`, height: '100%', background: c });
 
-const headerNav = { 
-  display: 'flex', 
-  justifyContent: 'space-between', 
-  alignItems: 'center', 
-  marginBottom: '50px' 
-};
+const tabBar = { display: 'flex', gap: '30px', borderBottom: '1px solid #eee', marginBottom: '40px' };
+const tabItem = (active) => ({ padding: '15px 5px', background: 'none', border: 'none', color: active ? '#000' : '#94a3b8', fontSize: '12px', fontWeight: 900, cursor: 'pointer', borderBottom: active ? '3px solid #000' : '3px solid transparent' });
+const viewPort = { minHeight: '500px' };
+const fadeAnim = { animation: 'fadeIn 0.4s ease' };
+const viewHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' };
+const viewTitle = { margin: 0, fontSize: '22px', fontWeight: 950 };
+const addBtn = { background: '#000', color: '#fff', border: 'none', padding: '12px 22px', borderRadius: '10px', fontWeight: 800, cursor: 'pointer', fontSize: '12px', display: 'flex', alignItems: 'center', gap: '8px' };
 
-const logoArea = { display: 'flex', alignItems: 'center', gap: '15px' };
-const logoIcon = { width: '50px', height: '50px', background: '#fff', borderRadius: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 10px rgba(0,0,0,0.05)', border: '1px solid #e2e8f0' };
-const logoText = { fontSize: '20px', fontWeight: 900, margin: 0, letterSpacing: '-1px' };
-const subText = { fontSize: '11px', color: '#64748b', margin: 0, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '1px' };
+const cardGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '25px' };
+const itemCard = { background: '#fff', borderRadius: '20px', border: '1px solid #f0f0f0', overflow: 'hidden' };
+const itemImage = (url) => ({ height: '200px', background: url ? `url(${url}) center/cover` : '#f8f8f8', position: 'relative' });
+const imageOverlay = { position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, transparent, rgba(0,0,0,0.5))' };
+const cardQuickActions = { position: 'absolute', top: '12px', right: '12px', display: 'flex', gap: '8px' };
+const miniAction = { width: '36px', height: '36px', borderRadius: '10px', background: '#fff', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
+const deleteAction = { width: '36px', height: '36px', borderRadius: '10px', background: '#fee2e2', color: '#ef4444', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
+const itemBody = { padding: '20px' };
+const itemTitle = { margin: '0 0 10px', fontSize: '16px', fontWeight: 900 };
+const metaLine = { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', color: '#64748b', marginBottom: '15px' };
+const fullWidthBtn = { width: '100%', background: '#f1f5f9', border: 'none', padding: '12px', borderRadius: '10px', fontWeight: 800, fontSize: '11px', cursor: 'pointer' };
 
-const tabSwitcher = { background: '#fff', padding: '6px', borderRadius: '16px', display: 'flex', gap: '5px', border: '1px solid #e2e8f0' };
-const tabBtn = (active) => ({ 
-  padding: '10px 22px', 
-  border: 'none', 
-  borderRadius: '12px', 
-  background: active ? '#000' : 'transparent', 
-  color: active ? '#fff' : '#64748b', 
-  fontSize: '13px', 
-  fontWeight: 700, 
-  cursor: 'pointer',
-  transition: 'all 0.2s ease'
-});
+const tableWrapper = { background: '#fff', borderRadius: '20px', border: '1px solid #f0f0f0', overflow: 'hidden' };
+const dataTable = { width: '100%', borderCollapse: 'collapse', textAlign: 'left' };
+const tableTh = { padding: '15px 20px', background: '#f8fafc', fontSize: '10px', fontWeight: 900, color: '#94a3b8' };
+const tableTr = { borderBottom: '1px solid #f1f5f9' };
+const tableTd = { padding: '15px 20px', fontSize: '13px' };
+const guestBold = { margin: 0, fontWeight: 800 };
+const guestMuted = { margin: 0, fontSize: '11px', color: '#94a3b8' };
+const scannedPill = { background: '#f1f5f9', color: '#94a3b8', padding: '4px 10px', borderRadius: '6px', fontSize: '10px', fontWeight: 900 };
+const activePill = { background: '#f0fdf4', color: '#16a34a', padding: '4px 10px', borderRadius: '6px', fontSize: '10px', fontWeight: 900 };
 
-const userControl = { display: 'flex', alignItems: 'center', gap: '15px' };
-const profilePill = { display: 'flex', alignItems: 'center', gap: '10px', background: '#fff', padding: '6px 14px', borderRadius: '50px', border: '1px solid #e2e8f0', fontSize: '13px', fontWeight: 700 };
-const avatar = { width: '26px', height: '26px', background: '#000', color: '#fff', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '10px' };
-const iconBtn = { background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' };
-const logoutBtn = { background: '#fee2e2', color: '#ef4444', border: 'none', padding: '10px', borderRadius: '12px', cursor: 'pointer' };
+const compListStack = { display: 'flex', flexDirection: 'column', gap: '30px' };
+const grandCompCard = { background: '#fff', borderRadius: '24px', border: '1px solid #f0f0f0', padding: '30px' };
+const grandHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '25px', borderBottom: '1px solid #f8f8f8', paddingBottom: '20px' };
+const grandTitle = { margin: 0, fontSize: '20px', fontWeight: 900 };
+const grandSub = { margin: '5px 0 0', fontSize: '12px', color: '#94a3b8', fontWeight: 600 };
+const deleteTextBtn = { background: 'none', border: 'none', color: '#ef4444', fontSize: '11px', fontWeight: 900, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' };
+const nestedContestGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(350px, 1fr))', gap: '20px' };
+const contestContainer = { background: '#fcfcfc', border: '1px solid #f1f5f9', borderRadius: '18px', padding: '20px' };
+const contestHead = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' };
+const contestTitle = { margin: 0, fontSize: '14px', fontWeight: 900 };
+const contestPrice = { margin: '2px 0 0', fontSize: '11px', color: '#0ea5e9', fontWeight: 700 };
+const miniActionGroup = { display: 'flex', gap: '8px' };
+const iconBtn = { width: '32px', height: '32px', borderRadius: '8px', border: '1px solid #eee', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' };
+const iconBtnDelete = { width: '32px', height: '32px', borderRadius: '8px', border: 'none', background: '#fee2e2', color: '#ef4444', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' };
+const candidateTable = { display: 'flex', flexDirection: 'column', gap: '10px' };
+const candRow = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px', background: '#fff', border: '1px solid #f1f5f9', borderRadius: '12px' };
+const candMain = { display: 'flex', alignItems: 'center', gap: '10px' };
+const candAvatar = (url) => ({ width: '30px', height: '30px', borderRadius: '8px', background: url ? `url(${url}) center/cover` : '#eee' });
+const candNameText = { fontSize: '13px', fontWeight: 700 };
+const candStats = { display: 'flex', alignItems: 'center', gap: '10px' };
+const voteBadge = { background: '#f8fafc', color: '#000', fontSize: '10px', fontWeight: 900, padding: '4px 8px', borderRadius: '6px' };
+const candDelete = { background: 'none', border: 'none', color: '#94a3b8', cursor: 'pointer' };
+const emptyText = { fontSize: '11px', color: '#94a3b8', textAlign: 'center', margin: '20px 0' };
 
-const wealthSection = { display: 'grid', gridTemplateColumns: '1.8fr 1fr', gap: '30px', marginBottom: '60px' };
-const mainWealthCard = { background: '#000', borderRadius: '40px', padding: '50px', color: '#fff', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)' };
-const wealthHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'center' };
-const wealthLabel = { fontSize: '11px', fontWeight: 800, color: '#64748b', letterSpacing: '2px' };
-const statusPill = { background: '#1e293b', padding: '6px 14px', borderRadius: '50px', fontSize: '10px', fontWeight: 800, color: '#10b981', display: 'flex', alignItems: 'center', gap: '8px' };
-const pulseDot = { width: '6px', height: '6px', background: '#10b981', borderRadius: '50%', animation: 'pulse 2s infinite' };
-const wealthAmount = { fontSize: '64px', fontWeight: 950, margin: '25px 0', letterSpacing: '-3px' };
-const wealthBreakdown = { borderTop: '1px solid #1e293b', paddingTop: '30px', display: 'flex', flexDirection: 'column', gap: '15px' };
-const breakdownItem = { display: 'flex', justifyContent: 'space-between', fontSize: '14px' };
-const bLabel = { color: '#64748b' };
-const bValue = { fontWeight: 700 };
-const wealthActions = { display: 'flex', gap: '15px', marginTop: '20px' };
-const withdrawBtn = { flex: 1, background: '#fff', color: '#000', border: 'none', padding: '16px', borderRadius: '18px', fontWeight: 800, fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', cursor: 'pointer' };
-const settingsBtn = { width: '55px', background: '#1e293b', border: 'none', borderRadius: '18px', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
+const analyticsGrid = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '30px' };
+const analyticsCard = { background: '#fff', borderRadius: '24px', border: '1px solid #f0f0f0', padding: '30px' };
+const anaHeader = { display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '25px' };
+const anaTitle = { margin: 0, fontSize: '16px', fontWeight: 900 };
+const anaBody = { display: 'flex', flexDirection: 'column', gap: '15px' };
+const anaRow = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '15px', background: '#fcfcfc', borderRadius: '16px' };
+const anaInfo = { display: 'flex', flexDirection: 'column' };
+const anaName = { margin: 0, fontSize: '13px', fontWeight: 800 };
+const anaMeta = { margin: '2px 0 0', fontSize: '11px', color: '#94a3b8', fontWeight: 600 };
+const anaVal = { margin: 0, fontSize: '14px', fontWeight: 950, color: '#16a34a' };
+const liveBadge = { background: '#f0fdf4', color: '#16a34a', padding: '6px 12px', borderRadius: '20px', fontSize: '10px', fontWeight: 900, display: 'flex', alignItems: 'center', gap: '6px' };
 
-const secondaryStats = { display: 'flex', flexDirection: 'column', gap: '20px' };
-const statBox = { background: '#fff', padding: '30px', borderRadius: '30px', border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: '20px' };
-const statIcon = { width: '50px', height: '50px', background: '#f8fafc', borderRadius: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center' };
-const statNum = { fontSize: '28px', fontWeight: 900, margin: 0 };
-const statLab = { fontSize: '12px', color: '#94a3b8', fontWeight: 700, margin: 0 };
-
-const bottomGrid = { display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '50px' };
-const secHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' };
-const secTitle = { fontSize: '22px', fontWeight: 900, letterSpacing: '-0.5px' };
-const utilBtn = { background: '#fff', border: '1px solid #e2e8f0', padding: '10px 18px', borderRadius: '12px', fontSize: '12px', fontWeight: 700, display: 'flex', gap: '8px', cursor: 'pointer' };
-
-const salesList = { background: '#fff', borderRadius: '35px', border: '1px solid #e2e8f0', padding: '10px', maxHeight: '500px', overflowY: 'auto' };
-const saleItem = { display: 'flex', alignItems: 'center', gap: '15px', padding: '20px', borderBottom: '1px solid #f8fafc' };
-const saleAvatar = { width: '45px', height: '45px', background: '#f1f5f9', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' };
-const saleInfo = { flex: 1 };
-const saleName = { margin: 0, fontWeight: 800, fontSize: '14px' };
-const saleMeta = { margin: 0, fontSize: '12px', color: '#94a3b8' };
-const salePrice = { fontWeight: 900, color: '#10b981', fontSize: '14px' };
-
-const actionGrid = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' };
-const actionCard = { background: '#fff', border: '1px solid #e2e8f0', padding: '40px 20px', borderRadius: '30px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '15px', cursor: 'pointer', transition: 'transform 0.2s ease' };
-
-const eventGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '30px' };
-const eventCard = { background: '#fff', borderRadius: '32px', border: '1px solid #e2e8f0', overflow: 'hidden' };
-const eventImg = (url) => ({ height: '200px', background: url ? `url(${url}) center/cover` : '#f1f5f9', padding: '20px' });
-const eventBadge = { background: '#000', color: '#fff', padding: '6px 12px', borderRadius: '8px', fontSize: '10px', fontWeight: 800, display: 'inline-block' };
-const eventBody = { padding: '25px' };
-const eTitle = { fontSize: '18px', fontWeight: 800, margin: '0 0 8px' };
-const eDate = { fontSize: '13px', color: '#94a3b8', display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '15px' };
-const eTiers = { display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '25px' };
-const tierPill = { background: '#f8fafc', border: '1px solid #e2e8f0', padding: '4px 10px', borderRadius: '8px', fontSize: '10px', fontWeight: 700, color: '#64748b' };
-const eFooter = { display: 'flex', gap: '10px' };
-const manageBtn = { flex: 1, background: '#000', color: '#fff', border: 'none', padding: '12px', borderRadius: '12px', fontWeight: 800, fontSize: '12px', cursor: 'pointer' };
-const copyBtn = { width: '45px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
-
-const tableContainer = { background: '#fff', borderRadius: '30px', border: '1px solid #e2e8f0', overflow: 'hidden' };
-const luxuryTable = { width: '100%', borderCollapse: 'collapse', textAlign: 'left' };
-const th = { padding: '20px 25px', background: '#fafafa', fontSize: '11px', fontWeight: 800, color: '#94a3b8', letterSpacing: '1px' };
-const tr = { borderBottom: '1px solid #f8fafc' };
-const td = { padding: '25px' };
-const tdName = { margin: 0, fontWeight: 800, fontSize: '14px' };
-const tdEmail = { margin: 0, fontSize: '12px', color: '#94a3b8' };
-const tierBadge = { background: '#f1f5f9', padding: '4px 10px', borderRadius: '6px', fontSize: '11px', fontWeight: 700 };
-const scanBadge = (done) => ({ padding: '6px 12px', borderRadius: '8px', fontSize: '10px', fontWeight: 800, background: done ? '#f0fdf4' : '#fff7ed', color: done ? '#16a34a' : '#ea580c', display: 'inline-flex', alignItems: 'center', gap: '5px' });
-
-const overlay = { position: 'fixed', inset: 0, background: 'rgba(255,255,255,0.8)', backdropFilter: 'blur(10px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' };
-const modal = { background: '#fff', width: '500px', borderRadius: '45px', padding: '50px', boxShadow: '0 30px 60px -12px rgba(0,0,0,0.1)', border: '1px solid #e2e8f0', textAlign: 'center' };
-const modalDeco = { marginBottom: '25px', display: 'inline-block', padding: '20px', background: '#f0f9ff', borderRadius: '24px' };
-const modalTitle = { fontSize: '28px', fontWeight: 950, margin: '0 0 15px', letterSpacing: '-1px' };
-const modalSub = { color: '#64748b', fontSize: '15px', lineHeight: 1.6, marginBottom: '35px' };
-const form = { textAlign: 'left' };
-const inputGroup = { display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' };
-const label = { fontSize: '12px', fontWeight: 800, color: '#0f172a' };
-const input = { padding: '16px', borderRadius: '16px', border: '1px solid #e2e8f0', background: '#f8fafc', fontSize: '14px', outline: 'none' };
-const row = { display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '15px' };
-const infoBox = { display: 'flex', gap: '10px', alignItems: 'center', background: '#f0f9ff', padding: '15px', borderRadius: '15px', fontSize: '12px', color: '#0369a1', marginBottom: '30px', fontWeight: 600 };
-const submitBtn = { width: '100%', background: '#000', color: '#fff', border: 'none', padding: '20px', borderRadius: '20px', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', cursor: 'pointer' };
-
-const contentFadeIn = { animation: 'fadeIn 0.5s ease-out' };
-
-const LuxuryLoader = () => (
-  <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fff' }}>
-     <div style={{ textAlign: 'center' }}>
-        <Loader2 className="animate-spin" size={40} color="#000"/>
-        <h2 style={{ fontSize: '18px', fontWeight: 900, marginTop: '20px', letterSpacing: '4px' }}>OUSTED</h2>
-     </div>
-  </div>
-);
-
-const primaryBtn = { background: '#000', color: '#fff', border: 'none', padding: '12px 24px', borderRadius: '14px', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' };
-const searchBox = { position: 'relative', display: 'flex', alignItems: 'center' };
-const searchInput = { padding: '12px 12px 12px 40px', borderRadius: '14px', border: '1px solid #e2e8f0', width: '300px', fontSize: '13px' };
-
-// Add these to your style constants at the bottom
-const salesCol = { 
-  background: '#fff', 
-  borderRadius: '35px', 
-  border: '1px solid #e2e8f0', 
-  padding: '30px',
-  display: 'flex',
-  flexDirection: 'column'
-};
-
-const actionCol = { 
-  display: 'flex', 
-  flexDirection: 'column', 
-  gap: '20px' 
-};
-
-const salesList = { 
-  marginTop: '10px',
-  display: 'flex',
-  flexDirection: 'column',
-  maxHeight: '400px',
-  overflowY: 'auto'
-};
+const overlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 };
+const modal = { background: '#fff', width: '400px', borderRadius: '30px', padding: '40px' };
+const modalHead = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' };
+const modalTitle = { margin: 0, fontSize: '20px', fontWeight: 950 };
+const closeBtn = { background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' };
+const modalBody = { display: 'flex', flexDirection: 'column', gap: '20px' };
+const inputStack = { display: 'flex', flexDirection: 'column', gap: '8px' };
+const fieldLabel = { fontSize: '9px', fontWeight: 900, color: '#94a3b8', letterSpacing: '1px' };
+const modalInput = { padding: '14px', borderRadius: '12px', border: '1px solid #eee', fontSize: '14px', outline: 'none', fontWeight: 600 };
+const actionSubmitBtn = (p) => ({ padding: '16px', background: '#000', color: '#fff', border: 'none', borderRadius: '14px', fontWeight: 800, cursor: p ? 'not-allowed' : 'pointer', fontSize: '13px' });
+const emptyState = { padding: '60px', textAlign: 'center', background: '#fff', borderRadius: '24px', border: '1px dashed #eee', color: '#94a3b8', fontWeight: 600 };
