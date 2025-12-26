@@ -50,61 +50,60 @@ export default function OrganizerDashboard() {
   const [newCandidate, setNewCandidate] = useState({ name: '', image_url: '' });
 
   // --- 3. DATA ENGINE ---
-  const loadDashboardData = useCallback(async (isSilent = false) => {
-    try {
-      if (!isSilent) setLoading(true);
-      else setRefreshing(true);
+  // --- 3. DATA ENGINE (FIXED) ---
+const loadDashboardData = useCallback(async (isSilent = false) => {
+  try {
+    if (!isSilent) setLoading(true);
+    else setRefreshing(true);
 
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
-      if (authError || !user) {
-        router.push('/login');
-        return;
-      }
-
-      // Parallel Data Fetching
-      const [profileRes, eventsRes, contestsRes, ticketsRes, candidatesRes] = await Promise.all([
-        supabase.from('profiles').select('*').eq('id', user.id).single(),
-        supabase.from('events').select('*').eq('organizer_id', user.id).order('created_at', { ascending: false }),
-        supabase.from('contests').select('*').eq('organizer_id', user.id).order('created_at', { ascending: false }),
-        supabase.from('tickets').select('*, events(title, organizer_id)').order('created_at', { ascending: false }),
-        supabase.from('candidates').select('*')
-      ]);
-
-      const myTickets = ticketsRes.data?.filter(t => t.events?.organizer_id === user.id) || [];
-      
-      // Manually map candidates to contests to avoid Relationship errors (400)
-      const contestsWithCandidates = (contestsRes.data || []).map(contest => ({
-        ...contest,
-        candidates: (candidatesRes.data || []).filter(c => c.contest_id === contest.id)
-      }));
-      
-      setData({
-        events: eventsRes.data || [],
-        contests: contestsWithCandidates,
-        tickets: myTickets,
-        profile: { ...user, ...profileRes.data }
-      });
-
-      if (profileRes.data?.paystack_subaccount_code) {
-        setPaystackConfig({
-          businessName: profileRes.data.business_name || "",
-          bankCode: profileRes.data.bank_code || "",
-          accountNumber: profileRes.data.account_number || "",
-          subaccountCode: profileRes.data.paystack_subaccount_code,
-          isVerified: true
-        });
-      }
-    } catch (err) {
-      console.error("Critical Dashboard Error:", err);
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      router.push('/login');
+      return;
     }
-  }, [router]);
 
-  useEffect(() => {
-    loadDashboardData();
-  }, [loadDashboardData]);
+    // Parallel Data Fetching with correct column naming
+    const [profileRes, eventsRes, contestsRes, ticketsRes, candidatesRes] = await Promise.all([
+      supabase.from('profiles').select('*').eq('id', user.id).single(),
+      supabase.from('events').select('*').eq('organizer_id', user.id).order('created_at', { ascending: false }),
+      // FIX: Changed organizer_id to user_id to match common schema 
+      supabase.from('contests').select('*').eq('user_id', user.id).order('created_at', { ascending: false }),
+      supabase.from('tickets').select('*, events!inner(title, organizer_id)').eq('events.organizer_id', user.id).order('created_at', { ascending: false }),
+      supabase.from('candidates').select('*')
+    ]);
+
+    // Handle potential contest fetch error gracefully
+    const contestData = contestsRes.data || [];
+    const ticketsData = ticketsRes.data || [];
+
+    const contestsWithCandidates = contestData.map(contest => ({
+      ...contest,
+      candidates: (candidatesRes.data || []).filter(c => c.contest_id === contest.id)
+    }));
+    
+    setData({
+      events: eventsRes.data || [],
+      contests: contestsWithCandidates,
+      tickets: ticketsData,
+      profile: { ...user, ...profileRes.data }
+    });
+
+    if (profileRes.data?.paystack_subaccount_code) {
+      setPaystackConfig({
+        businessName: profileRes.data.business_name || "",
+        bankCode: profileRes.data.bank_code || "",
+        accountNumber: profileRes.data.account_number || "",
+        subaccountCode: profileRes.data.paystack_subaccount_code,
+        isVerified: true
+      });
+    }
+  } catch (err) {
+    console.error("Critical Dashboard Error:", err);
+  } finally {
+    setLoading(false);
+    setRefreshing(false);
+  }
+}, [router]);
 
   // --- 4. COMPUTED ANALYTICS (95/5 SPLIT) ---
   const stats = useMemo(() => {
