@@ -73,17 +73,22 @@ export default function OrganizerDashboard() {
 
       const eventIds = events?.map(e => e.id) || [];
 
-      // Step B: Fetch Tickets (Multi-Tier Join)
-      let tickets = [];
-      if (eventIds.length > 0) {
-        const { data: ticketData } = await supabase
-          .from('tickets')
-          .select('*, ticket_tiers(name, price), events(title)')
-          .in('event_id', eventIds)
-          .order('created_at', { ascending: false });
-        tickets = ticketData || [];
-      }
-
+      // Step B: Fetch Tickets (Fixed Multi-Tier Join)
+let tickets = [];
+if (eventIds.length > 0) {
+  const { data: ticketData, error: ticketError } = await supabase
+    .from('tickets')
+    .select(`
+      *,
+      events!inner (title, currency),
+      ticket_tiers!inner (name, price)
+    `)
+    .in('event_id', eventIds)
+    .order('created_at', { ascending: false });
+    
+  if (ticketError) console.error("Ticket Fetch Error:", ticketError);
+  tickets = ticketData || [];
+}
       setData({
         profile: profile,
         events: events || [],
@@ -554,3 +559,27 @@ const LuxuryLoader = () => (
 const primaryBtn = { background: '#000', color: '#fff', border: 'none', padding: '12px 24px', borderRadius: '14px', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' };
 const searchBox = { position: 'relative', display: 'flex', alignItems: 'center' };
 const searchInput = { padding: '12px 12px 12px 40px', borderRadius: '14px', border: '1px solid #e2e8f0', width: '300px', fontSize: '13px' };
+
+// Add these to your style constants at the bottom
+const salesCol = { 
+  background: '#fff', 
+  borderRadius: '35px', 
+  border: '1px solid #e2e8f0', 
+  padding: '30px',
+  display: 'flex',
+  flexDirection: 'column'
+};
+
+const actionCol = { 
+  display: 'flex', 
+  flexDirection: 'column', 
+  gap: '20px' 
+};
+
+const salesList = { 
+  marginTop: '10px',
+  display: 'flex',
+  flexDirection: 'column',
+  maxHeight: '400px',
+  overflowY: 'auto'
+};
