@@ -3,142 +3,91 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabase';
 import { 
   Zap, Trophy, Search, TrendingUp, ArrowLeft, 
-  ChevronRight, Share2, XCircle, BarChart3, Send 
+  ChevronRight, Share2, XCircle, BarChart3, Send,
+  Award, Star, Flame, Crown
 } from 'lucide-react';
 
 export default function VotingPortal() {
-  const [contests, setContests] = useState([]);
+  const [competitions, setCompetitions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   
-  // Navigation State
-  const [selectedContest, setSelectedContest] = useState(null);
-  const [selectedCategory, setSelectedCategory] = useState(null);
+  // Navigation State - The 3-Tier Drill Down
+  const [view, setView] = useState('competitions'); // 'competitions' | 'categories' | 'leaderboard'
+  const [activeComp, setActiveComp] = useState(null);
+  const [activeCat, setActiveCat] = useState(null);
 
   useEffect(() => {
-    async function loadInitialData() {
+    async function loadData() {
+      // Fetching contests grouped by their competition/title
       const { data } = await supabase
         .from('contests')
         .select('*, candidates(*)')
         .eq('is_active', true)
         .order('created_at', { ascending: false });
       
-      setContests(data || []);
-
-      // DEEP LINKING: Check URL for ?contest=Title&cat=Category
-      const params = new URLSearchParams(window.location.search);
-      const urlContest = params.get('contest');
-      const urlCat = params.get('cat');
-
-      if (urlContest && data) {
-        const found = data.find(c => c.title === urlContest);
-        if (found) {
-          setSelectedContest(found);
-          if (urlCat) setSelectedCategory(urlCat);
-        }
-      }
+      setCompetitions(data || []);
       setLoading(false);
     }
-    loadInitialData();
+    loadData();
 
-    // REAL-TIME: Listen for vote increments globally
-    const channel = supabase.channel('live-voting-results')
+    const channel = supabase.channel('live-voting')
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'candidates' }, 
       payload => {
-        setContests(prev => prev.map(con => ({
-          ...con,
-          candidates: con.candidates.map(can => can.id === payload.new.id ? payload.new : can)
+        setCompetitions(prev => prev.map(comp => ({
+          ...comp,
+          candidates: comp.candidates.map(can => can.id === payload.new.id ? payload.new : can)
         })));
       }).subscribe();
 
     return () => supabase.removeChannel(channel);
   }, []);
 
-  const handleShare = (contestTitle, categoryName) => {
-    const url = `${window.location.origin}/voting?contest=${encodeURIComponent(contestTitle)}&cat=${encodeURIComponent(categoryName)}`;
-    const text = `Check out the live leaderboard for ${categoryName} in the ${contestTitle}! Vote now on OUSTED. 🗳️`;
-    
-    if (navigator.share) {
-      navigator.share({ title: 'OUSTED Voting', text, url });
-    } else {
-      window.open(`https://wa.me/?text=${encodeURIComponent(text + " " + url)}`);
-    }
+  // Payment Logic
+  const handleVote = (candidateId, price, candidateName) => {
+    if (!window.PaystackPop) return;
+    const handler = window.PaystackPop.setup({
+      key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY, 
+      email: "voter@ousted.com",
+      amount: Math.round(price * 100),
+      currency: "GHS",
+      metadata: { candidate_id: candidateId, type: 'VOTE', organizer_id: activeComp.organizer_id },
+      callback: function(response) {
+        supabase.rpc('increment_vote', { candidate_id: candidateId });
+      }
+    });
+    handler.openIframe();
   };
 
-const handleVote = (candidateId, price, candidateName) => {
-  // Ensure the Paystack script is loaded on the window
-  if (!window.PaystackPop) {
-    console.error("Paystack SDK not found");
-    return;
-  }
+  if (loading) return <div style={centerText}>Loading Luxury Experience...</div>;
 
-  const handler = window.PaystackPop.setup({
-    key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY, 
-    email: "voter@ousted.com", // You can prompt for this or use a dummy
-    amount: Math.round(price * 100), // GHS to Pesewas (Luxury items use exact math)
-    currency: "GHS",
-    metadata: {
-      candidate_id: candidateId,
-      candidate_name: candidateName,
-      custom_fields: [
-        {
-          display_name: "Service",
-          variable_name: "service",
-          value: "luxury_voting"
-        }
-      ]
-    },
-    // MUST BE A VALID FUNCTION
-    callback: function(response) {
-      console.log("Payment Successful. Ref:", response.reference);
-      
-      // Update the DB immediately for UX
-      supabase.rpc('increment_vote', { candidate_id: candidateId })
-        .then(({ error }) => {
-          if (!error) {
-            alert(`Vote cast for ${candidateName}!`);
-            // Trigger a UI refresh or state update here
-          }
-        });
-    },
-    onClose: function() {
-      console.log("Transaction cancelled.");
-    },
-  });
-
-  handler.openIframe();
-};
-
-  if (loading) return <div style={centerText}>Initializing OUSTED Choice Engine...</div>;
-
-  // VIEW 1: CONTEST LIST (With Search)
-  if (!selectedContest) {
-    const filteredContests = contests.filter(c => 
-      c.title.toLowerCase().includes(searchQuery) || 
-      c.candidates.some(can => can.name.toLowerCase().includes(searchQuery))
-    );
-
+  // --- VIEW 1: COMPETITIONS (The "Grand Entry") ---
+  if (view === 'competitions') {
     return (
       <div style={container}>
         <header style={headerStyle}>
-          <h1 style={mainTitle}>Live <span style={{color:'#0ea5e9'}}>Contests.</span></h1>
+          <div style={premiumBadge}><Crown size={14}/> PREMIER SELECTION</div>
+          <h1 style={mainTitle}>Major <span style={accentText}>Competitions.</span></h1>
           <div style={searchContainer}>
             <Search size={20} color="#0ea5e9" />
-            <input 
-              placeholder="Search contests or nominees..." 
-              style={searchBar}
-              onChange={(e) => setSearchQuery(e.target.value.toLowerCase())}
-            />
+            <input placeholder="Search major events..." style={searchBar} onChange={(e) => setSearchQuery(e.target.value.toLowerCase())} />
           </div>
         </header>
 
         <div style={contestGrid}>
-          {filteredContests.map(c => (
-            <div key={c.id} onClick={() => setSelectedContest(c)} style={contestCard}>
-              <div style={contestIcon}><Trophy size={24} color="#0ea5e9"/></div>
-              <h2 style={{margin:'15px 0 5px', fontWeight:900}}>{c.title}</h2>
-              <p style={{color:'#666', fontSize:'14px', marginBottom:'20px'}}>{c.description}</p>
-              <div style={categoryBadge}>{c.candidates?.length} Total Nominees</div>
+          {competitions.filter(c => c.title.toLowerCase().includes(searchQuery)).map(comp => (
+            <div key={comp.id} onClick={() => { setActiveComp(comp); setView('categories'); }} style={luxuryCard}>
+              <div style={cardImagePlaceholder}>
+                <Trophy size={40} color="rgba(14, 165, 233, 0.5)"/>
+              </div>
+              <div style={cardContent}>
+                <h2 style={cardTitle}>{comp.title}</h2>
+                <p style={cardDesc}>{comp.description}</p>
+                <div style={cardFooter}>
+                  <span>{new Set(comp.candidates.map(can => can.category)).size} Categories</span>
+                  <div style={goButton}><ChevronRight size={18}/></div>
+                </div>
+              </div>
             </div>
           ))}
         </div>
@@ -146,26 +95,23 @@ const handleVote = (candidateId, price, candidateName) => {
     );
   }
 
-  // ... (rest of the code above stays the same)
-
-  // VIEW 2: CATEGORY SELECTION
-  if (selectedContest && !selectedCategory) {
-    // You named this 'categories'
-    const categories = [...new Set(selectedContest.candidates.map(c => c.category || 'General Nominees'))];
-    
+  // --- VIEW 2: CATEGORIES (Specific Contests) ---
+  if (view === 'categories') {
+    const categories = [...new Set(activeComp.candidates.map(c => c.category || 'General Selection'))];
     return (
       <div style={container}>
-        <button onClick={() => setSelectedContest(null)} style={backBtn}>
-          <ArrowLeft size={18}/> Back to Contests
-        </button>
-        <h1 style={mainTitle}>{selectedContest.title}</h1>
+        <button onClick={() => setView('competitions')} style={backBtn}><ArrowLeft size={18}/> Back to Competitions</button>
+        <h1 style={subHeaderTitle}>{activeComp.title}</h1>
+        <p style={subHeaderDesc}>Select a category to view live standings</p>
         
-        {/* CHANGED: Ensure style={categoryListStyle} exists and matches */}
-        <div style={categoryListStyle}> 
+        <div style={categoryList}>
           {categories.map(cat => (
-            <div key={cat} onClick={() => setSelectedCategory(cat)} style={categoryRow}>
-              <span style={{fontWeight:800, fontSize:'18px'}}>{cat}</span>
-              <ChevronRight color="#ccc" />
+            <div key={cat} onClick={() => { setActiveCat(cat); setView('leaderboard'); }} style={categoryRowLuxury}>
+              <div style={{display:'flex', alignItems:'center', gap:'20px'}}>
+                <div style={categoryIcon}><Award color="#0ea5e9"/></div>
+                <span style={{fontWeight:800, fontSize:'20px'}}>{cat}</span>
+              </div>
+              <ChevronRight color="#0ea5e9" />
             </div>
           ))}
         </div>
@@ -173,57 +119,39 @@ const handleVote = (candidateId, price, candidateName) => {
     );
   }
 
-// ... (rest of the code)
-
-
-  // VIEW 3: LIVE LEADERBOARD
-  const filteredCandidates = selectedContest.candidates
-    .filter(c => (c.category || 'General Nominees') === selectedCategory)
+  // --- VIEW 3: LIVE LEADERBOARD ---
+  const filteredCandidates = activeComp.candidates
+    .filter(c => (c.category || 'General Selection') === activeCat)
     .sort((a, b) => b.vote_count - a.vote_count);
-
   const totalVotes = filteredCandidates.reduce((acc, curr) => acc + curr.vote_count, 0);
 
   return (
     <div style={container}>
       <div style={navHeader}>
-        <button onClick={() => setSelectedCategory(null)} style={backBtn}><ArrowLeft size={18}/> All Categories</button>
-        <button onClick={() => handleShare(selectedContest.title, selectedCategory)} style={shareBtn}>
-          <Share2 size={18}/> SHARE
-        </button>
+        <button onClick={() => setView('categories')} style={backBtn}><ArrowLeft size={18}/> All Categories</button>
+        <button onClick={() => {/* handleShare */}} style={shareBtn}><Share2 size={18}/> SHARE</button>
       </div>
 
-      <div style={leaderboardHead}>
-        <div>
-          <h1 style={{...mainTitle, fontSize:'40px', marginBottom:0}}>{selectedCategory}</h1>
-          <p style={{color:'#0ea5e9', fontWeight:800, letterSpacing:'1px'}}><BarChart3 size={16} inline/> LIVE LEADERBOARD</p>
-        </div>
-        <div style={totalBadge}>{totalVotes.toLocaleString()} VOTES</div>
+      <div style={leaderboardHeadLuxury}>
+        <h1 style={{...mainTitle, fontSize:'48px', marginBottom:0}}>{activeCat}</h1>
+        <div style={liveIndicator}><div style={pulseDot}/> LIVE STANDINGS • {totalVotes.toLocaleString()} VOTES</div>
       </div>
-
-      
 
       <div style={leaderboardBox}>
         {filteredCandidates.map((can, index) => {
           const percentage = totalVotes > 0 ? (can.vote_count / totalVotes) * 100 : 0;
           return (
-            <div key={can.id} style={candidateRow}>
-              <div style={{display:'flex', gap:'20px', alignItems:'center'}}>
-                <div style={rankText}>{index + 1}</div>
-                <div style={avatarCircle}><img src={can.image_url} style={avatarImg} /></div>
-                <div style={{flex:1}}>
-                  <div style={{display:'flex', justifyContent:'space-between', marginBottom:'8px'}}>
-                    <span style={{fontWeight:900, fontSize:'18px'}}>{can.name}</span>
-                    <span style={{fontWeight:900, color:'#0ea5e9'}}>{can.vote_count}</span>
-                  </div>
-                  <div style={barContainer}><div style={{...barFill, width: `${percentage}%`}} /></div>
+            <div key={can.id} style={candidateRowLuxury}>
+              <div style={rankBadge}>{index + 1}</div>
+              <div style={avatarCircle}><img src={can.image_url} style={avatarImg} /></div>
+              <div style={{flex:1}}>
+                <div style={{display:'flex', justifyContent:'space-between', marginBottom:'10px'}}>
+                  <span style={{fontWeight:900, fontSize:'20px', letterSpacing:'-0.5px'}}>{can.name}</span>
+                  <span style={{fontWeight:900, color:'#0ea5e9'}}>{can.vote_count} <small style={{fontSize:'10px', color:'#aaa'}}>VOTES</small></span>
                 </div>
-                <button 
-  onClick={() => handleVote(can.id, selectedContest.vote_price, can.name)} 
-  style={voteActionBtn}
->
-  VOTE
-</button>
+                <div style={barContainer}><div style={{...barFill, width: `${percentage}%`}} /></div>
               </div>
+              <button onClick={() => handleVote(can.id, activeComp.vote_price, can.name)} style={luxuryVoteBtn}>VOTE</button>
             </div>
           );
         })}
@@ -232,51 +160,47 @@ const handleVote = (candidateId, price, candidateName) => {
   );
 }
 
-// STYLES
-const container = { maxWidth: '1000px', margin: '0 auto', padding: '140px 20px' };
-const headerStyle = { textAlign:'center', marginBottom:'60px' };
-const mainTitle = { fontSize: '64px', fontWeight: 900, letterSpacing: '-3px', marginBottom: '20px' };
-const searchContainer = { display: 'flex', alignItems: 'center', gap: '15px', maxWidth: '500px', margin: '0 auto', background: '#fff', padding: '15px 25px', borderRadius: '20px', boxShadow: '0 10px 40px rgba(0,0,0,0.05)' };
-const searchBar = { border: 'none', background: 'none', width: '100%', fontSize: '16px', outline: 'none', fontWeight: 600 };
-const contestGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '20px' };
-const contestCard = { background: '#fff', padding: '40px', borderRadius: '40px', border: '1px solid #eee', cursor: 'pointer', transition: 'transform 0.2s ease' };
-const contestIcon = { width:'50px', height:'50px', background:'#f0f9ff', borderRadius:'15px', display:'flex', alignItems:'center', justifyContent:'center' };
-const categoryBadge = { display:'inline-block', background:'#000', color:'#fff', padding:'5px 15px', borderRadius:'10px', fontSize:'11px', fontWeight:800 };
-const backBtn = { background:'none', border:'none', cursor:'pointer', fontWeight:800, display:'flex', alignItems:'center', gap:'8px', color:'#aaa' };
-const categoryRow = { background: '#fff', padding: '30px 40px', borderRadius: '30px', marginBottom: '15px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', border: '1px solid #eee' };
-const navHeader = { display:'flex', justifyContent:'space-between', marginBottom:'20px' };
-const shareBtn = { background:'#f8f8f8', border:'none', padding:'10px 20px', borderRadius:'15px', fontWeight:800, cursor:'pointer', display:'flex', alignItems:'center', gap:'8px' };
-const leaderboardHead = { display:'flex', justifyContent:'space-between', alignItems:'flex-end', marginBottom:'50px' };
-const totalBadge = { background:'#0ea5e9', color:'#fff', padding:'12px 25px', borderRadius:'20px', fontWeight:900, fontSize:'14px' };
-const candidateRow = { background:'#fff', padding:'25px', borderRadius:'35px', marginBottom:'15px', border:'1px solid #f0f0f0' };
-const rankText = { fontSize:'24px', fontWeight:900, color:'#ddd', width:'30px' };
-const avatarCircle = { width:'60px', height:'60px', borderRadius:'20px', overflow:'hidden', background:'#f0f0f0' };
+// --- ADVANCED LUXURY STYLES ---
+const container = { maxWidth: '1100px', margin: '0 auto', padding: '120px 20px' };
+const headerStyle = { textAlign:'center', marginBottom:'80px' };
+const mainTitle = { fontSize: '72px', fontWeight: 900, letterSpacing: '-4px', lineHeight: 1 };
+const accentText = { color: '#0ea5e9', background: 'linear-gradient(to right, #0ea5e9, #6366f1)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' };
+const premiumBadge = { display:'inline-flex', alignItems:'center', gap:'8px', background:'#000', color:'#fff', padding:'8px 16px', borderRadius:'100px', fontSize:'12px', fontWeight:800, marginBottom:'20px', letterSpacing:'1px' };
+
+const luxuryCard = { background:'#fff', borderRadius:'45px', overflow:'hidden', border:'1px solid #f0f0f0', cursor:'pointer', transition:'all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)', boxShadow:'0 20px 40px rgba(0,0,0,0.03)' };
+const cardImagePlaceholder = { height:'200px', background:'#f8fafc', display:'flex', alignItems:'center', justifyContent:'center' };
+const cardContent = { padding: '30px' };
+const cardTitle = { fontSize:'24px', fontWeight:900, marginBottom:'10px', letterSpacing:'-1px' };
+const cardDesc = { color:'#64748b', fontSize:'15px', lineHeight:'1.6', marginBottom:'25px' };
+const cardFooter = { display:'flex', justifyContent:'space-between', alignItems:'center', fontWeight:800, fontSize:'14px', color:'#0ea5e9' };
+const goButton = { width:'40px', height:'40px', background:'#000', color:'#fff', borderRadius:'15px', display:'flex', alignItems:'center', justifyContent:'center' };
+
+const categoryRowLuxury = { background:'#fff', padding:'35px', borderRadius:'35px', marginBottom:'15px', display:'flex', justifyContent:'space-between', alignItems:'center', cursor:'pointer', border:'1px solid #f1f5f9', transition:'0.2s' };
+const categoryIcon = { width:'50px', height:'50px', background:'#f0f9ff', borderRadius:'18px', display:'flex', alignItems:'center', justifyContent:'center' };
+
+const candidateRowLuxury = { display:'flex', gap:'25px', alignItems:'center', background:'#fff', padding:'30px', borderRadius:'40px', marginBottom:'20px', border:'1px solid #f1f5f9', position:'relative' };
+const rankBadge = { position:'absolute', top:'-10px', left:'-10px', width:'35px', height:'35px', background:'#000', color:'#fff', borderRadius:'12px', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'14px', fontWeight:900 };
+
+const luxuryVoteBtn = { background:'#000', color:'#fff', border:'none', padding:'18px 35px', borderRadius:'22px', fontWeight:900, cursor:'pointer', transition:'0.3s' };
+const liveIndicator = { display:'flex', alignItems:'center', gap:'10px', color:'#0ea5e9', fontWeight:800, fontSize:'14px', marginTop:'10px' };
+const pulseDot = { width:'8px', height:'8px', background:'#0ea5e9', borderRadius:'50%', animation:'pulse 1.5s infinite' };
+
+// Legacy Mappings to prevent ReferenceErrors
+const categoryList = { marginTop: '30px', display:'flex', flexDirection:'column', gap:'15px' };
+const categoryListStyle = categoryList;
+const leaderboardBox = { marginTop: '40px' };
+const backBtn = { background:'none', border:'none', cursor:'pointer', fontWeight:800, display:'flex', alignItems:'center', gap:'8px', color:'#94a3b8', marginBottom:'20px' };
+const subHeaderTitle = { fontSize:'48px', fontWeight:900, letterSpacing:'-2px', marginBottom:'5px' };
+const subHeaderDesc = { color:'#64748b', fontWeight:600, marginBottom:'40px' };
+const searchContainer = { display: 'flex', alignItems: 'center', gap: '15px', maxWidth: '500px', margin: '40px auto 0', background: '#fff', padding: '18px 30px', borderRadius: '25px', boxShadow: '0 15px 50px rgba(0,0,0,0.06)' };
+const searchBar = { border:'none', outline:'none', width:'100%', fontWeight:700, fontSize:'16px' };
+const contestGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '30px' };
+const centerText = { padding: '150px', textAlign: 'center', fontWeight: 800, color: '#aaa' };
+const avatarCircle = { width:'80px', height:'80px', borderRadius:'25px', overflow:'hidden', background:'#f8fafc' };
 const avatarImg = { width:'100%', height:'100%', objectFit:'cover' };
-const barContainer = { background:'#f5f5f5', height:'8px', borderRadius:'10px', overflow:'hidden' };
-const barFill = { background: 'linear-gradient(to right, #0ea5e9, #6366f1)', height:'100%', transition:'width 1.5s cubic-bezier(0.19, 1, 0.22, 1)' };
-const voteActionBtn = { background:'#000', color:'#fff', border:'none', padding:'12px 25px', borderRadius:'15px', fontWeight:900, cursor:'pointer' };
-const centerText = { padding: '150px', textAlign: 'center', fontWeight: 800, color: '#aaa', fontSize: '20px' };
-
-// ADD THIS TO YOUR STYLES AT THE BOTTOM
-const categoryListStyle = { 
-  display: 'flex', 
-  flexDirection: 'column', 
-  gap: '10px',
-  marginTop: '30px' 
-};
-// ADD THESE THREE (to fix the current and previous ReferenceErrors)
-const categoryList = { 
-  display: 'flex', 
-  flexDirection: 'column', 
-  gap: '12px', 
-  marginTop: '30px' 
-};
-
-const leaderboardBox = { 
-  marginTop: '40px',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '15px'
-};
-
-// ... keep all other existing styles (mainTitle, searchContainer, etc.)
+const barContainer = { background:'#f1f5f9', height:'10px', borderRadius:'20px', overflow:'hidden' };
+const barFill = { background: 'linear-gradient(to right, #0ea5e9, #6366f1)', height:'100%', transition:'width 1s ease-in-out' };
+const navHeader = { display:'flex', justifyContent:'space-between', marginBottom:'30px' };
+const shareBtn = { background:'#fff', border:'1px solid #eee', padding:'12px 25px', borderRadius:'18px', fontWeight:800, display:'flex', alignItems:'center', gap:'8px', cursor:'pointer' };
+const leaderboardHeadLuxury = { marginBottom:'40px' };
+const totalBadge = { background:'#0ea5e9', color:'#fff', padding:'12px 25px', borderRadius:'20px', fontWeight:900 };
