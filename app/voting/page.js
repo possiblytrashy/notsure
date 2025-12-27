@@ -156,39 +156,42 @@ export default function VotingPortal() {
   );
 }
 
-// --- STYLES ---
 const container = { maxWidth: '1100px', margin: '0 auto', padding: '120px 20px' };
 const headerStyle = { textAlign:'center', marginBottom:'60px' };
-const mainTitle = { fontSize: '72px', fontWeight: 900, letterSpacing: '-4px' };
+const mainTitle = { fontSize: '72px', fontWeight: 900, letterSpacing: '-4px', lineHeight: 1, marginBottom: '10px' };
 const accentText = { color: '#0ea5e9' };
-const premiumBadge = { background:'#000', color:'#fff', padding:'8px 16px', borderRadius:'100px', fontSize:'12px', fontWeight:800, marginBottom:'20px' };
+const premiumBadge = { display:'inline-flex', alignItems:'center', gap:'8px', background:'#000', color:'#fff', padding:'8px 16px', borderRadius:'100px', fontSize:'12px', fontWeight:800, marginBottom:'20px' };
+
 const contestGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '30px' };
-const luxuryCard = { background:'#fff', borderRadius:'45px', overflow:'hidden', border:'1px solid #f0f0f0', cursor:'pointer' };
+const luxuryCard = { background:'#fff', borderRadius:'45px', overflow:'hidden', border:'1px solid #f0f0f0', cursor:'pointer', boxShadow:'0 20px 40px rgba(0,0,0,0.03)' };
 const cardImagePlaceholder = { height:'150px', background:'#f8fafc', display:'flex', alignItems:'center', justifyContent:'center' };
 const cardContent = { padding: '30px' };
 const cardTitle = { fontSize:'24px', fontWeight:900 };
 const cardFooter = { display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:'20px', color:'#0ea5e9', fontWeight:800 };
 const goButton = { width:'40px', height:'40px', background:'#000', color:'#fff', borderRadius:'15px', display:'flex', alignItems:'center', justifyContent:'center' };
-const backBtn = { background:'none', border:'none', cursor:'pointer', fontWeight:800, display:'flex', alignItems:'center', gap:'8px', color:'#94a3b8' };
+
+const backBtn = { background:'none', border:'none', cursor:'pointer', fontWeight:800, display:'flex', alignItems:'center', gap:'8px', color:'#94a3b8', marginBottom: '20px' };
+const subHeaderTitle = { fontSize:'48px', fontWeight:900, letterSpacing:'-2px', marginBottom: '10px' };
 const categoryList = { marginTop: '30px', display:'flex', flexDirection:'column', gap:'15px' };
 const categoryRowLuxury = { background:'#fff', padding:'30px', borderRadius:'30px', display:'flex', justifyContent:'space-between', alignItems:'center', cursor:'pointer', border:'1px solid #f1f5f9' };
 const categoryIcon = { width:'50px', height:'50px', background:'#f0f9ff', borderRadius:'18px', display:'flex', alignItems:'center', justifyContent:'center' };
-const subHeaderTitle = { fontSize:'48px', fontWeight:900, letterSpacing:'-2px' };
-const navHeader = { display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'30px' };
-const liveIndicator = { display:'flex', alignItems:'center', gap:'8px', color:'#0ea5e9', fontWeight:800 };
-const pulseDot = { width:'10px', height:'10px', background:'#0ea5e9', borderRadius:'50%' };
+
+const navHeader = { display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'40px' };
 const luxuryGallery = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '40px' };
-const tallCandidateCard = { background: '#fff', borderRadius: '40px', overflow: 'hidden', border: '1px solid #f0f0f0' };
-const imageWrapper = { height: '400px', position: 'relative' };
+const tallCandidateCard = { background: '#fff', borderRadius: '40px', overflow: 'hidden', border: '1px solid #f0f0f0', boxShadow: '0 30px 60px rgba(0,0,0,0.05)' };
+const imageWrapper = { height: '450px', position: 'relative' };
 const heroImg = { width: '100%', height: '100%', objectFit: 'cover' };
-const rankOverlay = { position: 'absolute', top: '20px', left: '20px', background: '#000', color: '#fff', padding: '8px 15px', borderRadius: '12px', fontWeight: 900 };
-const cardInfo = { padding: '25px' };
-const candidateName = { fontSize: '24px', fontWeight: 900, marginBottom: '15px', textAlign: 'center' };
-const barContainer = { background:'#f1f5f9', height:'8px', borderRadius:'10px', marginBottom:'20px', overflow:'hidden' };
-const barFill = { background: '#0ea5e9', height:'100%', transition:'width 1s ease' };
-const votingControl = { display:'flex', flexDirection:'column', gap:'10px' };
-const qtySelector = { display:'flex', justifyContent:'space-between', alignItems:'center', background:'#f8fafc', padding:'5px', borderRadius:'15px' };
-const qtyInput = { border:'none', background:'none', width:'40px', textAlign:'center', fontWeight:900, fontSize:'18px' };
-const qtyBtn = { width:'35px', height:'35px', borderRadius:'10px', border:'none', background:'#fff', cursor:'pointer', boxShadow:'0 2px 5px rgba(0,0,0,0.05)' };
-const grandVoteBtn = { background:'#000', color:'#fff', border:'none', padding:'18px', borderRadius:'20px', fontWeight:900, cursor:'pointer' };
-const centerText = { padding: '100px', textAlign: 'center', fontWeight: 800 };
+const rankOverlay = { position: 'absolute', top: '20px', left: '20px', background: 'rgba(0,0,0,0.7)', color: '#fff', padding: '10px 18px', borderRadius: '15px', fontWeight: 900, backdropFilter: 'blur(10px)' };
+const cardInfo = { padding: '30px' };
+const candidateName = { fontSize: '28px', fontWeight: 900, marginBottom: '20px', textAlign: 'center', letterSpacing: '-1px' };
+const barContainer = { background:'#f1f5f9', height:'10px', borderRadius:'20px', marginBottom:'25px', overflow:'hidden' };
+const barFill = { background: 'linear-gradient(90deg, #0ea5e9, #6366f1)', height:'100%', transition:'width 1s ease' };
+
+const votingControl = { display:'flex', flexDirection:'column', gap:'12px' };
+const qtySelector = { display:'flex', justifyContent:'space-between', alignItems:'center', background:'#f8fafc', padding:'8px', borderRadius:'20px' };
+const qtyInput = { border:'none', background:'none', width:'60px', textAlign:'center', fontWeight:900, fontSize:'20px', outline: 'none' };
+const qtyBtn = { width:'45px', height:'45px', borderRadius:'15px', border:'none', background:'#fff', cursor:'pointer', boxShadow:'0 4px 10px rgba(0,0,0,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center' };
+const grandVoteBtn = { background:'#000', color:'#fff', border:'none', padding:'22px', borderRadius:'25px', fontWeight: 900, fontSize: '16px', cursor:'pointer', boxShadow: '0 20px 40px rgba(0,0,0,0.1)' };
+
+const centerText = { padding: '150px', textAlign: 'center', fontWeight: 800, color: '#94a3b8', fontSize: '20px' };
+const pulseDot = { width:'10px', height:'10px', background:'#0ea5e9', borderRadius:'50%', animation: 'pulse 2s infinite' };
