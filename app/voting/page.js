@@ -65,43 +65,45 @@ export default function VotingPortal() {
     }
   };
 
-const handleVote = async (candidateId, price, candidateName) => {
-  // Ensure we don't trigger if Paystack hasn't loaded
+const handleVote = (candidateId, price, candidateName) => {
+  // Ensure the Paystack script is loaded on the window
   if (!window.PaystackPop) {
-    alert("Payment system is loading, please try again in a moment.");
+    console.error("Paystack SDK not found");
     return;
   }
 
   const handler = window.PaystackPop.setup({
     key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY, 
-    email: 'voter@ousted.com', // Replace with dynamic user email if available
-    amount: Math.round(price * 100), // GHS to Pesewas
-    currency: 'GHS',
+    email: "voter@ousted.com", // You can prompt for this or use a dummy
+    amount: Math.round(price * 100), // GHS to Pesewas (Luxury items use exact math)
+    currency: "GHS",
     metadata: {
       candidate_id: candidateId,
       candidate_name: candidateName,
-      system_type: "luxury_voting_v1"
+      custom_fields: [
+        {
+          display_name: "Service",
+          variable_name: "service",
+          value: "luxury_voting"
+        }
+      ]
     },
-    callback: async function(response) {
-      // 1. Log the reference for reconciliation
-      console.log("Payment Success Ref:", response.reference);
-
-      // 2. Trigger the vote increment
-      const { error } = await supabase.rpc('increment_vote', { 
-        candidate_id: candidateId 
-      });
-
-      if (error) {
-        console.error("Vote failed after payment:", error);
-        alert("Payment received, but vote count failed to update. Please contact support.");
-      } else {
-        alert(`Success! Your vote for ${candidateName} has been recorded.`);
-      }
+    // MUST BE A VALID FUNCTION
+    callback: function(response) {
+      console.log("Payment Successful. Ref:", response.reference);
+      
+      // Update the DB immediately for UX
+      supabase.rpc('increment_vote', { candidate_id: candidateId })
+        .then(({ error }) => {
+          if (!error) {
+            alert(`Vote cast for ${candidateName}!`);
+            // Trigger a UI refresh or state update here
+          }
+        });
     },
     onClose: function() {
-      // Luxury UI tip: Use a subtle toast instead of alert
-      console.log('Transaction closed by user.');
-    }
+      console.log("Transaction cancelled.");
+    },
   });
 
   handler.openIframe();
