@@ -242,11 +242,4 @@ const liveIndicator = {
   borderRadius: '100px' 
 };
 
-const pulseDot = { 
-  width: '8px', 
-  height: '8px', 
-  background: '#0ea5e9', 
-  borderRadius: '50%',
-  boxShadow: '0 0 0 0 rgba(14, 165, 233, 0.7)',
-  // Note: For the actual pulsing animation, you'd usually add a global CSS keyframe
-};
+
