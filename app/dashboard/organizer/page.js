@@ -249,7 +249,7 @@ export default function OrganizerDashboard() {
     setShowEditCompModal(comp);
   };
 
-  const saveCompEdit = async () => {
+ const saveCompEdit = async () => {
     if (!showEditCompModal?.id) return;
     setIsProcessing(true);
     try {
@@ -270,12 +270,13 @@ export default function OrganizerDashboard() {
       setShowEditCompModal(null);
       await loadDashboardData(true);
     } catch (err) {
-      console.error(err);
+      console.error("Update Error:", err);
       alert("Failed to update competition.");
     } finally {
       setIsProcessing(false);
     }
   };
+
   const deleteCandidate = async (candId) => {
     if (!confirm("Are you sure? This nominee and their votes will be permanently deleted.")) return;
     setIsProcessing(true);
@@ -290,17 +291,7 @@ export default function OrganizerDashboard() {
       setIsProcessing(false);
     }
   };
-      if (error) throw error;
-      setShowEditCompModal(null);
-      loadDashboardData(true);
-    } catch (err) {
-      console.error(err);
-      alert("Failed to update competition.");
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
+  
 
   // --- 6. LOADING SKELETON ---
   if (loading) return (
