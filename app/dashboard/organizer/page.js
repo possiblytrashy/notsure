@@ -255,10 +255,10 @@ export default function OrganizerDashboard() {
     });
     setShowEditCompModal(comp);
   };
-
-  const saveCompEdit = async () => {
+const saveCompEdit = async () => {
     if (!showEditCompModal?.id) return;
     setIsProcessing(true);
+    
     try {
       const { error } = await supabase
         .from('contests')
@@ -270,7 +270,7 @@ export default function OrganizerDashboard() {
           is_active: editCompForm.is_active,
           image_url: editCompForm.image_url
         })
-        .eq('id', showEditCompModal.id); // <--- THIS SEMICOLON IS CRITICAL
+        .eq('id', showEditCompModal.id);
 
       if (error) throw error;
       
