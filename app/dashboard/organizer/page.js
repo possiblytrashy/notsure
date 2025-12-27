@@ -536,26 +536,28 @@ export default function OrganizerDashboard() {
                        
                        <div style={divider}></div>
                        
-                       {/* inside candidateList.map */}
-<div key={cand.id} style={candidateRow}>
-  <span style={rankNum}>#{idx + 1}</span>
-  <div style={candInfo}>
-    <p style={candName}>{cand.name}</p>
-    <div style={voteBarContainer}>
-      <div style={voteBarFill(idx === 0 ? 100 : (cand.vote_count / (sortedCandidates[0]?.vote_count || 1)) * 100)}></div>
+ {/* ... inside candidateList ... */}
+{sortedCandidates.map((cand, idx) => ( // <--- Added idx here
+  <div key={cand.id} style={candidateRow}>
+    <span style={rankNum}>#{idx + 1}</span>
+    <div style={candInfo}>
+      <p style={candName}>{cand.name}</p>
+      <div style={voteBarContainer}>
+        <div style={voteBarFill(idx === 0 ? 100 : (cand.vote_count / (sortedCandidates[0]?.vote_count || 1)) * 100)}></div>
+      </div>
+    </div>
+    <div style={{textAlign: 'right', minWidth: '60px', display: 'flex', alignItems: 'center', gap: '10px'}}>
+      <p style={candVotes}>{cand.vote_count}</p>
+      <button  
+        style={deleteMiniBtn} 
+        onClick={() => deleteCandidate(cand.id)}
+        title="Remove Nominee"
+      >
+        <Trash2 size={12}/>
+      </button>
     </div>
   </div>
-  <div style={{textAlign: 'right', minWidth: '60px', display: 'flex', alignItems: 'center', gap: '10px'}}>
-    <p style={candVotes}>{cand.vote_count}</p>
-    <button 
-      style={deleteMiniBtn} 
-      onClick={() => deleteCandidate(cand.id)}
-      title="Remove Nominee"
-    >
-      <Trash2 size={12}/>
-    </button>
-  </div>
-</div>
+))}
                     </div>
                   );
                 })}
