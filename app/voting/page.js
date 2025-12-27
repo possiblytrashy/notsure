@@ -224,7 +224,6 @@ const categoryListStyle = {
 
 // UPDATE YOUR STYLES OBJECT AT THE BOTTOM
 const container = { maxWidth: '1000px', margin: '0 auto', padding: '140px 20px' };
-const headerStyle = { textAlign:'center', marginBottom:'60px' };
 
 // ADD THESE THREE (to fix the current and previous ReferenceErrors)
 const categoryList = { 
