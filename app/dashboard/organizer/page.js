@@ -270,6 +270,47 @@ export default function OrganizerDashboard() {
     }
   };
 
+  // --- DEEP CRUD ACTIONS ---
+
+// Delete a Candidate
+const deleteCandidate = async (candId) => {
+  if (!confirm("Are you sure? This will remove the nominee and all their votes.")) return;
+  setIsProcessing(true);
+  try {
+    const { error } = await supabase.from('candidates').delete().eq('id', candId);
+    if (error) throw error;
+    loadDashboardData(true);
+  } catch (err) {
+    alert("Delete failed.");
+  } finally {
+    setIsProcessing(false);
+  }
+};
+
+// Deep Update Competition
+const saveCompEdit = async () => {
+  setIsProcessing(true);
+  try {
+    const { error } = await supabase.from('contests')
+      .update({ 
+        title: editCompForm.title,
+        description: editCompForm.description,
+        category: editCompForm.category,
+        vote_price: parseFloat(editCompForm.vote_price), // Deep control
+        is_active: editCompForm.is_active,             // Kill switch
+        image_url: editCompForm.image_url              // Branding
+      })
+      .eq('id', showEditCompModal.id);
+
+    if (error) throw error;
+    setShowEditCompModal(null);
+    loadDashboardData(true);
+  } catch (err) {
+    alert("Deep update failed.");
+  } finally {
+    setIsProcessing(false);
+  }
+};
   // --- 6. LOADING SKELETON ---
   if (loading) return (
     <div style={skeletonStyles.wrapper}>
@@ -513,21 +554,26 @@ export default function OrganizerDashboard() {
                        
                        <div style={divider}></div>
                        
-                       <div style={candidateList}>
-                          <p style={{fontSize:'12px', fontWeight:800, color:'#94a3b8', marginBottom:'15px', letterSpacing:'1px'}}>LEADERBOARD</p>
-                          {sortedCandidates.length > 0 ? sortedCandidates.map((cand, idx) => (
-                            <div key={cand.id} style={candidateRow}>
-                               <span style={rankNum}>#{idx + 1}</span>
-                               <div style={candInfo}>
-                                  <p style={candName}>{cand.name}</p>
-                                  <div style={voteBarContainer}>
-                                     <div style={voteBarFill(idx === 0 ? 100 : (cand.vote_count / (sortedCandidates[0]?.vote_count || 1)) * 100)}></div>
-                                  </div>
-                               </div>
-                               <p style={candVotes}>{cand.vote_count}</p>
-                            </div>
-                          )) : <div style={emptySmall}>No nominees yet. Click the <UserPlus size={12}/> icon to add one.</div>}
-                       </div>
+                       {/* inside candidateList.map */}
+<div key={cand.id} style={candidateRow}>
+  <span style={rankNum}>#{idx + 1}</span>
+  <div style={candInfo}>
+    <p style={candName}>{cand.name}</p>
+    <div style={voteBarContainer}>
+      <div style={voteBarFill(idx === 0 ? 100 : (cand.vote_count / (sortedCandidates[0]?.vote_count || 1)) * 100)}></div>
+    </div>
+  </div>
+  <div style={{textAlign: 'right', minWidth: '60px', display: 'flex', alignItems: 'center', gap: '10px'}}>
+    <p style={candVotes}>{cand.vote_count}</p>
+    <button 
+      style={deleteMiniBtn} 
+      onClick={() => deleteCandidate(cand.id)}
+      title="Remove Nominee"
+    >
+      <Trash2 size={12}/>
+    </button>
+  </div>
+</div>
                     </div>
                   );
                 })}
@@ -648,34 +694,66 @@ export default function OrganizerDashboard() {
       )}
 
       {/* 3. EDIT COMPETITION MODAL */}
-      {showEditCompModal && (
-        <div style={overlay} onClick={() => setShowEditCompModal(null)}>
-          <div style={modal} onClick={e => e.stopPropagation()}>
-             <div style={modalHead}>
-              <h2 style={modalTitle}>Edit Competition</h2>
-              <button style={closeBtn} onClick={() => setShowEditCompModal(null)}><X size={20}/></button>
-             </div>
-             <div style={modalBody}>
-                <div style={inputStack}>
-                   <label style={fieldLabel}>TITLE</label>
-                   <input style={modalInput} value={editCompForm.title} onChange={(e) => setEditCompForm({...editCompForm, title: e.target.value})} />
-                </div>
-                <div style={inputStack}>
-                   <label style={fieldLabel}>DESCRIPTION</label>
-                   <textarea style={{...modalInput, height: '80px', resize:'none'}} value={editCompForm.description} onChange={(e) => setEditCompForm({...editCompForm, description: e.target.value})} />
-                </div>
-                <div style={inputStack}>
-                   <label style={fieldLabel}>CATEGORY</label>
-                   <input style={modalInput} value={editCompForm.category} onChange={(e) => setEditCompForm({...editCompForm, category: e.target.value})} placeholder="e.g. Music, Fashion"/>
-                </div>
-                <button style={actionSubmitBtn(isProcessing)} onClick={saveCompEdit} disabled={isProcessing}>
-                  {isProcessing ? 'SAVING...' : 'UPDATE DETAILS'}
-                </button>
-             </div>
+{/* 3. DEEP EDIT COMPETITION MODAL */}
+{showEditCompModal && (
+  <div style={overlay} onClick={() => setShowEditCompModal(null)}>
+    <div style={{...modal, width: '500px'}} onClick={e => e.stopPropagation()}>
+      <div style={modalHead}>
+        <div>
+          <h2 style={modalTitle}>Competition Settings</h2>
+          <p style={subLabel}>System ID: {showEditCompModal.id.split('-')[0]}...</p>
+        </div>
+        <button style={closeBtn} onClick={() => setShowEditCompModal(null)}><X size={20}/></button>
+      </div>
+
+      <div style={modalBody}>
+        {/* Toggle Switch for is_active */}
+        <div style={settingToggleRow}>
+          <div>
+            <p style={{fontWeight: 800, fontSize: '14px', margin: 0}}>VOTING STATUS</p>
+            <p style={{fontSize: '12px', color: '#64748b', margin: 0}}>Enable or disable live voting for this category</p>
+          </div>
+          <button 
+            onClick={() => setEditCompForm({...editCompForm, is_active: !editCompForm.is_active})}
+            style={toggleStyle(editCompForm.is_active)}
+          >
+            {editCompForm.is_active ? 'LIVE' : 'PAUSED'}
+          </button>
+        </div>
+
+        <div style={inputStack}>
+          <label style={fieldLabel}>COMPETITION TITLE</label>
+          <input style={modalInput} value={editCompForm.title} onChange={(e) => setEditCompForm({...editCompForm, title: e.target.value})} />
+        </div>
+
+        <div style={twoColumnGrid}>
+          <div style={inputStack}>
+            <label style={fieldLabel}>VOTE PRICE (GHS)</label>
+            <input type="number" style={modalInput} value={editCompForm.vote_price} onChange={(e) => setEditCompForm({...editCompForm, vote_price: e.target.value})} />
+          </div>
+          <div style={inputStack}>
+            <label style={fieldLabel}>CATEGORY TAG</label>
+            <input style={modalInput} value={editCompForm.category} onChange={(e) => setEditCompForm({...editCompForm, category: e.target.value})} placeholder="e.g. Fashion"/>
           </div>
         </div>
-      )}
 
+        <div style={inputStack}>
+          <label style={fieldLabel}>CATEGORY HERO IMAGE URL</label>
+          <input style={modalInput} value={editCompForm.image_url} onChange={(e) => setEditCompForm({...editCompForm, image_url: e.target.value})} placeholder="https://..." />
+        </div>
+
+        <div style={inputStack}>
+          <label style={fieldLabel}>DESCRIPTION</label>
+          <textarea style={{...modalInput, height: '60px', resize:'none'}} value={editCompForm.description} onChange={(e) => setEditCompForm({...editCompForm, description: e.target.value})} />
+        </div>
+
+        <button style={actionSubmitBtn(isProcessing)} onClick={saveCompEdit} disabled={isProcessing}>
+          {isProcessing ? <Loader2 className="animate-spin" size={18}/> : 'SAVE SYSTEM CHANGES'}
+        </button>
+      </div>
+    </div>
+  </div>
+)}
       {/* 4. QR PREVIEW MODAL */}
       {showQR && (
         <div style={overlay} onClick={() => setShowQR(null)}>
@@ -821,3 +899,42 @@ const inputStack = { display: 'flex', flexDirection: 'column', gap: '8px' };
 const fieldLabel = { fontSize: '11px', fontWeight: 800, color: '#64748b', letterSpacing: '1px' };
 const modalInput = { padding: '14px', borderRadius: '12px', border: '1px solid #e2e8f0', fontSize: '14px', outline: 'none', fontWeight: 600, width: '100%' };
 const actionSubmitBtn = (loading) => ({ padding: '16px', background: loading ? '#94a3b8' : '#000', color: '#fff', border: 'none', borderRadius: '16px', fontWeight: 800, cursor: loading ? 'not-allowed' : 'pointer', fontSize: '13px', marginTop: '10px' });
+const settingToggleRow = {
+  display: 'flex',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  padding: '15px',
+  background: '#f8fafc',
+  borderRadius: '15px',
+  marginBottom: '20px',
+  border: '1px solid #e2e8f0'
+};
+
+const toggleStyle = (isActive) => ({
+  padding: '8px 16px',
+  borderRadius: '10px',
+  border: 'none',
+  fontWeight: 900,
+  fontSize: '11px',
+  cursor: 'pointer',
+  background: isActive ? '#22c55e' : '#ef4444',
+  color: '#fff',
+  transition: 'all 0.2s ease'
+});
+
+const deleteMiniBtn = {
+  background: 'none',
+  border: 'none',
+  color: '#cbd5e1',
+  cursor: 'pointer',
+  padding: '5px',
+  borderRadius: '5px',
+  transition: 'all 0.2s',
+  hover: { color: '#ef4444' } // Use CSS for hover
+};
+
+const twoColumnGrid = {
+  display: 'grid',
+  gridTemplateColumns: '1fr 1fr',
+  gap: '15px'
+};
