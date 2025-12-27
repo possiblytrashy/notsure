@@ -65,10 +65,47 @@ export default function VotingPortal() {
     }
   };
 
-  const handleVote = async (candidateId, price) => {
-    alert(`Redirecting to Mobile Money for GHS ${price}...`);
-    await supabase.rpc('increment_vote', { candidate_id: candidateId });
-  };
+const handleVote = async (candidateId, price, candidateName) => {
+  // Ensure we don't trigger if Paystack hasn't loaded
+  if (!window.PaystackPop) {
+    alert("Payment system is loading, please try again in a moment.");
+    return;
+  }
+
+  const handler = window.PaystackPop.setup({
+    key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY, 
+    email: 'voter@ousted.com', // Replace with dynamic user email if available
+    amount: Math.round(price * 100), // GHS to Pesewas
+    currency: 'GHS',
+    metadata: {
+      candidate_id: candidateId,
+      candidate_name: candidateName,
+      system_type: "luxury_voting_v1"
+    },
+    callback: async function(response) {
+      // 1. Log the reference for reconciliation
+      console.log("Payment Success Ref:", response.reference);
+
+      // 2. Trigger the vote increment
+      const { error } = await supabase.rpc('increment_vote', { 
+        candidate_id: candidateId 
+      });
+
+      if (error) {
+        console.error("Vote failed after payment:", error);
+        alert("Payment received, but vote count failed to update. Please contact support.");
+      } else {
+        alert(`Success! Your vote for ${candidateName} has been recorded.`);
+      }
+    },
+    onClose: function() {
+      // Luxury UI tip: Use a subtle toast instead of alert
+      console.log('Transaction closed by user.');
+    }
+  });
+
+  handler.openIframe();
+};
 
   if (loading) return <div style={centerText}>Initializing OUSTED Choice Engine...</div>;
 
