@@ -242,6 +242,8 @@ export default function OrganizerDashboard() {
 
 // --- FIXED ACTION HANDLERS ---
 
+ // --- REFINED ACTION HANDLERS (Screaming Syntax Clean) ---
+
   const openEditCompModal = (comp) => {
     setEditCompForm({
       title: comp.title || '',
@@ -276,7 +278,7 @@ export default function OrganizerDashboard() {
       setShowEditCompModal(null);
       await loadDashboardData(true);
     } catch (err) {
-      console.error("Update Error:", err);
+      console.error("Deep Update Error:", err);
       alert("Failed to update competition.");
     } finally {
       setIsProcessing(false);
@@ -284,7 +286,7 @@ export default function OrganizerDashboard() {
   };
 
   const deleteCandidate = async (candId) => {
-    if (!confirm("Are you sure? This nominee and their votes will be deleted.")) return;
+    if (!confirm("Are you sure? This nominee and their votes will be permanently deleted.")) return;
     setIsProcessing(true);
     try {
       const { error } = await supabase.from('candidates').delete().eq('id', candId);
