@@ -237,14 +237,7 @@ export default function OrganizerDashboard() {
     }
   };
 
-  // Edit Competition
-// --- UPDATED DEEP ACTION HANDLERS ---
-
-// --- FIXED ACTION HANDLERS ---
-
- // --- REFINED ACTION HANDLERS (Screaming Syntax Clean) ---
-
-  const openEditCompModal = (comp) => {
+ const openEditCompModal = (comp) => {
     setEditCompForm({
       title: comp.title || '',
       description: comp.description || '',
@@ -255,10 +248,10 @@ export default function OrganizerDashboard() {
     });
     setShowEditCompModal(comp);
   };
-const saveCompEdit = async () => {
+
+  const saveCompEdit = async () => {
     if (!showEditCompModal?.id) return;
     setIsProcessing(true);
-    
     try {
       const { error } = await supabase
         .from('contests')
@@ -277,7 +270,7 @@ const saveCompEdit = async () => {
       setShowEditCompModal(null);
       await loadDashboardData(true);
     } catch (err) {
-      console.error("Update Error:", err);
+      console.error(err);
       alert("Failed to update competition.");
     } finally {
       setIsProcessing(false);
