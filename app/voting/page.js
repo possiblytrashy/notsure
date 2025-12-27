@@ -107,14 +107,22 @@ export default function VotingPortal() {
     );
   }
 
+  // ... (rest of the code above stays the same)
+
   // VIEW 2: CATEGORY SELECTION
   if (selectedContest && !selectedCategory) {
+    // You named this 'categories'
     const categories = [...new Set(selectedContest.candidates.map(c => c.category || 'General Nominees'))];
+    
     return (
       <div style={container}>
-        <button onClick={() => setSelectedContest(null)} style={backBtn}><ArrowLeft size={18}/> Back to Contests</button>
+        <button onClick={() => setSelectedContest(null)} style={backBtn}>
+          <ArrowLeft size={18}/> Back to Contests
+        </button>
         <h1 style={mainTitle}>{selectedContest.title}</h1>
-        <div style={categoryList}>
+        
+        {/* CHANGED: Ensure style={categoryListStyle} exists and matches */}
+        <div style={categoryListStyle}> 
           {categories.map(cat => (
             <div key={cat} onClick={() => setSelectedCategory(cat)} style={categoryRow}>
               <span style={{fontWeight:800, fontSize:'18px'}}>{cat}</span>
@@ -125,6 +133,9 @@ export default function VotingPortal() {
       </div>
     );
   }
+
+// ... (rest of the code)
+
 
   // VIEW 3: LIVE LEADERBOARD
   const filteredCandidates = selectedContest.candidates
@@ -201,3 +212,11 @@ const barContainer = { background:'#f5f5f5', height:'8px', borderRadius:'10px', 
 const barFill = { background: 'linear-gradient(to right, #0ea5e9, #6366f1)', height:'100%', transition:'width 1.5s cubic-bezier(0.19, 1, 0.22, 1)' };
 const voteActionBtn = { background:'#000', color:'#fff', border:'none', padding:'12px 25px', borderRadius:'15px', fontWeight:900, cursor:'pointer' };
 const centerText = { padding: '150px', textAlign: 'center', fontWeight: 800, color: '#aaa', fontSize: '20px' };
+
+// ADD THIS TO YOUR STYLES AT THE BOTTOM
+const categoryListStyle = { 
+  display: 'flex', 
+  flexDirection: 'column', 
+  gap: '10px',
+  marginTop: '30px' 
+};
