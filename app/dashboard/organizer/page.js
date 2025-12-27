@@ -268,8 +268,7 @@ export default function OrganizerDashboard() {
           category: editCompForm.category,
           vote_price: parseFloat(editCompForm.vote_price),
           is_active: editCompForm.is_active,
-          image_url: editCompForm.image_url,
-          updated_at: new Date().toISOString()
+          image_url: editCompForm.image_url
         })
         .eq('id', showEditCompModal.id);
 
