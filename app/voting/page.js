@@ -111,50 +111,63 @@ const handleVote = (candidate, qty) => {
   }
 
   // VIEW 3: LEADERBOARD (Large Images)
-  const filteredCandidates = activeComp.candidates
-    .filter(c => (c.category || 'General') === activeCat)
-    .sort((a,b) => b.vote_count - a.vote_count);
-  const totalVotes = filteredCandidates.reduce((acc, curr) => acc + curr.vote_count, 0);
+ // Inside the filteredCandidates.map(...) function:
 
-  return (
-    <div style={container}>
-      <div style={navHeader}>
-        <button onClick={()=>setView('categories')} style={backBtn}><ArrowLeft size={18}/> Categories</button>
-        <div style={liveIndicator}><div style={pulseDot}/> {totalVotes.toLocaleString()} VOTES</div>
-      </div>
+const qty = voteQuantities[can.id] || 1;
 
-      <div style={luxuryGallery}>
-        {filteredCandidates.map((can, index) => {
-          const qty = voteQuantities[can.id] || 1;
-          const percentage = totalVotes > 0 ? (can.vote_count / totalVotes) * 100 : 0;
-          return (
-            <div key={can.id} style={tallCandidateCard}>
-              <div style={imageWrapper}>
-                <img src={can.image_url} style={heroImg} />
-                <div style={rankOverlay}>#{index + 1}</div>
-              </div>
-              <div style={cardInfo}>
-                <h3 style={candidateName}>{can.name}</h3>
-                <div style={barContainer}><div style={{...barFill, width: `${percentage}%`}} /></div>
-                
-                <div style={votingControl}>
-                  <div style={qtySelector}>
-                    <button onClick={()=>setVoteQuantities({...voteQuantities, [can.id]: Math.max(1, qty-1)})} style={qtyBtn}><Minus size={14}/></button>
-                    <input type="number" value={qty} readOnly style={qtyInput} />
-                    <button onClick={()=>setVoteQuantities({...voteQuantities, [can.id]: qty+1})} style={qtyBtn}><Plus size={14}/></button>
-                  </div>
-                  <button onClick={()=>handleVote(can, qty)} style={grandVoteBtn}>
-                    VOTE {qty > 1 ? `(${qty})` : ''} — GHS {(qty * activeComp.vote_price).toFixed(2)}
-                  </button>
-                </div>
-              </div>
-            </div>
-          );
-        })}
+// Helper to handle manual typing
+const handleManualQtyChange = (val) => {
+  const parsed = parseInt(val);
+  // Ensure we don't allow negatives or non-numbers
+  const finalQty = isNaN(parsed) || parsed < 1 ? 1 : parsed;
+  setVoteQuantities({ ...voteQuantities, [can.id]: finalQty });
+};
+
+return (
+  <div key={can.id} style={tallCandidateCard}>
+    <div style={imageWrapper}>
+      <img src={can.image_url} style={heroImg} />
+      <div style={rankOverlay}>#{index + 1}</div>
+    </div>
+    <div style={cardInfo}>
+      <h3 style={candidateName}>{can.name}</h3>
+      <div style={barContainer}><div style={{...barFill, width: `${percentage}%`}} /></div>
+      
+      <div style={votingControl}>
+        <div style={qtySelector}>
+          {/* Minus Button */}
+          <button 
+            onClick={() => setVoteQuantities({...voteQuantities, [can.id]: Math.max(1, qty - 1)})} 
+            style={qtyBtn}
+          >
+            <Minus size={14}/>
+          </button>
+
+          {/* EDITABLE INPUT: User can now type here */}
+          <input 
+            type="number" 
+            value={qty} 
+            onChange={(e) => handleManualQtyChange(e.target.value)}
+            style={qtyInput}
+            min="1"
+          />
+
+          {/* Plus Button */}
+          <button 
+            onClick={() => setVoteQuantities({...voteQuantities, [can.id]: qty + 1})} 
+            style={qtyBtn}
+          >
+            <Plus size={14}/>
+          </button>
+        </div>
+        
+        <button onClick={() => handleVote(can, qty)} style={grandVoteBtn}>
+          VOTE {qty > 1 ? `(${qty.toLocaleString()})` : ''} — GHS {(qty * (activeComp?.vote_price || 0)).toFixed(2)}
+        </button>
       </div>
     </div>
-  );
-}
+  </div>
+);
 
 const container = { maxWidth: '1100px', margin: '0 auto', padding: '120px 20px' };
 const headerStyle = { textAlign:'center', marginBottom:'60px' };
@@ -242,4 +255,15 @@ const liveIndicator = {
   borderRadius: '100px' 
 };
 
-
+const qtyInput = { 
+  border: 'none', 
+  background: 'none', 
+  width: '80px', // Increased width for larger numbers
+  textAlign: 'center', 
+  fontWeight: 900, 
+  fontSize: '20px', 
+  outline: 'none',
+  appearance: 'textfield', // Removes arrows in Firefox
+  WebkitAppearance: 'none', // Removes arrows in Chrome/Safari
+  margin: 0
+};
