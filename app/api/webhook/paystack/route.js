@@ -15,51 +15,66 @@ export async function POST(req) {
     const bodyText = await req.text();
     const body = JSON.parse(bodyText);
 
+    // Filter for successful charges only
     if (body.event !== 'charge.success') {
       return new Response('Event ignored', { status: 200 });
     }
 
-    // 1. Extract Metadata (aligned with our unlimited voting frontend)
+    // --- CRITICAL FIX: METADATA PARSING ---
+    // Paystack often stringifies metadata. We must parse it if it's a string.
+    let rawMetadata = body.data.metadata;
+    let metadata = {};
+    
+    try {
+      metadata = typeof rawMetadata === 'string' ? JSON.parse(rawMetadata) : (rawMetadata || {});
+    } catch (e) {
+      console.error("Metadata parsing failed:", e);
+      metadata = rawMetadata || {};
+    }
+
     const { 
       type, 
       event_id, 
       tier_id, 
       candidate_id, 
-      vote_count, // For unlimited votes
+      vote_count, 
       organizer_id 
-    } = body.data.metadata || {};
+    } = metadata;
 
     const email = body.data.customer.email;
     const amountPaid = body.data.amount / 100;
+    const reference = body.data.reference;
 
-    // 2. Financial Split (5% Commission)
+    // Financial Split Logic (5% / 95%)
     const platformFee = amountPaid * 0.05;
     const organizerShare = amountPaid * 0.95;
 
-    // --- CASE A: UNLIMITED VOTE HANDLING ---
+    // --- CASE A: VOTE HANDLING ---
+    // We check for 'VOTE' type OR the presence of a candidate_id
     if (type === 'VOTE' || candidate_id) {
       const votesToAdd = parseInt(vote_count) || 1;
 
-      // Update Candidate using the fixed SQL function
+      // 1. Trigger the SQL Function
       const { error: rpcError } = await supabase.rpc('increment_vote', { 
         candidate_id: candidate_id, 
         row_count: votesToAdd 
       });
 
-      if (rpcError) throw new Error(`RPC Error: ${rpcError.message}`);
+      if (rpcError) {
+        console.error("Supabase RPC Error:", rpcError.message);
+        throw new Error(`Database Update Failed: ${rpcError.message}`);
+      }
 
-      // Record Payout
-      const { error: payoutError } = await supabase.from('payouts').insert({
+      // 2. Record Payout for Accounting
+      await supabase.from('payouts').insert({
         organizer_id,
         amount_total: amountPaid,
         platform_fee: platformFee,
         organizer_amount: organizerShare,
         type: 'VOTE',
-        reference: body.data.reference,
+        reference: reference,
         candidate_id: candidate_id
       });
-
-      if (payoutError) console.error("Payout logging failed:", payoutError);
     } 
     
     // --- CASE B: TICKET HANDLING ---
@@ -68,7 +83,7 @@ export async function POST(req) {
       const qrDataUrl = await QRCode.toDataURL(ticketHash);
       const qrBuffer = Buffer.from(qrDataUrl.split(',')[1], 'base64');
 
-      // Upload QR to Supabase Storage
+      // Upload QR
       const { error: uploadError } = await supabase.storage
         .from('media')
         .upload(`qrs/${ticketHash}.png`, qrBuffer, {
@@ -80,7 +95,7 @@ export async function POST(req) {
 
       const qrUrl = supabase.storage.from('media').getPublicUrl(`qrs/${ticketHash}.png`).data.publicUrl;
 
-      // Save Ticket & Payout record
+      // Save Ticket Entry
       const { error: dbError } = await supabase.from('tickets').insert({
         event_id,
         tier_id,
@@ -93,16 +108,17 @@ export async function POST(req) {
 
       if (dbError) throw dbError;
 
+      // Save Payout Entry
       await supabase.from('payouts').insert({
         organizer_id,
         amount_total: amountPaid,
         platform_fee: platformFee,
         organizer_amount: organizerShare,
         type: 'TICKET',
-        reference: body.data.reference
+        reference: reference
       });
 
-      // Fetch Event Details & Send Email
+      // Fetch Details and Email
       const { data: eventDetails } = await supabase
         .from('events')
         .select('title, location, date, time')
@@ -117,12 +133,12 @@ export async function POST(req) {
       });
     }
 
-    return new Response('Webhook Handled', { status: 200 });
+    return new Response('Webhook Handled Successfully', { status: 200 });
 
   } catch (error) {
-    console.error('Webhook Critical Error:', error.message);
-    // Returning 500 tells Paystack to retry the webhook later
-    return new Response(`Error: ${error.message}`, { status: 500 });
+    console.error('CRITICAL WEBHOOK ERROR:', error.message);
+    // Return 500 so Paystack knows to retry later
+    return new Response(`Webhook Error: ${error.message}`, { status: 500 });
   }
 }
 
