@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
 import { 
   ArrowLeft, Search, Trophy, Crown, Share2, 
@@ -9,52 +9,40 @@ import {
 export default function VotingPortal() {
   const [competitions, setCompetitions] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [view, setView] = useState('competitions'); 
-  const [activeComp, setActiveComp] = useState(null);
+  const [activeCompId, setActiveCompId] = useState(null); // Store ID instead of object
   const [activeCat, setActiveCat] = useState(null);
   const [voteQuantities, setVoteQuantities] = useState({});
   const [toast, setToast] = useState(null);
   const [copySuccess, setCopySuccess] = useState(null);
 
-  // 1. LOAD DATA & INITIALIZE REALTIME
-  const loadData = async () => {
-    const { data } = await supabase.from('contests').select('*, candidates(*)').eq('is_active', true);
-    setCompetitions(data || []);
+  // 1. DATA FETCHING (Triple Checked)
+  const fetchLatestData = useCallback(async (isManual = false) => {
+    if (isManual) setIsRefreshing(true);
+    
+    const { data, error } = await supabase
+      .from('contests')
+      .select('*, candidates(*)')
+      .eq('is_active', true);
+
+    if (!error && data) {
+      setCompetitions(data);
+    }
+    
     setLoading(false);
-  };
-
-  useEffect(() => {
-    loadData();
-
-    // LISTEN FOR REALTIME UPDATES
-    // Note: Ensure "Replication" is enabled for 'candidates' table in Supabase Dashboard
-    const channel = supabase.channel('realtime-votes')
-      .on('postgres_changes', { 
-        event: 'UPDATE', 
-        schema: 'public', 
-        table: 'candidates' 
-      }, payload => {
-        setCompetitions(prev => prev.map(comp => ({
-          ...comp,
-          candidates: comp.candidates.map(can => 
-            can.id === payload.new.id ? { ...can, ...payload.new } : can
-          )
-        })));
-
-        // Show toast for other people's votes
-        const diff = payload.new.vote_count - (payload.old.vote_count || 0);
-        if (diff > 0) {
-          setToast({ name: payload.new.name, count: diff, type: 'ACTIVITY' });
-          setTimeout(() => setToast(null), 4000);
-        }
-      })
-      .subscribe();
-
-    return () => supabase.removeChannel(channel);
+    if (isManual) setTimeout(() => setIsRefreshing(false), 600);
   }, []);
 
-  // 2. CONFETTI & VOTE HANDLER
+  useEffect(() => {
+    fetchLatestData();
+  }, [fetchLatestData]);
+
+  // Derive the active competition from the list using the ID
+  const activeComp = competitions.find(c => c.id === activeCompId);
+
+  // 2. HANDLERS
   const triggerConfetti = () => {
     if (typeof window !== "undefined" && window.confetti) {
       window.confetti({
@@ -83,6 +71,8 @@ export default function VotingPortal() {
       callback: (res) => {
         triggerConfetti();
         setToast({ name: candidate.name, count: qty, type: 'SUCCESS' });
+        // Refresh data automatically after successful vote
+        fetchLatestData();
         setTimeout(() => setToast(null), 5000);
       }
     });
@@ -124,6 +114,7 @@ export default function VotingPortal() {
     </div>
   );
 
+  // VIEW 1: SELECT COMPETITION
   if (view === 'competitions') {
     return (
       <div style={container}>
@@ -132,12 +123,12 @@ export default function VotingPortal() {
           <h1 style={mainTitle}>Major <span style={accentText}>Events.</span></h1>
           <div style={searchContainer}>
             <Search size={20} color="#0ea5e9" />
-            <input placeholder="Search..." style={searchBar} onChange={(e)=>setSearchQuery(e.target.value.toLowerCase())} />
+            <input placeholder="Search events..." style={searchBar} onChange={(e)=>setSearchQuery(e.target.value.toLowerCase())} />
           </div>
         </header>
         <div style={contestGrid}>
           {competitions.filter(c => c.title.toLowerCase().includes(searchQuery)).map(comp => (
-            <div key={comp.id} onClick={()=>{setActiveComp(comp); setView('categories');}} style={luxuryCard}>
+            <div key={comp.id} onClick={()=>{setActiveCompId(comp.id); setView('categories');}} style={luxuryCard}>
               <div style={cardImagePlaceholder}><Trophy size={40} color="#0ea5e9"/></div>
               <div style={cardContent}>
                 <h2 style={cardTitle}>{comp.title}</h2>
@@ -153,12 +144,13 @@ export default function VotingPortal() {
     );
   }
 
+  // VIEW 2: SELECT CATEGORY
   if (view === 'categories') {
-    const categories = [...new Set(activeComp.candidates.map(c => c.category || 'General'))];
+    const categories = [...new Set(activeComp?.candidates.map(c => c.category || 'General'))];
     return (
       <div style={container}>
         <button onClick={()=>setView('competitions')} style={backBtn}><ArrowLeft size={18}/> Back</button>
-        <h1 style={subHeaderTitle}>{activeComp.title}</h1>
+        <h1 style={subHeaderTitle}>{activeComp?.title}</h1>
         <div style={categoryList}>
           {categories.map(cat => (
             <div key={cat} onClick={()=>{setActiveCat(cat); setView('leaderboard');}} style={categoryRowLuxury}>
@@ -174,20 +166,28 @@ export default function VotingPortal() {
     );
   }
 
-  const filteredCandidates = activeComp.candidates
+  // VIEW 3: LEADERBOARD / VOTE
+  const filteredCandidates = activeComp?.candidates
     .filter(c => (c.category || 'General') === activeCat)
-    .sort((a,b) => b.vote_count - a.vote_count);
+    .sort((a,b) => b.vote_count - a.vote_count) || [];
+  
   const totalVotes = filteredCandidates.reduce((acc, curr) => acc + curr.vote_count, 0);
 
   return (
     <div style={container}>
-      {/* Script for Confetti CDN */}
       <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js" defer></script>
 
       <div style={navHeader}>
         <button onClick={()=>setView('categories')} style={backBtn}><ArrowLeft size={18}/> Categories</button>
         <div style={{display:'flex', gap:'15px', alignItems:'center'}}>
-            <button onClick={loadData} style={refreshIconBtn}><RefreshCcw size={16}/></button>
+            {/* THE REFRESH BUTTON */}
+            <button 
+              onClick={() => fetchLatestData(true)} 
+              disabled={isRefreshing}
+              style={{...refreshIconBtn, opacity: isRefreshing ? 0.5 : 1}}
+            >
+              <RefreshCcw size={16} className={isRefreshing ? "spin" : ""} />
+            </button>
             <div style={liveIndicator}><div style={pulseDot}/> {totalVotes.toLocaleString()} VOTES</div>
         </div>
       </div>
@@ -215,7 +215,7 @@ export default function VotingPortal() {
                     <button onClick={() => setVoteQuantities({...voteQuantities, [can.id]: qty + 1})} style={qtyBtn}><Plus size={14}/></button>
                   </div>
                   <button onClick={() => handleVote(can, qty)} style={grandVoteBtn}>
-                    VOTE {qty > 1 ? `(${qty.toLocaleString()})` : ''} — GHS {(qty * (activeComp?.vote_price || 0)).toFixed(2)}
+                    VOTE — GHS {(qty * (activeComp?.vote_price || 0)).toFixed(2)}
                   </button>
                 </div>
               </div>
@@ -225,27 +225,26 @@ export default function VotingPortal() {
       </div>
 
       {toast && (
-        <div style={{...toastContainer, borderColor: toast.type === 'SUCCESS' ? '#0ea5e9' : '#f1f5f9'}}>
-          <div style={{...toastIcon, background: toast.type === 'SUCCESS' ? '#0ea5e9' : '#000'}}><BarChart3 size={18} color="#fff"/></div>
+        <div style={{...toastContainer, borderColor: '#0ea5e9'}}>
+          <div style={{...toastIcon, background: '#0ea5e9'}}><Check size={18} color="#fff"/></div>
           <div style={toastText}>
-             {toast.type === 'SUCCESS' ? (
-               <span>Success! You cast <b>{toast.count} votes</b> for <b>{toast.name}</b></span>
-             ) : (
-               <span><b>Activity:</b> Someone cast {toast.count} votes for {toast.name}</span>
-             )}
+            Success! You cast <b>{toast.count} votes</b> for <b>{toast.name}</b>
           </div>
         </div>
       )}
+
       <style>{`
         @keyframes slideUp { from { transform: translate(-50%, 40px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
         @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .spin { animation: spin 0.8s linear infinite; }
       `}</style>
     </div>
   );
 }
 
-// --- STYLES ---
-const container = { maxWidth: '1100px', margin: '0 auto', padding: '120px 20px' };
+// --- STYLES (Consolidated for speed) ---
+const container = { maxWidth: '1100px', margin: '0 auto', padding: '100px 20px' };
 const headerStyle = { textAlign:'center', marginBottom:'60px' };
 const mainTitle = { fontSize: 'clamp(40px, 8vw, 72px)', fontWeight: 900, letterSpacing: '-4px', lineHeight: 1 };
 const accentText = { color: '#0ea5e9' };
@@ -277,7 +276,7 @@ const votingControl = { display:'flex', flexDirection:'column', gap:'12px' };
 const qtySelector = { display:'flex', justifyContent:'space-between', alignItems:'center', background:'#f8fafc', padding:'8px', borderRadius:'20px' };
 const qtyInput = { border: 'none', background: 'none', width: '80px', textAlign: 'center', fontWeight: 900, fontSize: '20px', outline: 'none' };
 const qtyBtn = { width:'45px', height:'45px', borderRadius:'15px', border:'none', background:'#fff', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', boxShadow: '0 4px 10px rgba(0,0,0,0.05)' };
-const grandVoteBtn = { background:'#000', color:'#fff', border:'none', padding:'22px', borderRadius:'25px', fontWeight: 900, fontSize: '16px', cursor:'pointer', transition: 'transform 0.2s' };
+const grandVoteBtn = { background:'#000', color:'#fff', border:'none', padding:'22px', borderRadius:'25px', fontWeight: 900, fontSize: '16px', cursor:'pointer' };
 const searchContainer = { display: 'flex', alignItems: 'center', gap: '15px', maxWidth: '500px', margin: '40px auto 0', background: '#fff', padding: '18px 30px', borderRadius: '25px', boxShadow: '0 15px 50px rgba(0,0,0,0.06)', border: '1px solid #f1f5f9' };
 const searchBar = { border: 'none', outline: 'none', width: '100%', fontWeight: 700, fontSize: '16px', color: '#000' };
 const liveIndicator = { display: 'flex', alignItems: 'center', gap: '10px', color: '#0ea5e9', fontWeight: 800, fontSize: '14px', background: '#f0f9ff', padding: '8px 16px', borderRadius: '100px' };
