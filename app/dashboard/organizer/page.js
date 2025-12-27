@@ -259,7 +259,7 @@ export default function OrganizerDashboard() {
   const saveCompEdit = async () => {
     if (!showEditCompModal?.id) return;
     setIsProcessing(true);
-   try {
+    try {
       const { error } = await supabase
         .from('contests')
         .update({ 
@@ -270,14 +270,14 @@ export default function OrganizerDashboard() {
           is_active: editCompForm.is_active,
           image_url: editCompForm.image_url
         })
-        .eq('id', showEditCompModal.id)
+        .eq('id', showEditCompModal.id); // <--- THIS SEMICOLON IS CRITICAL
 
       if (error) throw error;
       
       setShowEditCompModal(null);
       await loadDashboardData(true);
     } catch (err) {
-      console.error(err);
+      console.error("Update Error:", err);
       alert("Failed to update competition.");
     } finally {
       setIsProcessing(false);
