@@ -49,6 +49,7 @@ export default function RootLayout({ children }) {
           }
           * { box-sizing: border-box; }
         `}</style>
+  <script src="https://js.paystack.co/v1/inline.js"></script>
       </head>
       <body className={`${outfit.className} mesh-bg`} style={{ margin: 0, minHeight: '100vh' }}>
         
