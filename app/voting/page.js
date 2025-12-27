@@ -230,3 +230,23 @@ const liveBadge = {
   fontWeight: 800,
   letterSpacing: '1px'
 };
+const liveIndicator = { 
+  display: 'flex', 
+  alignItems: 'center', 
+  gap: '10px', 
+  color: '#0ea5e9', 
+  fontWeight: 800, 
+  fontSize: '14px', 
+  background: '#f0f9ff', 
+  padding: '8px 16px', 
+  borderRadius: '100px' 
+};
+
+const pulseDot = { 
+  width: '8px', 
+  height: '8px', 
+  background: '#0ea5e9', 
+  borderRadius: '50%',
+  boxShadow: '0 0 0 0 rgba(14, 165, 233, 0.7)',
+  // Note: For the actual pulsing animation, you'd usually add a global CSS keyframe
+};
