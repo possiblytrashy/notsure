@@ -17,9 +17,10 @@ export default function VotingPortal() {
 
   useEffect(() => {
     async function loadData() {
+      // Simulate slight delay for smooth transition if data is cached
       const { data } = await supabase.from('contests').select('*, candidates(*)').eq('is_active', true);
       setCompetitions(data || []);
-      setLoading(false);
+      setTimeout(() => setLoading(false), 800); 
     }
     loadData();
 
@@ -36,7 +37,6 @@ export default function VotingPortal() {
 
   const handleVote = (candidate, qty) => {
     if (!window.PaystackPop) return;
-    
     const handler = window.PaystackPop.setup({
       key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
       email: "voter@ousted.com",
@@ -48,20 +48,40 @@ export default function VotingPortal() {
         type: 'VOTE',
         organizer_id: activeComp.organizer_id 
       },
-      callback: function(response) {
-        alert("Payment Successful! Votes will reflect shortly.");
-      }
+      callback: (res) => alert("Order Received. Updating leaderboard...")
     });
     handler.openIframe();
   };
 
   const handleManualQtyChange = (candidateId, val) => {
     const parsed = parseInt(val);
-    const finalQty = isNaN(parsed) || parsed < 1 ? 1 : parsed;
-    setVoteQuantities({ ...voteQuantities, [candidateId]: finalQty });
+    setVoteQuantities({ ...voteQuantities, [candidateId]: isNaN(parsed) || parsed < 1 ? 1 : parsed });
   };
 
-  if (loading) return <div style={centerText}>Initialising Ousted Experience...</div>;
+  // --- SKELETON RENDERER ---
+  if (loading) return (
+    <div style={container}>
+       <div style={{...headerStyle, opacity: 0.3}}>
+          <div style={{width: '100px', height: '20px', background: '#eee', borderRadius: '50px', margin: '0 auto 20px'}} />
+          <div style={{width: '300px', height: '60px', background: '#eee', borderRadius: '20px', margin: '0 auto'}} />
+       </div>
+       <div style={contestGrid}>
+         {[1, 2, 3].map(i => (
+           <div key={i} style={{...luxuryCard, height: '300px', background: '#fcfcfc', border: '1px solid #eee'}}>
+              <div style={{height: '150px', background: '#f0f0f0'}} className="shimmer" />
+              <div style={{padding: '30px'}}>
+                 <div style={{width: '60%', height: '20px', background: '#eee', borderRadius: '10px', marginBottom: '10px'}} />
+                 <div style={{width: '40%', height: '15px', background: '#f5f5f5', borderRadius: '10px'}} />
+              </div>
+           </div>
+         ))}
+       </div>
+       <style>{`
+         .shimmer { animation: pulse 1.5s infinite ease-in-out; }
+         @keyframes pulse { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
+       `}</style>
+    </div>
+  );
 
   // VIEW 1: COMPETITIONS
   if (view === 'competitions') {
@@ -72,7 +92,7 @@ export default function VotingPortal() {
           <h1 style={mainTitle}>Major <span style={accentText}>Events.</span></h1>
           <div style={searchContainer}>
             <Search size={20} color="#0ea5e9" />
-            <input placeholder="Search competitions..." style={searchBar} onChange={(e)=>setSearchQuery(e.target.value.toLowerCase())} />
+            <input placeholder="Search..." style={searchBar} onChange={(e)=>setSearchQuery(e.target.value.toLowerCase())} />
           </div>
         </header>
         <div style={contestGrid}>
@@ -127,7 +147,6 @@ export default function VotingPortal() {
         <button onClick={()=>setView('categories')} style={backBtn}><ArrowLeft size={18}/> Categories</button>
         <div style={liveIndicator}><div style={pulseDot}/> {totalVotes.toLocaleString()} VOTES</div>
       </div>
-
       <div style={luxuryGallery}>
         {filteredCandidates.map((can, index) => {
           const qty = voteQuantities[can.id] || 1;
@@ -141,21 +160,11 @@ export default function VotingPortal() {
               <div style={cardInfo}>
                 <h3 style={candidateName}>{can.name}</h3>
                 <div style={barContainer}><div style={{...barFill, width: `${percentage}%`}} /></div>
-                
                 <div style={votingControl}>
                   <div style={qtySelector}>
-                    <button onClick={() => setVoteQuantities({...voteQuantities, [can.id]: Math.max(1, qty - 1)})} style={qtyBtn}>
-                      <Minus size={14}/>
-                    </button>
-                    <input 
-                      type="number" 
-                      value={qty} 
-                      onChange={(e) => handleManualQtyChange(can.id, e.target.value)}
-                      style={qtyInput}
-                    />
-                    <button onClick={() => setVoteQuantities({...voteQuantities, [can.id]: qty + 1})} style={qtyBtn}>
-                      <Plus size={14}/>
-                    </button>
+                    <button onClick={() => setVoteQuantities({...voteQuantities, [can.id]: Math.max(1, qty - 1)})} style={qtyBtn}><Minus size={14}/></button>
+                    <input type="number" value={qty} onChange={(e) => handleManualQtyChange(can.id, e.target.value)} style={qtyInput} />
+                    <button onClick={() => setVoteQuantities({...voteQuantities, [can.id]: qty + 1})} style={qtyBtn}><Plus size={14}/></button>
                   </div>
                   <button onClick={() => handleVote(can, qty)} style={grandVoteBtn}>
                     VOTE {qty > 1 ? `(${qty.toLocaleString()})` : ''} — GHS {(qty * (activeComp?.vote_price || 0)).toFixed(2)}
@@ -170,7 +179,7 @@ export default function VotingPortal() {
   );
 }
 
-// --- STYLES ---
+// --- STYLES (Keep existing ones, ensure curly braces match) ---
 const container = { maxWidth: '1100px', margin: '0 auto', padding: '120px 20px' };
 const headerStyle = { textAlign:'center', marginBottom:'60px' };
 const mainTitle = { fontSize: '72px', fontWeight: 900, letterSpacing: '-4px', lineHeight: 1, marginBottom: '10px' };
