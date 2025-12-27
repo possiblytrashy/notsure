@@ -238,27 +238,62 @@ export default function OrganizerDashboard() {
   };
 
   // Edit Competition
+// --- UPDATED DEEP ACTION HANDLERS ---
+
   const openEditCompModal = (comp) => {
     setEditCompForm({
-      title: comp.title,
+      title: comp.title || '',
       description: comp.description || '',
-      category: comp.category || ''
+      category: comp.category || '',
+      vote_price: comp.vote_price || 1.00, // Load existing price
+      is_active: comp.is_active ?? true,    // Load active status
+      image_url: comp.image_url || ''      // Load category image
     });
     setShowEditCompModal(comp);
   };
 
   const saveCompEdit = async () => {
+    if (!showEditCompModal?.id) return;
+    
     setIsProcessing(true);
     try {
       const { error } = await supabase.from('contests')
         .update({ 
           title: editCompForm.title,
           description: editCompForm.description,
-          // If you have a category column, update it here. 
-          // If not, you might store it in description or a metadata json column
+          category: editCompForm.category,
+          vote_price: parseFloat(editCompForm.vote_price),
+          is_active: editCompForm.is_active,
+          image_url: editCompForm.image_url,
+          updated_at: new Date().toISOString()
         })
         .eq('id', showEditCompModal.id);
 
+      if (error) throw error;
+      
+      setShowEditCompModal(null);
+      await loadDashboardData(true); // Refresh UI
+    } catch (err) {
+      console.error("Deep Update Error:", err);
+      alert("Failed to update competition system settings.");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const deleteCandidate = async (candId) => {
+    if (!confirm("Are you sure? This nominee and their votes will be permanently deleted.")) return;
+    setIsProcessing(true);
+    try {
+      const { error } = await supabase.from('candidates').delete().eq('id', candId);
+      if (error) throw error;
+      loadDashboardData(true);
+    } catch (err) {
+      alert("Delete failed.");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
       if (error) throw error;
       setShowEditCompModal(null);
       loadDashboardData(true);
@@ -270,47 +305,7 @@ export default function OrganizerDashboard() {
     }
   };
 
-  // --- DEEP CRUD ACTIONS ---
 
-// Delete a Candidate
-const deleteCandidate = async (candId) => {
-  if (!confirm("Are you sure? This will remove the nominee and all their votes.")) return;
-  setIsProcessing(true);
-  try {
-    const { error } = await supabase.from('candidates').delete().eq('id', candId);
-    if (error) throw error;
-    loadDashboardData(true);
-  } catch (err) {
-    alert("Delete failed.");
-  } finally {
-    setIsProcessing(false);
-  }
-};
-
-// Deep Update Competition
-const saveCompEdit = async () => {
-  setIsProcessing(true);
-  try {
-    const { error } = await supabase.from('contests')
-      .update({ 
-        title: editCompForm.title,
-        description: editCompForm.description,
-        category: editCompForm.category,
-        vote_price: parseFloat(editCompForm.vote_price), // Deep control
-        is_active: editCompForm.is_active,             // Kill switch
-        image_url: editCompForm.image_url              // Branding
-      })
-      .eq('id', showEditCompModal.id);
-
-    if (error) throw error;
-    setShowEditCompModal(null);
-    loadDashboardData(true);
-  } catch (err) {
-    alert("Deep update failed.");
-  } finally {
-    setIsProcessing(false);
-  }
-};
   // --- 6. LOADING SKELETON ---
   if (loading) return (
     <div style={skeletonStyles.wrapper}>
