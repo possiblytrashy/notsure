@@ -215,7 +215,12 @@ const handleVote = async (candidateId, price, candidateName) => {
                   </div>
                   <div style={barContainer}><div style={{...barFill, width: `${percentage}%`}} /></div>
                 </div>
-                <button onClick={() => handleVote(can.id, selectedContest.vote_price)} style={voteActionBtn}>VOTE</button>
+                <button 
+  onClick={() => handleVote(can.id, selectedContest.vote_price, can.name)} 
+  style={voteActionBtn}
+>
+  VOTE
+</button>
               </div>
             </div>
           );
