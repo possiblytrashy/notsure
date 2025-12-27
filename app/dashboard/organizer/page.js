@@ -270,7 +270,7 @@ export default function OrganizerDashboard() {
       setShowEditCompModal(null);
       await loadDashboardData(true);
     } catch (err) {
-      console.error("Update Error:", err);
+      console.error(err);
       alert("Failed to update competition.");
     } finally {
       setIsProcessing(false);
@@ -853,7 +853,12 @@ const rankNum = { fontSize: '14px', fontWeight: 900, color: '#cbd5e1', width: '3
 const candInfo = { flex: 1 };
 const candName = { margin: '0 0 6px', fontSize: '13px', fontWeight: 700 };
 const voteBarContainer = { height: '6px', background: '#f1f5f9', borderRadius: '3px', overflow: 'hidden' };
-const voteBarFill = (pct) => ({ height: '100%', width: `${pct}%`, background: '#000', borderRadius: '3px' });
+const voteBarFill = (percentage) => ({
+  width: `${percentage}%`,
+  height: '100%',
+  backgroundColor: '#d4af37', // Luxury Gold
+  transition: 'width 1s ease-in-out'
+});
 const candVotes = { fontSize: '12px', fontWeight: 900, width: '60px', textAlign: 'right' };
 const emptySmall = { fontSize: '12px', color: '#94a3b8', textAlign: 'center', padding: '20px', background: '#f8fafc', borderRadius: '12px' };
 const sectionTitleRow = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' };
