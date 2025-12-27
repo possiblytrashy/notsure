@@ -195,3 +195,38 @@ const grandVoteBtn = { background:'#000', color:'#fff', border:'none', padding:'
 
 const centerText = { padding: '150px', textAlign: 'center', fontWeight: 800, color: '#94a3b8', fontSize: '20px' };
 const pulseDot = { width:'10px', height:'10px', background:'#0ea5e9', borderRadius:'50%', animation: 'pulse 2s infinite' };
+// Add these to your existing styles section
+const searchContainer = { 
+  display: 'flex', 
+  alignItems: 'center', 
+  gap: '15px', 
+  maxWidth: '500px', 
+  margin: '40px auto 0', 
+  background: '#fff', 
+  padding: '18px 30px', 
+  borderRadius: '25px', 
+  boxShadow: '0 15px 50px rgba(0,0,0,0.06)',
+  border: '1px solid #f1f5f9'
+};
+
+const searchBar = { 
+  border: 'none', 
+  outline: 'none', 
+  width: '100%', 
+  fontWeight: 700, 
+  fontSize: '16px',
+  color: '#000'
+};
+
+const liveBadge = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: '10px',
+  background: '#f0f9ff',
+  color: '#0ea5e9',
+  padding: '8px 16px',
+  borderRadius: '100px',
+  fontSize: '12px',
+  fontWeight: 800,
+  letterSpacing: '1px'
+};
