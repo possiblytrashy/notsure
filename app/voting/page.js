@@ -34,27 +34,27 @@ export default function VotingPortal() {
     return () => supabase.removeChannel(channel);
   }, []);
 
-  const handleVote = (candidate, qty) => {
-    if (!window.PaystackPop) return;
-    const totalAmount = qty * (activeComp.vote_price || 1);
-
-    const handler = window.PaystackPop.setup({
-      key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
-      email: "voter@ousted.com",
-      amount: Math.round(totalAmount * 100),
-      currency: "GHS",
-      metadata: { 
-        candidate_id: candidate.id, 
-        vote_count: qty, 
-        type: 'VOTE',
-        organizer_id: activeComp.organizer_id 
-      },
-      callback: function(response) {
-        alert("Payment verified. Votes will update shortly.");
-      }
-    });
-    handler.openIframe();
-  };
+const handleVote = (candidate, qty) => {
+  if (!window.PaystackPop) return;
+  
+  const handler = window.PaystackPop.setup({
+    key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
+    email: "voter@ousted.com", // In production, get this from an input
+    amount: Math.round(qty * activeComp.vote_price * 100),
+    currency: "GHS",
+    // ENSURE METADATA IS HERE
+    metadata: { 
+      candidate_id: candidate.id, 
+      vote_count: qty, 
+      type: 'VOTE',
+      organizer_id: activeComp.organizer_id 
+    },
+    callback: function(response) {
+      // response.reference is what you'll see in the webhook
+    }
+  });
+  handler.openIframe();
+};
 
   if (loading) return <div style={centerText}>Initialising Ousted Experience...</div>;
 
