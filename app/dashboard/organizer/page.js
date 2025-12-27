@@ -258,10 +258,10 @@ export default function OrganizerDashboard() {
 
   const saveCompEdit = async () => {
     if (!showEditCompModal?.id) return;
-    
     setIsProcessing(true);
     try {
-      const { error } = await supabase.from('contests')
+      const { error } = await supabase
+        .from('contests')
         .update({ 
           title: editCompForm.title,
           description: editCompForm.description,
@@ -277,13 +277,12 @@ export default function OrganizerDashboard() {
       setShowEditCompModal(null);
       await loadDashboardData(true);
     } catch (err) {
-      console.error("Deep Update Error:", err);
+      console.error(err);
       alert("Failed to update competition.");
     } finally {
       setIsProcessing(false);
     }
   };
-
   const deleteCandidate = async (candId) => {
     if (!confirm("Are you sure? This nominee and their votes will be permanently deleted.")) return;
     setIsProcessing(true);
