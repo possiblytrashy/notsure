@@ -477,7 +477,7 @@ export default function OrganizerDashboard() {
                    <h2 style={viewTitle}>Competitions & Voting</h2>
                    <p style={subLabel} style={{marginTop:'5px'}}>Manage categories, nominees, and monitor real-time votes.</p>
                 </div>
-                <button style={addBtn} onClick={() => router.push('/voting/create')}>
+                <button style={addBtn} onClick={() => router.push('/contests/create')}>
                   <Plus size={20}/> CREATE COMPETITION
                 </button>
              </div>
