@@ -59,7 +59,36 @@ export default function OrganizerDashboard() {
   const [newCandidate, setNewCandidate] = useState({ name: '', image_url: '', bio: '' });
 
   // Competition Edit Form State
-  const [editCompForm, setEditCompForm] = useState({ title: '', description: '', category: '' });
+  const [editCompForm, setEditCompForm] = useState({ 
+  title: '', 
+  description: '', 
+  category: '', 
+  image_file: null, // New
+  image_url: '' 
+});
+  
+// Add these to your state definitions
+const [uploading, setUploading] = useState(false);
+
+  const uploadImage = async (file, bucket = 'competition-images') => {
+  try {
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${Math.random()}.${fileExt}`;
+    const filePath = `${fileName}`;
+
+    const { error: uploadError } = await supabase.storage
+      .from(bucket)
+      .upload(filePath, file);
+
+    if (uploadError) throw uploadError;
+
+    const { data } = supabase.storage.from(bucket).getPublicUrl(filePath);
+    return data.publicUrl;
+  } catch (error) {
+    console.error('Error uploading image:', error);
+    return null;
+  }
+};
 
   // --- 3. DATA ENGINE ---
   const loadDashboardData = useCallback(async (isSilent = false) => {
@@ -249,50 +278,54 @@ export default function OrganizerDashboard() {
     setShowEditCompModal(comp);
   };
 
- const saveCompEdit = async () => {
-    if (!showEditCompModal?.id) return;
-    setIsProcessing(true);
-    try {
-      const { error } = await supabase
-        .from('contests')
-        .update({ 
-          title: editCompForm.title,
-          description: editCompForm.description,
-          category: editCompForm.category,
-          vote_price: parseFloat(editCompForm.vote_price),
-          is_active: editCompForm.is_active,
-          image_url: editCompForm.image_url
-        })
-        .eq('id', showEditCompModal.id);
+const saveCompEdit = async () => {
+  if (!showEditCompModal?.id) return;
+  setIsProcessing(true);
+  try {
+    let finalImageUrl = editCompForm.image_url;
 
-      if (error) throw error;
-      
-      setShowEditCompModal(null);
-      await loadDashboardData(true);
-    } catch (err) {
-      console.error(err);
-      alert("Failed to update competition.");
-    } finally {
-      setIsProcessing(false);
+    // If a new file was selected, upload it first
+    if (editCompForm.image_file) {
+      const uploadedUrl = await uploadImage(editCompForm.image_file);
+      if (uploadedUrl) finalImageUrl = uploadedUrl;
     }
-  };
 
-  const deleteCandidate = async (candId) => {
-    if (!confirm("Are you sure? This nominee and their votes will be permanently deleted.")) return;
-    setIsProcessing(true);
-    try {
-      const { error } = await supabase.from('candidates').delete().eq('id', candId);
-      if (error) throw error;
-      await loadDashboardData(true);
-    } catch (err) {
-      console.error("Delete Error:", err);
-      alert("Delete failed.");
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-  
+    const { error } = await supabase
+      .from('contests')
+      .update({ 
+        title: editCompForm.title,
+        description: editCompForm.description,
+        category: editCompForm.category,
+        vote_price: parseFloat(editCompForm.vote_price),
+        is_active: editCompForm.is_active,
+        image_url: finalImageUrl // Save the new public URL
+      })
+      .eq('id', showEditCompModal.id);
 
+    if (error) throw error;
+    setShowEditCompModal(null);
+    await loadDashboardData(true);
+  } catch (err) {
+    alert("Update failed.");
+  } finally {
+    setIsProcessing(false);
+  }
+};
+
+const deleteEntireCompetition = async (compId) => {
+  if (!confirm("CRITICAL: This will delete the competition, all nominees, and all recorded votes. Proceed?")) return;
+  setIsProcessing(true);
+  try {
+    // Supabase foreign keys should be set to 'CASCADE' to delete candidates automatically
+    const { error } = await supabase.from('contests').delete().eq('id', compId);
+    if (error) throw error;
+    await loadDashboardData(true);
+  } catch (err) {
+    alert("Deletion failed.");
+  } finally {
+    setIsProcessing(false);
+  }
+};
   // --- 6. LOADING SKELETON ---
   if (loading) return (
     <div style={skeletonStyles.wrapper}>
@@ -721,10 +754,20 @@ export default function OrganizerDashboard() {
           </div>
         </div>
 
-        <div style={inputStack}>
-          <label style={fieldLabel}>CATEGORY HERO IMAGE URL</label>
-          <input style={modalInput} value={editCompForm.image_url} onChange={(e) => setEditCompForm({...editCompForm, image_url: e.target.value})} placeholder="https://..." />
-        </div>
+        div style={inputStack}>
+  <label style={fieldLabel}>CATEGORY HERO IMAGE</label>
+  <div style={uploadContainer}>
+    {editCompForm.image_url && !editCompForm.image_file && (
+      <img src={editCompForm.image_url} style={previewThumb} alt="Preview" />
+    )}
+    <input 
+      type="file" 
+      accept="image/*" 
+      onChange={(e) => setEditCompForm({...editCompForm, image_file: e.target.files[0]})}
+      style={fileInputStyle}
+    />
+  </div>
+</div>
 
         <div style={inputStack}>
           <label style={fieldLabel}>DESCRIPTION</label>
@@ -735,9 +778,19 @@ export default function OrganizerDashboard() {
           {isProcessing ? <Loader2 className="animate-spin" size={18}/> : 'SAVE SYSTEM CHANGES'}
         </button>
       </div>
+        <div style={dangerZone}>
+  <p style={dangerText}>DANGER ZONE</p>
+  <button 
+    style={deleteFullBtn} 
+    onClick={() => deleteEntireCompetition(showEditCompModal.id)}
+  >
+    <Trash2 size={14}/> DELETE ENTIRE COMPETITION
+  </button>
+</div>
     </div>
   </div>
 )}
+
       {/* 4. QR PREVIEW MODAL */}
       {showQR && (
         <div style={overlay} onClick={() => setShowQR(null)}>
@@ -926,4 +979,43 @@ const twoColumnGrid = {
   display: 'grid',
   gridTemplateColumns: '1fr 1fr',
   gap: '15px'
+};
+
+const uploadContainer = {
+  border: '2px dashed #e2e8f0',
+  padding: '15px',
+  borderRadius: '8px',
+  textAlign: 'center',
+  background: '#fff'
+};
+
+const previewThumb = {
+  width: '60px',
+  height: '60px',
+  borderRadius: '4px',
+  objectFit: 'cover',
+  marginBottom: '10px'
+};
+
+const dangerZone = {
+  marginTop: '30px',
+  padding: '15px',
+  borderTop: '1px solid #fee2e2',
+  backgroundColor: '#fff5f5',
+  borderRadius: '0 0 12px 12px'
+};
+
+const deleteFullBtn = {
+  width: '100%',
+  padding: '12px',
+  backgroundColor: '#ef4444',
+  color: 'white',
+  border: 'none',
+  borderRadius: '6px',
+  fontWeight: 'bold',
+  cursor: 'pointer',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  gap: '8px'
 };
