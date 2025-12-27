@@ -1,4 +1,5 @@
 "use client";
+
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
@@ -11,7 +12,7 @@ import {
   BarChart3, ArrowUpRight, Filter, DownloadCloud,
   Eye, MousePointer2, Share2, Star, Clock, Trash2, Edit3,
   Layers, Activity, Sparkles, ChevronDown, UserPlus,
-  BarChart, PieChart, CreditCard, Layout
+  BarChart, PieChart, CreditCard, Layout, Grip
 } from 'lucide-react';
 
 export default function OrganizerDashboard() {
@@ -21,9 +22,11 @@ export default function OrganizerDashboard() {
   const [activeTab, setActiveTab] = useState('events'); 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  
+  // Data Store
   const [data, setData] = useState({ 
     events: [], 
-    contests: [], 
+    competitions: [], // Renamed from contests
     tickets: [], 
     profile: null 
   });
@@ -31,13 +34,19 @@ export default function OrganizerDashboard() {
   // --- 2. UI & MODAL STATE ---
   const [copying, setCopying] = useState(null);
   const [showQR, setShowQR] = useState(null);
+  
+  // Modals
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showCandidateModal, setShowCandidateModal] = useState(null); // Holds competition object for adding candidates
+  const [showEditCompModal, setShowEditCompModal] = useState(null); // Holds competition object for editing details
+  
   const [isProcessing, setIsProcessing] = useState(false);
+  
+  // Filters
   const [ticketSearch, setTicketSearch] = useState('');
   const [selectedEventFilter, setSelectedEventFilter] = useState('all');
-  const [showCandidateModal, setShowCandidateModal] = useState(null); // Holds contest object
-  
-  // Payout/Onboarding State
+
+  // Payout/Onboarding Form State
   const [paystackConfig, setPaystackConfig] = useState({
     businessName: "",
     bankCode: "",
@@ -46,96 +55,111 @@ export default function OrganizerDashboard() {
     isVerified: false
   });
 
-  // Candidate Creation State
-  const [newCandidate, setNewCandidate] = useState({ name: '', image_url: '' });
+  // Candidate Creation Form State
+  const [newCandidate, setNewCandidate] = useState({ name: '', image_url: '', bio: '' });
+
+  // Competition Edit Form State
+  const [editCompForm, setEditCompForm] = useState({ title: '', description: '', category: '' });
 
   // --- 3. DATA ENGINE ---
-const loadDashboardData = useCallback(async (isSilent = false) => {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second hard limit
+  const loadDashboardData = useCallback(async (isSilent = false) => {
+    // Abort controller to prevent hanging requests
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s hard limit
 
-  try {
-    if (!isSilent) setLoading(true);
-    else setRefreshing(true);
+    try {
+      if (!isSilent) setLoading(true);
+      else setRefreshing(true);
 
-    // 1. Auth Check with error handling for network failure
-    const { data: authData, error: authError } = await supabase.auth.getUser().catch(err => {
-      console.error("Network failed to reach Supabase:", err);
-      return { data: { user: null }, error: err };
-    });
+      // 1. Auth Check
+      const { data: authData, error: authError } = await supabase.auth.getUser();
 
-    clearTimeout(timeoutId);
+      if (authError || !authData?.user) {
+        console.log("No valid session found, redirecting...");
+        router.push('/login');
+        return;
+      }
 
-    if (authError || !authData?.user) {
-      console.log("No valid session found, redirecting...");
-      router.push('/login');
-      return;
-    }
+      const user = authData.user;
 
-    const user = authData.user;
+      // 2. Parallel Data Fetching
+      // We use contests table but map it to 'competitions' in UI
+      const [profileRes, eventsRes, compsRes, ticketsRes, candidatesRes] = await Promise.allSettled([
+        supabase.from('profiles').select('*').eq('id', user.id).single(),
+        supabase.from('events').select('*').eq('organizer_id', user.id).order('created_at', { ascending: false }),
+        supabase.from('contests').select('*').eq('organizer_id', user.id).order('created_at', { ascending: false }),
+        supabase.from('tickets').select('*, events!inner(title, organizer_id)').eq('events.organizer_id', user.id),
+        supabase.from('candidates').select('*')
+      ]);
 
-    // 2. Fetch data in parallel but handle individual failures
-    const [profileRes, eventsRes, contestsRes, ticketsRes, candidatesRes] = await Promise.allSettled([
-      supabase.from('profiles').select('*').eq('id', user.id).single(),
-      supabase.from('events').select('*').eq('organizer_id', user.id).order('created_at', { ascending: false }),
-      supabase.from('contests').select('*').eq('organizer_id', user.id),
-      supabase.from('tickets').select('*, events!inner(title, organizer_id)').eq('events.organizer_id', user.id),
-      supabase.from('candidates').select('*')
-    ]);
+      clearTimeout(timeoutId);
 
-    // Helper to get data safely from settled promises
-    const getRes = (res) => (res.status === 'fulfilled' ? res.value.data : []);
-    const getSingle = (res) => (res.status === 'fulfilled' ? res.value.data : null);
+      // Helper to extract data safely
+      const getRes = (res) => (res.status === 'fulfilled' ? res.value.data : []);
+      const getSingle = (res) => (res.status === 'fulfilled' ? res.value.data : null);
 
-    const profileData = getSingle(profileRes);
-    const eventsData = getRes(eventsRes);
-    const contestsData = getRes(contestsRes);
-    const ticketsData = getRes(ticketsRes);
-    const candidatesData = getRes(candidatesRes);
+      const profileData = getSingle(profileRes);
+      const eventsData = getRes(eventsRes);
+      const compsData = getRes(compsRes);
+      const ticketsData = getRes(ticketsRes);
+      const candidatesData = getRes(candidatesRes);
 
-    // 3. Map Data
-    const finalContests = (contestsData || []).map(contest => ({
-      ...contest,
-      candidates: (candidatesData || []).filter(c => c.contest_id === contest.id)
-    }));
+      // 3. Data Mapping & Relations
+      // Attach candidates to their respective competitions
+      const finalCompetitions = (compsData || []).map(comp => ({
+        ...comp,
+        candidates: (candidatesData || []).filter(c => c.contest_id === comp.id)
+      }));
 
-    setData({
-      events: eventsData || [],
-      contests: finalContests,
-      tickets: ticketsData || [],
-      profile: { ...user, ...profileData }
-    });
-
-    if (profileData?.paystack_subaccount_code) {
-      setPaystackConfig({
-        businessName: profileData.business_name || "",
-        bankCode: profileData.bank_code || "",
-        accountNumber: profileData.account_number || "",
-        subaccountCode: profileData.paystack_subaccount_code,
-        isVerified: true
+      setData({
+        events: eventsData || [],
+        competitions: finalCompetitions,
+        tickets: ticketsData || [],
+        profile: { ...user, ...profileData }
       });
-    }
 
-  } catch (err) {
-    console.error("Dashboard engine crashed:", err);
-  } finally {
-    setLoading(false);
-    setRefreshing(false);
-  }
-}, [router]);
+      // 4. Populate Onboarding State
+      if (profileData) {
+        setPaystackConfig({
+          businessName: profileData.business_name || "",
+          bankCode: profileData.bank_code || "",
+          accountNumber: profileData.account_number || "",
+          subaccountCode: profileData.paystack_subaccount_code || "",
+          isVerified: !!profileData.paystack_subaccount_code
+        });
+      }
+
+    } catch (err) {
+      console.error("Dashboard engine crashed:", err);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [router]);
+
+  // Initial Load
+  useEffect(() => {
+    loadDashboardData();
+  }, [loadDashboardData]);
+
+
   // --- 4. COMPUTED ANALYTICS (95/5 SPLIT) ---
   const stats = useMemo(() => {
     const totalGross = data.tickets.reduce((acc, t) => acc + (parseFloat(t.amount) || 0), 0);
-    const totalVotes = data.contests.reduce((acc, c) => 
+    
+    // Vote calculation
+    const totalVotes = data.competitions.reduce((acc, c) => 
       acc + (c.candidates?.reduce((sum, cand) => sum + (parseInt(cand.vote_count) || 0), 0) || 0), 0);
+    
     const scannedCount = data.tickets.filter(t => t.is_scanned).length;
     
     return {
       totalGross,
-      organizerShare: totalGross * 0.95,
-      platformFee: totalGross * 0.05,
+      organizerShare: totalGross * 0.95, // 95% to Organizer
+      platformFee: totalGross * 0.05,    // 5% Platform Fee
       ticketCount: data.tickets.length,
       activeEvents: data.events.length,
+      activeComps: data.competitions.length,
       totalVotes,
       avgTicketValue: data.tickets.length ? totalGross / data.tickets.length : 0,
       checkInRate: data.tickets.length ? Math.round((scannedCount / data.tickets.length) * 100) : 0
@@ -151,6 +175,7 @@ const loadDashboardData = useCallback(async (isSilent = false) => {
     });
   }, [data.tickets, ticketSearch, selectedEventFilter]);
 
+
   // --- 5. ACTION HANDLERS ---
   const handleLogout = async () => {
     await supabase.auth.signOut();
@@ -164,6 +189,7 @@ const loadDashboardData = useCallback(async (isSilent = false) => {
     setTimeout(() => setCopying(null), 2000);
   };
 
+  // Payout Onboarding Save
   const saveOnboardingDetails = async () => {
     setIsProcessing(true);
     try {
@@ -171,10 +197,15 @@ const loadDashboardData = useCallback(async (isSilent = false) => {
         business_name: paystackConfig.businessName,
         bank_code: paystackConfig.bankCode,
         account_number: paystackConfig.accountNumber,
+        // In a real app, this triggers a backend function to create the Paystack Subaccount
+        updated_at: new Date().toISOString()
       }).eq('id', data.profile.id);
+
       if (error) throw error;
+      
       setShowSettingsModal(false);
-      loadDashboardData(true);
+      loadDashboardData(true); // Silent refresh
+      alert("Settings saved. Verifying with Paystack...");
     } catch (err) {
       alert("Update failed. Please check your connection.");
     } finally {
@@ -182,15 +213,21 @@ const loadDashboardData = useCallback(async (isSilent = false) => {
     }
   };
 
-  const addCandidate = async (contestId) => {
+  // Add Candidate
+  const addCandidate = async (compId) => {
     if (!newCandidate.name) return;
     setIsProcessing(true);
     try {
       const { error } = await supabase.from('candidates').insert([
-        { contest_id: contestId, name: newCandidate.name, image_url: newCandidate.image_url, vote_count: 0 }
+        { 
+          contest_id: compId, 
+          name: newCandidate.name, 
+          image_url: newCandidate.image_url, 
+          vote_count: 0 
+        }
       ]);
       if (error) throw error;
-      setNewCandidate({ name: '', image_url: '' });
+      setNewCandidate({ name: '', image_url: '', bio: '' });
       setShowCandidateModal(null);
       loadDashboardData(true);
     } catch (err) {
@@ -200,28 +237,70 @@ const loadDashboardData = useCallback(async (isSilent = false) => {
     }
   };
 
+  // Edit Competition
+  const openEditCompModal = (comp) => {
+    setEditCompForm({
+      title: comp.title,
+      description: comp.description || '',
+      category: comp.category || ''
+    });
+    setShowEditCompModal(comp);
+  };
+
+  const saveCompEdit = async () => {
+    setIsProcessing(true);
+    try {
+      const { error } = await supabase.from('contests')
+        .update({ 
+          title: editCompForm.title,
+          description: editCompForm.description,
+          // If you have a category column, update it here. 
+          // If not, you might store it in description or a metadata json column
+        })
+        .eq('id', showEditCompModal.id);
+
+      if (error) throw error;
+      setShowEditCompModal(null);
+      loadDashboardData(true);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to update competition.");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // --- 6. LOADING SKELETON ---
   if (loading) return (
-    <div style={fullPageCenter}>
-      <div style={shimmerLogo}>OUSTED</div>
-      <Loader2 className="animate-spin" size={32} color="#000"/>
-      <p style={loadingText}>PREPARING YOUR LUXURY DASHBOARD...</p>
+    <div style={skeletonStyles.wrapper}>
+       <div style={skeletonStyles.header}>
+          <div style={skeletonStyles.block(200, 40)}></div>
+          <div style={skeletonStyles.block(50, 50, '50%')}></div>
+       </div>
+       <div style={skeletonStyles.hero}></div>
+       <div style={skeletonStyles.grid}>
+         {[1,2,3].map(i => <div key={i} style={skeletonStyles.card}></div>)}
+       </div>
+       <p style={loadingText}>SYNCING LUXURY ASSETS...</p>
     </div>
   );
 
+  // --- 7. RENDER DASHBOARD ---
   return (
     <div style={mainWrapper}>
+      
       {/* HEADER SECTION */}
       <div style={topNav}>
         <div>
           <h1 style={logoText}>OUSTED <span style={badgeLuxury}>ORGANIZER</span></h1>
-          <p style={subLabel}>System v2.0 • Luxury Event Management</p>
+          <p style={subLabel}>System v2.5 • Luxury Event Management</p>
         </div>
         <div style={headerActions}>
            <div style={userBrief}>
              <p style={userEmail}>{data.profile?.email}</p>
              <div style={onboardingBadge(paystackConfig.subaccountCode)}>
                <div style={dot(paystackConfig.subaccountCode)}></div>
-               {paystackConfig.subaccountCode ? 'PAYSTACK SPLITS ACTIVE (95/5)' : 'PENDING ONBOARDING'}
+               {paystackConfig.subaccountCode ? 'PAYOUTS ACTIVE (95/5)' : 'ACTION REQUIRED: SETUP PAYOUT'}
              </div>
            </div>
            <button style={circleAction} onClick={() => loadDashboardData(true)}>
@@ -244,11 +323,14 @@ const loadDashboardData = useCallback(async (isSilent = false) => {
             <div style={iconCircleGold}><Sparkles size={24} color="#d4af37"/></div>
           </div>
           <div style={statsRow}>
-            <div style={miniStat}><TrendingUp size={14}/> <span>Payouts automated</span></div>
-            <div style={autoPayoutTag}><Zap size={14} fill="#0ea5e9"/> Paystack Subaccount {paystackConfig.subaccountCode ? 'Active' : 'Missing'}</div>
+            <div style={miniStat}><TrendingUp size={14}/> <span>Automatic Settlement</span></div>
+            <div style={autoPayoutTag}>
+              <Zap size={14} fill={paystackConfig.subaccountCode ? "#0ea5e9" : "#ccc"}/> 
+              {paystackConfig.subaccountCode ? 'Paystack Connected' : 'Payouts Paused'}
+            </div>
           </div>
           <button style={settingsIconBtn} onClick={() => setShowSettingsModal(true)}>
-            <Wallet size={16}/> SETTINGS & BANK SETUP
+            <Wallet size={16}/> EDIT PAYOUT & BANK SETTINGS
           </button>
         </div>
 
@@ -259,9 +341,9 @@ const loadDashboardData = useCallback(async (isSilent = false) => {
             <h3 style={statVal}>{stats.ticketCount}</h3>
           </div>
           <div style={glassStatCard}>
-            <div style={glassHeader}><Users size={20} color="#8b5cf6"/><span style={statPercent}>Hot</span></div>
-            <p style={statLabel}>TOTAL VOTES</p>
-            <h3 style={statVal}>{stats.totalVotes.toLocaleString()}</h3>
+            <div style={glassHeader}><Trophy size={20} color="#8b5cf6"/><span style={statPercent}>Hot</span></div>
+            <p style={statLabel}>COMPETITIONS</p>
+            <h3 style={statVal}>{stats.activeComps}</h3>
           </div>
           <div style={glassStatCard}>
             <div style={glassHeader}><BarChart3 size={20} color="#f59e0b"/><span style={statPercent}>Active</span></div>
@@ -276,9 +358,9 @@ const loadDashboardData = useCallback(async (isSilent = false) => {
         </div>
       </div>
 
-      {/* NAVIGATION TABS (Strict Order) */}
+      {/* NAVIGATION TABS */}
       <div style={tabBar}>
-        {['events', 'sales', 'contests', 'analytics'].map((tab) => (
+        {['events', 'sales', 'competitions', 'analytics'].map((tab) => (
           <button key={tab} onClick={() => setActiveTab(tab)} style={tabItem(activeTab === tab)}>
             {tab.toUpperCase()}
           </button>
@@ -320,14 +402,15 @@ const loadDashboardData = useCallback(async (isSilent = false) => {
                     </div>
                     <div style={cardActionRow}>
                       <button style={fullWidthBtn} onClick={() => { setSelectedEventFilter(event.id); setActiveTab('sales'); }}>
-                        SALES LEDGER
+                        VIEW SALES LEDGER
                       </button>
+                      {/* Placeholder for edit event logic */}
                       <button style={editBtnCircle}><Edit3 size={18}/></button>
                     </div>
                   </div>
                 </div>
               ))}
-              {data.events.length === 0 && <div style={emptyState}>No events created yet.</div>}
+              {data.events.length === 0 && <div style={emptyState}>No events created yet. Start by clicking the button above.</div>}
             </div>
           </div>
         )}
@@ -381,52 +464,75 @@ const loadDashboardData = useCallback(async (isSilent = false) => {
                   ))}
                 </tbody>
               </table>
-              {filteredTickets.length === 0 && <div style={emptyTableState}>No sales records found.</div>}
+              {filteredTickets.length === 0 && <div style={emptyTableState}>No sales records found matching your filters.</div>}
             </div>
           </div>
         )}
 
-        {/* 3. CONTESTS VIEW (With Candidate Management) */}
-        {activeTab === 'contests' && (
+        {/* 3. COMPETITIONS VIEW (Renamed from Contests) */}
+        {activeTab === 'competitions' && (
           <div style={fadeAnim}>
              <div style={sectionTitleRow}>
-                <h2 style={viewTitle}>Contest Management</h2>
-                <button style={addBtn} onClick={() => router.push('/dashboard/organizer/contests/create')}>
-                  <Plus size={20}/> NEW CATEGORY
+                <div>
+                   <h2 style={viewTitle}>Competitions & Voting</h2>
+                   <p style={subLabel} style={{marginTop:'5px'}}>Manage categories, nominees, and monitor real-time votes.</p>
+                </div>
+                <button style={addBtn} onClick={() => router.push('/voting/create')}>
+                  <Plus size={20}/> CREATE COMPETITION
                 </button>
              </div>
+             
              <div style={contestGrid}>
-                {data.contests.map(contest => {
-                  const sortedCandidates = [...(contest.candidates || [])].sort((a,b) => b.vote_count - a.vote_count);
+                {data.competitions.map(comp => {
+                  const sortedCandidates = [...(comp.candidates || [])].sort((a,b) => b.vote_count - a.vote_count);
+                  
                   return (
-                    <div key={contest.id} style={contestCard}>
+                    <div key={comp.id} style={contestCard}>
                        <div style={contestHeader}>
-                          <div>
-                            <h3 style={{margin:0, fontSize: '18px', fontWeight: 900}}>{contest.title}</h3>
-                            <p style={perfSub}>{contest.candidates?.length || 0} Candidates Participated</p>
+                          <div style={{flex: 1}}>
+                            <div style={badgeLuxuryAlt}>COMPETITION</div>
+                            <h3 style={{margin:'10px 0 5px', fontSize: '20px', fontWeight: 900}}>{comp.title}</h3>
+                            <p style={perfSub}>{comp.description || 'No description provided.'}</p>
+                            <div style={{display:'flex', gap:'10px', marginTop:'10px'}}>
+                                <span style={metaTag}>{sortedCandidates.length} Nominees</span>
+                                <span style={metaTag}>Category: {comp.category || 'General'}</span>
+                            </div>
                           </div>
-                          <button style={miniAction} onClick={() => setShowCandidateModal(contest)}>
-                             <UserPlus size={16}/>
-                          </button>
+                          <div style={{display:'flex', flexDirection:'column', gap:'8px'}}>
+                             <button style={miniAction} onClick={() => openEditCompModal(comp)} title="Edit Details">
+                                <Edit3 size={16}/>
+                             </button>
+                             <button style={miniAction} onClick={() => setShowCandidateModal(comp)} title="Add Candidate">
+                                <UserPlus size={16}/>
+                             </button>
+                             <button style={miniAction} onClick={() => copyLink('voting', comp.id)} title="Copy Link">
+                                {copying === comp.id ? <Check size={16} color="green"/> : <LinkIcon size={16}/>}
+                             </button>
+                          </div>
                        </div>
+                       
+                       <div style={divider}></div>
+                       
                        <div style={candidateList}>
+                          <p style={{fontSize:'12px', fontWeight:800, color:'#94a3b8', marginBottom:'15px', letterSpacing:'1px'}}>LEADERBOARD</p>
                           {sortedCandidates.length > 0 ? sortedCandidates.map((cand, idx) => (
                             <div key={cand.id} style={candidateRow}>
-                               <span style={rankNum}>0{idx + 1}</span>
+                               <span style={rankNum}>#{idx + 1}</span>
                                <div style={candInfo}>
                                   <p style={candName}>{cand.name}</p>
-                                  <p style={candVotes}>{cand.vote_count} VOTES</p>
+                                  <div style={voteBarContainer}>
+                                     <div style={voteBarFill(idx === 0 ? 100 : (cand.vote_count / (sortedCandidates[0]?.vote_count || 1)) * 100)}></div>
+                                  </div>
                                </div>
-                               <div style={voteBarContainer}>
-                                  <div style={voteBarFill(idx === 0 ? 100 : (cand.vote_count / (sortedCandidates[0]?.vote_count || 1)) * 100)}></div>
-                               </div>
+                               <p style={candVotes}>{cand.vote_count}</p>
                             </div>
-                          )) : <div style={emptySmall}>No candidates added. Click the + icon.</div>}
+                          )) : <div style={emptySmall}>No nominees yet. Click the <UserPlus size={12}/> icon to add one.</div>}
                        </div>
                     </div>
                   );
                 })}
              </div>
+             {data.competitions.length === 0 && <div style={emptyState}>No competitions created. Click "Create Competition" to start.</div>}
           </div>
         )}
 
@@ -459,7 +565,7 @@ const loadDashboardData = useCallback(async (isSilent = false) => {
                           </div>
                        </div>
                        <div style={perfFooter}>
-                          <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '8px'}}>
+                          <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '12px', fontWeight: 600}}>
                              <span>Check-in Progress</span>
                              <span>{rate}% ({scanned}/{eventSales.length})</span>
                           </div>
@@ -473,9 +579,9 @@ const loadDashboardData = useCallback(async (isSilent = false) => {
         )}
       </div>
 
-      {/* MODALS SECTION */}
+      {/* --- MODALS SECTION --- */}
 
-      {/* 1. SETTINGS MODAL (Onboarding) */}
+      {/* 1. SETTINGS / ONBOARDING MODAL */}
       {showSettingsModal && (
         <div style={overlay} onClick={() => setShowSettingsModal(false)}>
           <div style={modal} onClick={e => e.stopPropagation()}>
@@ -500,6 +606,7 @@ const loadDashboardData = useCallback(async (isSilent = false) => {
                   <option value="VOD">Telecel (Vodafone) Cash</option>
                   <option value="058">GT Bank</option>
                   <option value="044">Access Bank</option>
+                  <option value="011">Zenith Bank</option>
                 </select>
               </div>
               <div style={inputStack}>
@@ -519,7 +626,7 @@ const loadDashboardData = useCallback(async (isSilent = false) => {
         <div style={overlay} onClick={() => setShowCandidateModal(null)}>
           <div style={modal} onClick={e => e.stopPropagation()}>
             <div style={modalHead}>
-              <h2 style={modalTitle}>Add Candidate</h2>
+              <h2 style={modalTitle}>Add Nominee</h2>
               <button style={closeBtn} onClick={() => setShowCandidateModal(null)}><X size={20}/></button>
             </div>
             <p style={{fontSize: '13px', color: '#64748b', marginBottom: '20px'}}>Adding to: <strong>{showCandidateModal.title}</strong></p>
@@ -533,14 +640,43 @@ const loadDashboardData = useCallback(async (isSilent = false) => {
                   <input style={modalInput} value={newCandidate.image_url} onChange={(e) => setNewCandidate({...newCandidate, image_url: e.target.value})} placeholder="https://..."/>
                </div>
                <button style={actionSubmitBtn(isProcessing)} onClick={() => addCandidate(showCandidateModal.id)} disabled={isProcessing}>
-                  {isProcessing ? 'ADDING...' : 'ADD TO CONTEST'}
+                  {isProcessing ? 'ADDING...' : 'ADD TO COMPETITION'}
                </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* 3. QR PREVIEW MODAL */}
+      {/* 3. EDIT COMPETITION MODAL */}
+      {showEditCompModal && (
+        <div style={overlay} onClick={() => setShowEditCompModal(null)}>
+          <div style={modal} onClick={e => e.stopPropagation()}>
+             <div style={modalHead}>
+              <h2 style={modalTitle}>Edit Competition</h2>
+              <button style={closeBtn} onClick={() => setShowEditCompModal(null)}><X size={20}/></button>
+             </div>
+             <div style={modalBody}>
+                <div style={inputStack}>
+                   <label style={fieldLabel}>TITLE</label>
+                   <input style={modalInput} value={editCompForm.title} onChange={(e) => setEditCompForm({...editCompForm, title: e.target.value})} />
+                </div>
+                <div style={inputStack}>
+                   <label style={fieldLabel}>DESCRIPTION</label>
+                   <textarea style={{...modalInput, height: '80px', resize:'none'}} value={editCompForm.description} onChange={(e) => setEditCompForm({...editCompForm, description: e.target.value})} />
+                </div>
+                <div style={inputStack}>
+                   <label style={fieldLabel}>CATEGORY</label>
+                   <input style={modalInput} value={editCompForm.category} onChange={(e) => setEditCompForm({...editCompForm, category: e.target.value})} placeholder="e.g. Music, Fashion"/>
+                </div>
+                <button style={actionSubmitBtn(isProcessing)} onClick={saveCompEdit} disabled={isProcessing}>
+                  {isProcessing ? 'SAVING...' : 'UPDATE DETAILS'}
+                </button>
+             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 4. QR PREVIEW MODAL */}
       {showQR && (
         <div style={overlay} onClick={() => setShowQR(null)}>
           <div style={modal} onClick={e => e.stopPropagation()}>
@@ -559,11 +695,27 @@ const loadDashboardData = useCallback(async (isSilent = false) => {
   );
 }
 
-// --- LUXURY STYLES (TRIPLE CHECKED) ---
+// --- LUXURY STYLES ---
+
+// Skeleton Styles
+const skeletonStyles = {
+  wrapper: { height: '100vh', display: 'flex', flexDirection: 'column', padding: '50px 30px', background: '#fcfcfc', maxWidth: '1440px', margin: '0 auto' },
+  header: { display: 'flex', justifyContent: 'space-between', marginBottom: '60px' },
+  block: (w, h, r = '12px') => ({ width: w, height: h, background: '#eee', borderRadius: r, animation: 'pulse 1.5s infinite ease-in-out' }),
+  hero: { width: '100%', height: '250px', background: '#e0e0e0', borderRadius: '30px', marginBottom: '60px', animation: 'pulse 1.5s infinite ease-in-out' },
+  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '30px' },
+  card: { height: '300px', background: '#f5f5f5', borderRadius: '24px', animation: 'pulse 1.5s infinite ease-in-out' }
+};
+
+// CSS Injection for Skeleton Animation
+if (typeof document !== 'undefined') {
+  const styleSheet = document.createElement("style");
+  styleSheet.innerText = `@keyframes pulse { 0% { opacity: 0.6; } 50% { opacity: 1; } 100% { opacity: 0.6; } }`;
+  document.head.appendChild(styleSheet);
+}
+
 const mainWrapper = { padding: '50px 30px', maxWidth: '1440px', margin: '0 auto', background: '#fcfcfc', minHeight: '100vh', fontFamily: 'Inter, sans-serif' };
-const fullPageCenter = { height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#fff' };
-const shimmerLogo = { fontSize: '32px', fontWeight: 950, letterSpacing: '-2px', marginBottom: '10px' };
-const loadingText = { fontSize: '12px', fontWeight: 800, color: '#94a3b8', letterSpacing: '2px' };
+const loadingText = { fontSize: '12px', fontWeight: 800, color: '#94a3b8', letterSpacing: '2px', textAlign: 'center', marginTop: '20px' };
 const topNav = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '60px' };
 const logoText = { fontSize: '30px', fontWeight: 950, letterSpacing: '-2px', margin: 0 };
 const badgeLuxury = { background: '#000', color: '#fff', fontSize: '10px', padding: '5px 12px', borderRadius: '4px', verticalAlign: 'middle', marginLeft: '10px' };
@@ -598,7 +750,7 @@ const viewPort = { minHeight: '600px' };
 const fadeAnim = { animation: 'fadeIn 0.6s ease' };
 const viewHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '40px' };
 const viewTitle = { margin: 0, fontSize: '24px', fontWeight: 950, letterSpacing: '-1px' };
-const addBtn = { background: '#000', color: '#fff', border: 'none', padding: '14px 28px', borderRadius: '14px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px' };
+const addBtn = { background: '#000', color: '#fff', border: 'none', padding: '14px 28px', borderRadius: '14px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px', fontSize: '12px' };
 const cardGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '30px' };
 const itemCard = { background: '#fff', borderRadius: '24px', border: '1px solid #f0f0f0', overflow: 'hidden', transition: '0.3s' };
 const itemImage = (url) => ({ height: '240px', background: url ? `url(${url}) center/cover` : '#f8f8f8', position: 'relative' });
@@ -610,59 +762,62 @@ const itemTitle = { margin: '0 0 12px', fontSize: '18px', fontWeight: 900 };
 const itemMeta = { display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '25px' };
 const metaLine = { display: 'flex', alignItems: 'center', gap: '10px', fontSize: '13px', color: '#64748b', fontWeight: 600 };
 const cardActionRow = { display: 'flex', gap: '10px' };
-const fullWidthBtn = { flex: 1, background: '#f5f5f5', color: '#000', border: 'none', padding: '14px', borderRadius: '12px', fontWeight: 800, fontSize: '11px', cursor: 'pointer' };
-const editBtnCircle = { width: '48px', height: '48px', borderRadius: '12px', border: '1px solid #eee', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
-const filterGroup = { display: 'flex', gap: '15px' };
-const searchBox = { display: 'flex', alignItems: 'center', background: '#fff', border: '1px solid #eee', borderRadius: '12px', padding: '0 15px' };
-const searchInputField = { border: 'none', padding: '12px', outline: 'none', fontSize: '14px', width: '220px' };
-const eventDropdown = { border: '1px solid #eee', borderRadius: '12px', padding: '0 15px', fontWeight: 700, fontSize: '13px' };
-const outlineBtn = { display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 20px', borderRadius: '12px', border: '1px solid #eee', background: '#fff', fontWeight: 800, fontSize: '12px', cursor: 'pointer' };
+const fullWidthBtn = { flex: 1, padding: '12px', background: '#000', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 800, fontSize: '11px', cursor: 'pointer' };
+const editBtnCircle = { width: '40px', height: '40px', borderRadius: '12px', border: '1px solid #eee', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
+const emptyState = { gridColumn: '1/-1', textAlign: 'center', padding: '60px', color: '#94a3b8', border: '2px dashed #eee', borderRadius: '24px' };
+const filterGroup = { display: 'flex', gap: '15px', alignItems: 'center' };
+const searchBox = { display: 'flex', alignItems: 'center', gap: '10px', background: '#fff', border: '1px solid #e2e8f0', padding: '10px 15px', borderRadius: '12px' };
+const searchInputField = { border: 'none', outline: 'none', fontSize: '13px', fontWeight: 600, width: '150px' };
+const eventDropdown = { padding: '10px 15px', borderRadius: '12px', border: '1px solid #e2e8f0', background: '#fff', fontSize: '13px', fontWeight: 600, outline: 'none' };
+const outlineBtn = { display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 15px', border: '1px solid #e2e8f0', background: '#fff', borderRadius: '12px', fontSize: '11px', fontWeight: 800, cursor: 'pointer' };
 const tableWrapper = { background: '#fff', borderRadius: '24px', border: '1px solid #f0f0f0', overflow: 'hidden' };
 const dataTable = { width: '100%', borderCollapse: 'collapse' };
-const tableTh = { textAlign: 'left', padding: '20px', background: '#fafafa', fontSize: '10px', fontWeight: 900, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px' };
-const tableTr = { borderBottom: '1px solid #f9f9f9' };
-const tableTd = { padding: '20px', fontSize: '14px', verticalAlign: 'middle' };
+const tableTh = { textAlign: 'left', padding: '20px 25px', fontSize: '11px', fontWeight: 800, color: '#94a3b8', letterSpacing: '1px', borderBottom: '1px solid #f0f0f0' };
+const tableTr = { borderBottom: '1px solid #f8f8f8' };
+const tableTd = { padding: '20px 25px', fontSize: '13px', fontWeight: 600, color: '#334155' };
 const guestBold = { margin: 0, fontWeight: 800, color: '#000' };
-const guestMuted = { margin: 0, fontSize: '11px', color: '#94a3b8', fontWeight: 600 };
-const scannedPill = { background: '#fee2e2', color: '#ef4444', padding: '6px 12px', borderRadius: '6px', fontSize: '10px', fontWeight: 900 };
-const activePill = { background: '#f0fdf4', color: '#16a34a', padding: '6px 12px', borderRadius: '6px', fontSize: '10px', fontWeight: 900 };
-const contestGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(450px, 1fr))', gap: '30px' };
-const contestCard = { background: '#fff', borderRadius: '24px', padding: '35px', border: '1px solid #f0f0f0' };
-const contestHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '35px' };
-const perfSub = { margin: '4px 0 0', fontSize: '12px', color: '#94a3b8', fontWeight: 600 };
-const candidateList = { display: 'flex', flexDirection: 'column', gap: '20px' };
-const candidateRow = { display: 'grid', gridTemplateColumns: '40px 1.2fr 150px', alignItems: 'center', gap: '20px' };
-const rankNum = { fontWeight: 950, color: '#eee', fontSize: '20px' };
-const candInfo = { overflow: 'hidden' };
-const candName = { margin: 0, fontWeight: 800, fontSize: '15px' };
-const candVotes = { margin: 0, fontSize: '11px', color: '#94a3b8', fontWeight: 700 };
-const voteBarContainer = { height: '8px', background: '#f5f5f5', borderRadius: '10px', overflow: 'hidden' };
-const voteBarFill = (w) => ({ width: `${w}%`, height: '100%', background: '#000', borderRadius: '10px' });
-const overlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 };
-const modal = { background: '#fff', width: '90%', maxWidth: '450px', borderRadius: '30px', padding: '45px', boxShadow: '0 30px 60px rgba(0,0,0,0.2)' };
-const modalHead = { display: 'flex', justifyContent: 'space-between', marginBottom: '35px' };
-const modalTitle = { margin: 0, fontSize: '24px', fontWeight: 950, letterSpacing: '-1px' };
+const guestMuted = { margin: 0, fontSize: '11px', color: '#94a3b8', marginTop: '4px' };
+const scannedPill = { background: '#f0fdf4', color: '#16a34a', padding: '6px 12px', borderRadius: '20px', fontSize: '10px', fontWeight: 900 };
+const activePill = { background: '#f0f9ff', color: '#0ea5e9', padding: '6px 12px', borderRadius: '20px', fontSize: '10px', fontWeight: 900 };
+const emptyTableState = { padding: '60px', textAlign: 'center', color: '#94a3b8', fontSize: '13px' };
+const contestGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(400px, 1fr))', gap: '30px' };
+const contestCard = { background: '#fff', borderRadius: '30px', border: '1px solid #f0f0f0', overflow: 'hidden', padding: '30px', display: 'flex', flexDirection: 'column' };
+const contestHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '25px' };
+const badgeLuxuryAlt = { fontSize: '10px', fontWeight: 900, background: '#000', color: '#fff', display: 'inline-block', padding: '4px 10px', borderRadius: '6px' };
+const perfSub = { margin: 0, fontSize: '13px', color: '#64748b', lineHeight: '1.5' };
+const metaTag = { fontSize: '11px', fontWeight: 700, color: '#64748b', background: '#f1f5f9', padding: '4px 10px', borderRadius: '6px' };
+const divider = { height: '1px', background: '#f1f5f9', width: '100%', marginBottom: '25px' };
+const candidateList = { display: 'flex', flexDirection: 'column', gap: '15px' };
+const candidateRow = { display: 'flex', alignItems: 'center', gap: '15px' };
+const rankNum = { fontSize: '14px', fontWeight: 900, color: '#cbd5e1', width: '30px' };
+const candInfo = { flex: 1 };
+const candName = { margin: '0 0 6px', fontSize: '13px', fontWeight: 700 };
+const voteBarContainer = { height: '6px', background: '#f1f5f9', borderRadius: '3px', overflow: 'hidden' };
+const voteBarFill = (pct) => ({ height: '100%', width: `${pct}%`, background: '#000', borderRadius: '3px' });
+const candVotes = { fontSize: '12px', fontWeight: 900, width: '60px', textAlign: 'right' };
+const emptySmall = { fontSize: '12px', color: '#94a3b8', textAlign: 'center', padding: '20px', background: '#f8fafc', borderRadius: '12px' };
+const sectionTitleRow = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' };
+const activityBadge = { display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: 800, color: '#16a34a', background: '#f0fdf4', padding: '6px 12px', borderRadius: '20px' };
+const analyticsGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '20px' };
+const eventPerformanceCard = { background: '#fff', border: '1px solid #f0f0f0', borderRadius: '24px', padding: '25px' };
+const perfHeader = { display: 'flex', justifyContent: 'space-between', marginBottom: '20px' };
+const perfName = { margin: 0, fontSize: '15px', fontWeight: 800 };
+const perfTag = { fontSize: '10px', fontWeight: 800, color: '#94a3b8', border: '1px solid #eee', padding: '4px 8px', borderRadius: '6px' };
+const perfMain = { marginBottom: '25px' };
+const perfLabel = { fontSize: '12px', color: '#64748b', margin: '0 0 5px' };
+const perfValue = { fontSize: '24px', fontWeight: 900, margin: '0 0 10px', letterSpacing: '-1px' };
+const shareRow = { display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#16a34a', fontWeight: 700, background: '#f0fdf4', padding: '8px 12px', borderRadius: '8px' };
+const perfFooter = { marginTop: 'auto' };
+const progressBar = { height: '8px', background: '#f1f5f9', borderRadius: '4px', overflow: 'hidden' };
+const progressFill = (pct) => ({ height: '100%', width: `${pct}%`, background: '#16a34a' });
+const overlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, backdropFilter: 'blur(5px)' };
+const modal = { background: '#fff', width: '450px', borderRadius: '30px', padding: '30px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)' };
+const modalHead = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' };
+const modalTitle = { margin: 0, fontSize: '20px', fontWeight: 900 };
 const closeBtn = { background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' };
-const onboardingPromo = { background: '#f0f9ff', padding: '20px', borderRadius: '16px', display: 'flex', alignItems: 'center', gap: '15px', marginBottom: '35px' };
-const modalBody = { display: 'flex', flexDirection: 'column', gap: '25px' };
-const inputStack = { display: 'flex', flexDirection: 'column', gap: '10px' };
-const fieldLabel = { fontSize: '10px', fontWeight: 900, color: '#94a3b8', marginLeft: '5px' };
-const modalInput = { padding: '16px', borderRadius: '14px', border: '1px solid #eee', fontSize: '14px', fontWeight: 600, outline: 'none' };
-const actionSubmitBtn = (dis) => ({ background: dis ? '#eee' : '#000', color: '#fff', padding: '18px', borderRadius: '16px', border: 'none', fontWeight: 800, fontSize: '14px', cursor: 'pointer', marginTop: '10px' });
-const analyticsGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(380px, 1fr))', gap: '30px' };
-const eventPerformanceCard = { background: '#fff', borderRadius: '24px', padding: '35px', border: '1px solid #f0f0f0' };
-const perfHeader = { display: 'flex', justifyContent: 'space-between', marginBottom: '30px' };
-const perfName = { margin: 0, fontSize: '18px', fontWeight: 900 };
-const perfTag = { background: '#000', color: '#fff', padding: '5px 12px', borderRadius: '6px', fontSize: '10px', fontWeight: 900 };
-const perfMain = { marginBottom: '35px' };
-const perfLabel = { fontSize: '11px', color: '#94a3b8', marginBottom: '10px', fontWeight: 800, textTransform: 'uppercase' };
-const perfValue = { fontSize: '32px', fontWeight: 950, margin: 0 };
-const shareRow = { display: 'flex', justifyContent: 'space-between', marginTop: '15px', fontSize: '13px', color: '#16a34a', fontWeight: 700 };
-const perfFooter = { display: 'flex', flexDirection: 'column' };
-const progressBar = { height: '10px', background: '#f5f5f5', borderRadius: '10px', overflow: 'hidden' };
-const progressFill = (w) => ({ width: `${w}%`, height: '100%', background: '#0ea5e9' });
-const activityBadge = { display: 'flex', alignItems: 'center', gap: '10px', fontSize: '11px', fontWeight: 900, color: '#ef4444', background: '#fef2f2', padding: '6px 15px', borderRadius: '20px' };
-const sectionTitleRow = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '40px' };
-const emptyState = { gridColumn: '1/-1', textAlign: 'center', padding: '100px', color: '#94a3b8', fontWeight: 700 };
-const emptyTableState = { textAlign: 'center', padding: '50px', color: '#94a3b8', fontWeight: 600 };
-const emptySmall = { textAlign: 'center', padding: '20px', color: '#94a3b8', fontSize: '12px', border: '1px dashed #eee', borderRadius: '12px' };
+const onboardingPromo = { display: 'flex', gap: '15px', background: '#f0f9ff', padding: '15px', borderRadius: '16px', color: '#0ea5e9', marginBottom: '25px', alignItems: 'center' };
+const modalBody = { display: 'flex', flexDirection: 'column', gap: '20px' };
+const inputStack = { display: 'flex', flexDirection: 'column', gap: '8px' };
+const fieldLabel = { fontSize: '11px', fontWeight: 800, color: '#64748b', letterSpacing: '1px' };
+const modalInput = { padding: '14px', borderRadius: '12px', border: '1px solid #e2e8f0', fontSize: '14px', outline: 'none', fontWeight: 600, width: '100%' };
+const actionSubmitBtn = (loading) => ({ padding: '16px', background: loading ? '#94a3b8' : '#000', color: '#fff', border: 'none', borderRadius: '16px', fontWeight: 800, cursor: loading ? 'not-allowed' : 'pointer', fontSize: '13px', marginTop: '10px' });
