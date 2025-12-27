@@ -220,11 +220,6 @@ const categoryListStyle = {
   gap: '10px',
   marginTop: '30px' 
 };
-// ... existing code ...
-
-// UPDATE YOUR STYLES OBJECT AT THE BOTTOM
-const container = { maxWidth: '1000px', margin: '0 auto', padding: '140px 20px' };
-
 // ADD THESE THREE (to fix the current and previous ReferenceErrors)
 const categoryList = { 
   display: 'flex', 
