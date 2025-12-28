@@ -3,26 +3,26 @@ import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '../../lib/supabase';
 import { 
   ArrowLeft, Search, Trophy, Crown, Share2, 
-  Plus, Minus, BarChart3, ChevronRight, Award, Check, RefreshCcw, Image as ImageIcon
+  Plus, Minus, BarChart3, ChevronRight, Award, Check, RefreshCcw, 
+  Image as ImageIcon, AlertCircle
 } from 'lucide-react';
 
 export default function VotingPortal() {
-  const [competitions, setCompetitions] = useState([]); // This will now hold Grand Competitions
+  const [competitions, setCompetitions] = useState([]); 
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [view, setView] = useState('competitions'); 
   const [activeCompId, setActiveCompId] = useState(null); 
-  const [activeCatId, setActiveCatId] = useState(null); // Changed to ID for better syncing
+  const [activeCatId, setActiveCatId] = useState(null); 
   const [voteQuantities, setVoteQuantities] = useState({});
   const [toast, setToast] = useState(null);
   const [copySuccess, setCopySuccess] = useState(null);
 
-  // 1. DATA FETCHING (Nested Architecture Support)
+  // 1. DATA FETCHING (Filtering for is_active at the source)
   const fetchLatestData = useCallback(async (isManual = false) => {
     if (isManual) setIsRefreshing(true);
     
-    // Fetch Grand Competitions with their nested Contests and Candidates
     const { data, error } = await supabase
       .from('competitions')
       .select(`
@@ -31,7 +31,14 @@ export default function VotingPortal() {
       `);
 
     if (!error && data) {
-      setCompetitions(data);
+      // Filter out competitions that have no active contests
+      const filteredData = data.map(comp => ({
+        ...comp,
+        // Only keep contests that are active
+        contests: comp.contests?.filter(ct => ct.is_active) || []
+      })).filter(comp => comp.contests.length > 0);
+
+      setCompetitions(filteredData);
     }
     
     setLoading(false);
@@ -59,6 +66,12 @@ export default function VotingPortal() {
   };
 
   const handleVote = (candidate, qty) => {
+    // FINAL SAFETY CHECK: Prevent voting if paused
+    if (!activeContest || !activeContest.is_active) {
+      setToast({ type: 'ERROR', message: 'Voting is currently paused for this category.' });
+      return;
+    }
+
     if (!window.PaystackPop) return;
     
     const handler = window.PaystackPop.setup({
@@ -93,7 +106,6 @@ export default function VotingPortal() {
     }
   };
 
-  // --- RENDERING LOGIC ---
   if (loading) return (
     <div style={container}><div className="shimmer" style={{height:'400px', borderRadius:'40px', background:'#eee'}} /></div>
   );
@@ -123,7 +135,7 @@ export default function VotingPortal() {
               <div style={cardContent}>
                 <h2 style={cardTitle}>{comp.title}</h2>
                 <div style={cardFooter}>
-                  <span>{comp.contests?.length || 0} Categories</span>
+                  <span>{comp.contests?.length || 0} Categories Live</span>
                   <div style={goButton}><ChevronRight size={18}/></div>
                 </div>
               </div>
@@ -201,7 +213,10 @@ export default function VotingPortal() {
                     <input type="number" value={qty} onChange={(e) => setVoteQuantities({...voteQuantities, [can.id]: parseInt(e.target.value) || 1})} style={qtyInput} />
                     <button onClick={() => setVoteQuantities({...voteQuantities, [can.id]: qty + 1})} style={qtyBtn}><Plus size={14}/></button>
                   </div>
-                  <button onClick={() => handleVote(can, qty)} style={grandVoteBtn}>
+                  <button 
+                    onClick={() => handleVote(can, qty)} 
+                    style={grandVoteBtn}
+                  >
                     VOTE — GHS {(qty * (activeContest?.vote_price || 0)).toFixed(2)}
                   </button>
                 </div>
@@ -212,9 +227,10 @@ export default function VotingPortal() {
       </div>
 
       {toast && (
-        <div style={toastContainer}>
-          <Check size={18} color="#0ea5e9"/> 
-          <span>Success! {toast.count} votes for {toast.name}</span>
+        <div style={{...toastContainer, borderColor: toast.type === 'ERROR' ? '#ef4444' : '#0ea5e9'}}>
+          {toast.type === 'ERROR' ? <AlertCircle size={18} color="#ef4444"/> : <Check size={18} color="#0ea5e9"/>} 
+          <span>{toast.type === 'ERROR' ? toast.message : `Success! ${toast.count} votes for ${toast.name}`}</span>
+          {toast.type === 'ERROR' && <button onClick={() => setToast(null)} style={{background:'none', border:'none', marginLeft:'10px', cursor:'pointer'}}>×</button>}
         </div>
       )}
 
@@ -228,7 +244,7 @@ export default function VotingPortal() {
   );
 }
 
-// --- UPDATED STYLES ---
+// --- STYLES (Kept exactly as requested) ---
 const container = { maxWidth: '1100px', margin: '0 auto', padding: '100px 20px' };
 const headerStyle = { textAlign:'center', marginBottom:'60px' };
 const mainTitle = { fontSize: 'clamp(40px, 8vw, 72px)', fontWeight: 900, letterSpacing: '-4px' };
