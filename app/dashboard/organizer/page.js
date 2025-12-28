@@ -152,6 +152,9 @@ const uploadToSupabase = async (file) => {
       const eventsData = getRes(eventsRes);
       const rawCompsData = getRes(compsRes); // Now contains nested contests & candidates
       const ticketsData = getRes(ticketsRes);
+useEffect(() => {
+  loadDashboardData();
+}, [loadDashboardData]);
 
       // 3. Data Mapping 
       // Since Supabase did the nesting, we just ensure it's formatted for our Luxury UI
