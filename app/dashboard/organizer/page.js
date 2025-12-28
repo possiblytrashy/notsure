@@ -152,9 +152,7 @@ const uploadToSupabase = async (file) => {
       const eventsData = getRes(eventsRes);
       const rawCompsData = getRes(compsRes); // Now contains nested contests & candidates
       const ticketsData = getRes(ticketsRes);
-useEffect(() => {
-  loadDashboardData();
-}, [loadDashboardData]);
+
 
       // 3. Data Mapping 
       // Since Supabase did the nesting, we just ensure it's formatted for our Luxury UI
@@ -183,7 +181,9 @@ useEffect(() => {
       setRefreshing(false);
     }
   }, [router]);
-
+useEffect(() => {
+  loadDashboardData();
+}, [loadDashboardData]);
   // --- 4. COMPUTED ANALYTICS (95/5 SPLIT) ---
   const stats = useMemo(() => {
     const totalGross = data.tickets.reduce((acc, t) => acc + (parseFloat(t.amount) || 0), 0);
