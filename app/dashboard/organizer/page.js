@@ -292,56 +292,66 @@ useEffect(() => {
 
   // Updated Save function to handle file upload
 // --- MISSING ACTION HANDLERS TO FIX BUILD ---
-
+const [editCompForm, setEditCompForm] = useState({ 
+  title: '', 
+  description: '', 
+  category: '', 
+  vote_price: 1.00,
+  is_active: true, // This acts as the "Pause Voting" toggle
+  image_file: null,
+  image_url: '' 
+});
+  
   const saveCompEdit = async () => {
-    setIsProcessing(true);
-    try {
-      let finalImageUrl = editCompForm.image_url;
+  setIsProcessing(true);
+  try {
+    let finalImageUrl = editCompForm.image_url;
 
-      // Handle Image Upload if a new file was selected
-      if (editCompForm.image_file) {
-        const file = editCompForm.image_file;
-        const fileExt = file.name.split('.').pop();
-        const fileName = `${Math.random()}.${fileExt}`;
-        const filePath = `competition-images/${fileName}`;
+    // 1. Handle New Image Upload if selected
+    if (editCompForm.image_file) {
+      const file = editCompForm.image_file;
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Math.random()}.${fileExt}`;
+      const filePath = `competition-images/${fileName}`;
 
-        const { error: uploadError } = await supabase.storage
-          .from('event-assets')
-          .upload(filePath, file);
+      const { error: uploadError } = await supabase.storage
+        .from('event-assets')
+        .upload(filePath, file);
 
-        if (uploadError) throw uploadError;
+      if (uploadError) throw uploadError;
 
-        const { data: urlData } = supabase.storage
-          .from('event-assets')
-          .getPublicUrl(filePath);
-          
-        finalImageUrl = urlData.publicUrl;
-      }
-
-      const { error } = await supabase
-        .from('competitions')
-        .update({
-          title: editCompForm.title,
-          description: editCompForm.description,
-          category: editCompForm.category,
-          vote_price: editCompForm.vote_price,
-          is_active: editCompForm.is_active,
-          image_url: finalImageUrl,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', showEditCompModal.id);
-
-      if (error) throw error;
-      
-      setShowEditCompModal(null);
-      loadDashboardData(true);
-    } catch (err) {
-      console.error(err);
-      alert("Failed to update competition.");
-    } finally {
-      setIsProcessing(false);
+      const { data: urlData } = supabase.storage
+        .from('event-assets')
+        .getPublicUrl(filePath);
+        
+      finalImageUrl = urlData.publicUrl;
     }
-  };
+
+    // 2. Update Database (Deep Level)
+    const { error } = await supabase
+      .from('competitions')
+      .update({
+        title: editCompForm.title,
+        description: editCompForm.description,
+        category: editCompForm.category,
+        vote_price: editCompForm.vote_price,
+        is_active: editCompForm.is_active, // Toggle for pausing voting
+        image_url: finalImageUrl,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', showEditCompModal.id);
+
+    if (error) throw error;
+    
+    setShowEditCompModal(null);
+    loadDashboardData(true); // Refresh UI
+  } catch (err) {
+    console.error(err);
+    alert("Failed to update competition.");
+  } finally {
+    setIsProcessing(false);
+  }
+};
 
   const deleteCandidate = async (candId) => {
     if (!confirm("Are you sure? This will delete all votes for this nominee.")) return;
@@ -706,19 +716,49 @@ useEffect(() => {
       )}
 
       {showEditCompModal && (
-        <div style={overlay} onClick={() => setShowEditCompModal(null)}>
-          <div style={modal} onClick={e => e.stopPropagation()}>
-            <div style={modalHead}>
-              <h2 style={modalTitle}>Edit Competition</h2>
-              <button style={closeBtn} onClick={() => setShowEditCompModal(null)}><X size={20} /></button>
-            </div>
-            <div style={modalBody}>
-              <input style={modalInput} value={editCompForm.title} onChange={(e) => setEditCompForm({ ...editCompForm, title: e.target.value })} />
-              <button style={actionSubmitBtn(isProcessing)} onClick={saveCompEdit}>SAVE</button>
-            </div>
+  <div style={overlay} onClick={() => setShowEditCompModal(null)}>
+    <div style={modal} onClick={e => e.stopPropagation()}>
+      <div style={modalHead}>
+        <h2 style={modalTitle}>Manage Competition</h2>
+        <button style={closeBtn} onClick={() => setShowEditCompModal(null)}><X size={20} /></button>
+      </div>
+      <div style={modalBody}>
+        <div style={inputStack}>
+          <label style={fieldLabel}>TITLE</label>
+          <input style={modalInput} value={editCompForm.title} onChange={(e) => setEditCompForm({ ...editCompForm, title: e.target.value })} />
+        </div>
+        
+        <div style={twoColumnGrid}>
+          <div style={inputStack}>
+            <label style={fieldLabel}>VOTE PRICE (GHS)</label>
+            <input type="number" style={modalInput} value={editCompForm.vote_price} onChange={(e) => setEditCompForm({ ...editCompForm, vote_price: e.target.value })} />
+          </div>
+          <div style={inputStack}>
+             <label style={fieldLabel}>VOTING STATUS</label>
+             <button 
+               style={toggleStyle(editCompForm.is_active)} 
+               onClick={() => setEditCompForm({...editCompForm, is_active: !editCompForm.is_active})}
+             >
+               {editCompForm.is_active ? 'ACTIVE' : 'PAUSED'}
+             </button>
           </div>
         </div>
-      )}
+
+        <button style={actionSubmitBtn(isProcessing)} onClick={saveCompEdit}>
+          {isProcessing ? 'SAVING...' : 'UPDATE SETTINGS'}
+        </button>
+
+        {/* Deep Level Delete Option */}
+        <div style={dangerZone}>
+          <p style={dangerLabel}>DANGER ZONE</p>
+          <button style={deleteFullBtn} onClick={() => deleteEntireCompetition(showEditCompModal.id)}>
+            <Trash2 size={16} /> DELETE ENTIRE COMPETITION
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+)}
 
       {showQR && (
         <div style={overlay} onClick={() => setShowQR(null)}>
