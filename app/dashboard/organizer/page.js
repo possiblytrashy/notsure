@@ -1044,9 +1044,10 @@ const dangerLabel = {
   marginBottom: '10px',
   textTransform: 'uppercase'
 };
+// This MUST be outside the main OrganizerDashboard function
 function CategoryItem({ 
   contest, 
-  comp, 
+  comp, // This is the data object, not a style
   updateCategoryName, 
   updateCategoryPrice, 
   updateCategorySettings, 
@@ -1054,13 +1055,18 @@ function CategoryItem({
   setShowCandidateModal, 
   deleteCandidate 
 }) {
-  const [isSettingsOpen, setIsSettingsOpen] = React.useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  // If the mapping fails to pass comp, this prevents the crash
+  if (!comp) return null; 
 
   return (
     <div style={{ marginBottom: '20px', background: '#f8fafc', padding: '15px', borderRadius: '20px', border: '1px solid #f1f5f9' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <span style={{ fontSize: '10px', fontWeight: 900, color: '#64748b', textTransform: 'uppercase' }}>Category</span>
+          <span style={{ fontSize: '10px', fontWeight: 900, color: '#64748b', textTransform: 'uppercase' }}>
+             Category for {comp.title} {/* This is where comp is used */}
+          </span>
           <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 800 }}>{contest.title}</h4>
         </div>
         
@@ -1129,7 +1135,7 @@ function CategoryItem({
         </div>
       )}
 
-      {/* NOMINEES LIST */}
+      {/* NOMINEES LIST (Uses contest, not comp) */}
       <div style={{ marginTop: '20px' }}>
         {contest.candidates?.sort((a, b) => b.vote_count - a.vote_count).map((cand, idx) => (
           <div key={cand.id} style={{ display: 'flex', alignItems: 'center', gap: '15px', padding: '10px 0', borderBottom: '1px solid #f1f5f9' }}>
