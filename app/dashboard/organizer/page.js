@@ -754,7 +754,7 @@ const deleteEntireCompetition = async (compId) => {
           </div>
         </div>
 
-        div style={inputStack}>
+        <div style={inputStack}>
   <label style={fieldLabel}>CATEGORY HERO IMAGE</label>
   <div style={uploadContainer}>
     {editCompForm.image_url && !editCompForm.image_file && (
