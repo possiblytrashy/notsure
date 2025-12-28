@@ -1036,3 +1036,12 @@ const fileInputStyle = {
   marginTop: '8px',
   cursor: 'pointer'
 };
+
+const dangerLabel = {
+  fontSize: '11px',
+  fontWeight: '900',
+  color: '#ef4444',
+  letterSpacing: '1.5px',
+  marginBottom: '10px',
+  textTransform: 'uppercase'
+};
