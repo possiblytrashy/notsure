@@ -730,7 +730,7 @@ const uploadToSupabase = async (file) => {
       )}
     </div>
   );
-}
+
 
 // --- LUXURY STYLES ---
 const skeletonStyles = {
