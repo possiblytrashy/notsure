@@ -59,11 +59,13 @@ export default function OrganizerDashboard() {
   const [newCandidate, setNewCandidate] = useState({ name: '', image_url: '', bio: '' });
 const [showContestModal, setShowContestModal] = useState(null);
   // Competition Edit Form State
-  const [editCompForm, setEditCompForm] = useState({ 
+ const [editCompForm, setEditCompForm] = useState({ 
   title: '', 
   description: '', 
   category: '', 
-  image_file: null, // New
+  vote_price: 1.00,
+  is_active: true, // This acts as the "Pause Voting" toggle
+  image_file: null,
   image_url: '' 
 });
   
@@ -291,16 +293,6 @@ useEffect(() => {
   };
 
   // Updated Save function to handle file upload
-// --- MISSING ACTION HANDLERS TO FIX BUILD ---
-const [editCompForm, setEditCompForm] = useState({ 
-  title: '', 
-  description: '', 
-  category: '', 
-  vote_price: 1.00,
-  is_active: true, // This acts as the "Pause Voting" toggle
-  image_file: null,
-  image_url: '' 
-});
   
   const saveCompEdit = async () => {
   setIsProcessing(true);
