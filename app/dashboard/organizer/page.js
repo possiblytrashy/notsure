@@ -350,57 +350,7 @@ const deleteEntireCompetition = async (compId) => {
   };
 
   // Updated Save function to handle file upload
-const saveCompEdit = async () => {
-  if (!showEditCompModal?.id) return;
-  setIsProcessing(true);
-  try {
-    let finalImageUrl = editCompForm.image_url;
 
-    // If a new file was selected, upload it first
-    if (editCompForm.image_file) {
-      finalImageUrl = await uploadToSupabase(editCompForm.image_file);
-    }
-
-    const { error } = await supabase
-      .from('contests')
-      .update({ 
-        title: editCompForm.title,
-        description: editCompForm.description,
-        category: editCompForm.category,
-        vote_price: parseFloat(editCompForm.vote_price),
-        is_active: editCompForm.is_active,
-        image_url: finalImageUrl 
-      })
-      .eq('id', showEditCompModal.id);
-
-    if (error) throw error;
-    setShowEditCompModal(null);
-    await loadDashboardData(true);
-  } catch (err) {
-    console.error(err);
-    alert("Update failed.");
-  } finally {
-    setIsProcessing(false);
-  }
-};
-
-// Delete the entire competition (Cascades to candidates if DB is set up)
-const deleteEntireCompetition = async (compId) => {
-  const confirmDelete = confirm("CRITICAL: This will delete the competition and ALL candidates/votes. This cannot be undone.");
-  if (!confirmDelete) return;
-
-  setIsProcessing(true);
-  try {
-    const { error } = await supabase.from('contests').delete().eq('id', compId);
-    if (error) throw error;
-    setShowEditCompModal(null);
-    await loadDashboardData(true);
-  } catch (err) {
-    alert("Delete failed.");
-  } finally {
-    setIsProcessing(false);
-  }
-};
   // --- 6. LOADING SKELETON ---
   if (loading) return (
     <div style={skeletonStyles.wrapper}>
