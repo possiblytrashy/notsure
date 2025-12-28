@@ -821,191 +821,7 @@ useEffect(() => {
         </div>
   );
 }
- function CategoryItem({ contest, comp, updateCategoryName, updateCategoryPrice, updateCategorySettings, deleteCategory, setShowCandidateModal, deleteCandidate }) {
 
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-
-
-
-  return (
-
-    <div style={{ marginBottom: '20px', background: '#f8fafc', padding: '15px', borderRadius: '20px', border: '1px solid #f1f5f9' }}>
-
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-
-        <div>
-
-          <span style={{ fontSize: '10px', fontWeight: 900, color: '#64748b', textTransform: 'uppercase' }}>Category</span>
-
-          <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 800 }}>{contest.title}</h4>
-
-        </div>
-
-        
-
-        <div style={{ display: 'flex', gap: '10px' }}>
-
-          <button 
-
-            onClick={() => setIsSettingsOpen(!isSettingsOpen)} 
-
-            style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 15px', borderRadius: '8px', border: '1px solid #e2e8f0', background: '#fff', fontSize: '11px', fontWeight: 800, cursor: 'pointer' }}
-
-          >
-
-            {isSettingsOpen ? <ChevronDown size={14} /> : <Settings size={14} />}
-
-            {isSettingsOpen ? 'CLOSE' : 'EDIT CATEGORY'}
-
-          </button>
-
-          
-
-          <button 
-
-            style={{ background: '#0ea5e9', color: '#fff', border: 'none', borderRadius: '8px', padding: '8px', cursor: 'pointer' }} 
-
-            onClick={() => setShowCandidateModal(contest)}
-
-          >
-
-            <UserPlus size={16} />
-
-          </button>
-
-        </div>
-
-      </div>
-
-
-
-      {isSettingsOpen && (
-
-        <div style={{ marginTop: '20px', padding: '20px', background: '#fff', borderRadius: '15px', border: '1px solid #e2e8f0' }}>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
-
-            <div>
-
-              <label style={{ fontSize: '10px', fontWeight: 900, color: '#94a3b8' }}>RENAME CATEGORY</label>
-
-              <input 
-
-                style={{ width: '100%', padding: '10px', marginTop: '5px', borderRadius: '8px', border: '1px solid #e2e8f0' }} 
-
-                defaultValue={contest.title} 
-
-                onBlur={(e) => updateCategoryName(contest.id, e.target.value)} 
-
-              />
-
-            </div>
-
-            <div>
-
-              <label style={{ fontSize: '10px', fontWeight: 900, color: '#94a3b8' }}>VOTE PRICE (GHS)</label>
-
-              <input 
-
-                type="number" 
-
-                step="0.01"
-
-                style={{ width: '100%', padding: '10px', marginTop: '5px', borderRadius: '8px', border: '1px solid #e2e8f0' }} 
-
-                defaultValue={contest.vote_price} 
-
-                onBlur={(e) => updateCategoryPrice(contest.id, e.target.value)} 
-
-              />
-
-            </div>
-
-          </div>
-
-          
-
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '20px', paddingTop: '15px', borderTop: '1px solid #f1f5f9' }}>
-
-             <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-
-                <span style={{ fontSize: '10px', fontWeight: 900 }}>STATUS:</span>
-
-                <button 
-
-                  onClick={() => updateCategorySettings(contest.id, { isActive: !contest.is_active })}
-
-                  style={{ 
-
-                    padding: '6px 12px', borderRadius: '6px', border: 'none', fontWeight: 800, cursor: 'pointer',
-
-                    background: contest.is_active ? '#f0fdf4' : '#fef2f2',
-
-                    color: contest.is_active ? '#16a34a' : '#ef4444'
-
-                  }}
-
-                >
-
-                  {contest.is_active ? 'ACTIVE' : 'PAUSED'}
-
-                </button>
-
-             </div>
-
-             <button onClick={() => deleteCategory(contest.id)} style={{ background: 'none', border: 'none', color: '#ef4444', fontWeight: 700, cursor: 'pointer' }}>
-
-               <Trash2 size={14} style={{ verticalAlign: 'middle', marginRight: '5px' }} /> DELETE
-
-             </button>
-
-          </div>
-
-        </div>
-
-      )}
-
-
-
-      <div style={{ marginTop: '20px' }}>
-
-        {contest.candidates?.sort((a, b) => b.vote_count - a.vote_count).map((cand, idx) => (
-
-          <div key={cand.id} style={{ display: 'flex', alignItems: 'center', gap: '15px', padding: '10px 0', borderBottom: '1px solid #f1f5f9' }}>
-
-            <span style={{ fontWeight: 900, color: '#94a3b8', width: '30px' }}>#{idx + 1}</span>
-
-            <div style={{ flex: 1 }}>
-
-              <p style={{ margin: 0, fontWeight: 700, fontSize: '14px' }}>{cand.name}</p>
-
-              <div style={{ height: '6px', width: '100%', background: '#f1f5f9', borderRadius: '10px', marginTop: '5px', overflow: 'hidden' }}>
-
-                <div style={{ height: '100%', background: '#000', width: `${idx === 0 ? 100 : (cand.vote_count / (contest.candidates[0]?.vote_count || 1)) * 100}%` }}></div>
-
-              </div>
-
-            </div>
-
-            <p style={{ fontWeight: 900, margin: 0 }}>{cand.vote_count}</p>
-
-            <button style={{ background: 'none', border: 'none', color: '#cbd5e1', cursor: 'pointer' }} onClick={() => deleteCandidate(cand.id)}>
-
-              <Trash2 size={14} />
-
-            </button>
-
-          </div>
-
-        ))}
-
-      </div>
-
-    </div>
-
-  );
-
-}
 // --- LUXURY STYLES ---
 const skeletonStyles = {
   wrapper: { height: '100vh', display: 'flex', flexDirection: 'column', padding: '50px 30px', background: '#fcfcfc', maxWidth: '1440px', margin: '0 auto' },
@@ -1228,3 +1044,121 @@ const dangerLabel = {
   marginBottom: '10px',
   textTransform: 'uppercase'
 };
+function CategoryItem({ 
+  contest, 
+  comp, 
+  updateCategoryName, 
+  updateCategoryPrice, 
+  updateCategorySettings, 
+  deleteCategory, 
+  setShowCandidateModal, 
+  deleteCandidate 
+}) {
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  return (
+    <div style={{ marginBottom: '20px', background: '#f8fafc', padding: '15px', borderRadius: '20px', border: '1px solid #f1f5f9' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <span style={{ fontSize: '10px', fontWeight: 900, color: '#64748b', textTransform: 'uppercase' }}>Category</span>
+          <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 800 }}>{contest.title}</h4>
+        </div>
+        
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button 
+            onClick={() => setIsSettingsOpen(!isSettingsOpen)} 
+            style={{ 
+              display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 15px', 
+              borderRadius: '8px', border: '1px solid #e2e8f0', background: '#fff', 
+              fontSize: '11px', fontWeight: 800, cursor: 'pointer' 
+            }}
+          >
+            {isSettingsOpen ? <ChevronDown size={14} /> : <Settings size={14} />}
+            {isSettingsOpen ? 'CLOSE SETTINGS' : 'EDIT CATEGORY'}
+          </button>
+          
+          <button 
+            style={{ background: '#0ea5e9', color: 'white', border: 'none', borderRadius: '8px', padding: '8px', cursor: 'pointer' }} 
+            onClick={() => setShowCandidateModal(contest)}
+          >
+            <UserPlus size={16} />
+          </button>
+        </div>
+      </div>
+
+      {/* NESTED SETTINGS PANEL */}
+      {isSettingsOpen && (
+        <div style={{ marginTop: '20px', padding: '20px', background: '#fff', borderRadius: '15px', border: '1px solid #e2e8f0' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
+            <div>
+              <label style={{ fontSize: '10px', fontWeight: 900, color: '#94a3b8' }}>RENAME CATEGORY</label>
+              <input 
+                style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', marginTop: '5px' }} 
+                defaultValue={contest.title} 
+                onBlur={(e) => updateCategoryName(contest.id, e.target.value)} 
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: '10px', fontWeight: 900, color: '#94a3b8' }}>VOTE PRICE (GHS)</label>
+              <input 
+                type="number" 
+                step="0.01"
+                style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', marginTop: '5px' }} 
+                defaultValue={contest.vote_price} 
+                onBlur={(e) => updateCategoryPrice(contest.id, e.target.value)} 
+              />
+            </div>
+          </div>
+          
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '20px', paddingTop: '15px', borderTop: '1px solid #f1f5f9' }}>
+             <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <span style={{ fontSize: '10px', fontWeight: 900 }}>STATUS:</span>
+                <button 
+                  onClick={() => updateCategorySettings(contest.id, { isActive: !contest.is_active })}
+                  style={{ 
+                    padding: '6px 12px', borderRadius: '6px', border: 'none', fontWeight: 800, fontSize: '10px', cursor: 'pointer',
+                    backgroundColor: contest.is_active ? '#f0fdf4' : '#fef2f2',
+                    color: contest.is_active ? '#16a34a' : '#ef4444'
+                  }}
+                >
+                  {contest.is_active ? 'ACTIVE' : 'PAUSED'}
+                </button>
+             </div>
+             <button 
+               onClick={() => deleteCategory(contest.id)} 
+               style={{ background: 'none', border: 'none', color: '#ef4444', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}
+             >
+               <Trash2 size={14} /> DELETE CATEGORY
+             </button>
+          </div>
+        </div>
+      )}
+
+      {/* NOMINEES LIST */}
+      <div style={{ marginTop: '20px' }}>
+        {contest.candidates?.sort((a, b) => b.vote_count - a.vote_count).map((cand, idx) => (
+          <div key={cand.id} style={{ display: 'flex', alignItems: 'center', gap: '15px', padding: '10px 0', borderBottom: '1px solid #f1f5f9' }}>
+            <span style={{ fontWeight: 900, color: '#94a3b8', width: '30px' }}>#{idx + 1}</span>
+            <div style={{ flex: 1 }}>
+              <p style={{ margin: 0, fontWeight: 700, fontSize: '14px' }}>{cand.name}</p>
+              <div style={{ height: '6px', width: '100%', background: '#e2e8f0', borderRadius: '10px', marginTop: '5px', overflow: 'hidden' }}>
+                <div style={{ 
+                  height: '100%', 
+                  background: '#000', 
+                  width: `${idx === 0 ? 100 : (cand.vote_count / Math.max(contest.candidates[0]?.vote_count || 1, 1)) * 100}%` 
+                }}></div>
+              </div>
+            </div>
+            <p style={{ fontWeight: 900, margin: 0 }}>{cand.vote_count}</p>
+            <button 
+              onClick={() => deleteCandidate(cand.id)}
+              style={{ background: 'none', border: 'none', color: '#cbd5e1', cursor: 'pointer' }}
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
