@@ -1054,7 +1054,7 @@ function CategoryItem({
   setShowCandidateModal, 
   deleteCandidate 
 }) {
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = React.useState(false);
 
   return (
     <div style={{ marginBottom: '20px', background: '#f8fafc', padding: '15px', borderRadius: '20px', border: '1px solid #f1f5f9' }}>
@@ -1073,20 +1073,18 @@ function CategoryItem({
               fontSize: '11px', fontWeight: 800, cursor: 'pointer' 
             }}
           >
-            {isSettingsOpen ? <ChevronDown size={14} /> : <Settings size={14} />}
-            {isSettingsOpen ? 'CLOSE SETTINGS' : 'EDIT CATEGORY'}
+            {isSettingsOpen ? 'CLOSE' : 'EDIT CATEGORY'}
           </button>
           
           <button 
             style={{ background: '#0ea5e9', color: 'white', border: 'none', borderRadius: '8px', padding: '8px', cursor: 'pointer' }} 
             onClick={() => setShowCandidateModal(contest)}
           >
-            <UserPlus size={16} />
+            Add Nominee
           </button>
         </div>
       </div>
 
-      {/* NESTED SETTINGS PANEL */}
       {isSettingsOpen && (
         <div style={{ marginTop: '20px', padding: '20px', background: '#fff', borderRadius: '15px', border: '1px solid #e2e8f0' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
@@ -1111,24 +1109,21 @@ function CategoryItem({
           </div>
           
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '20px', paddingTop: '15px', borderTop: '1px solid #f1f5f9' }}>
-             <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                <span style={{ fontSize: '10px', fontWeight: 900 }}>STATUS:</span>
-                <button 
-                  onClick={() => updateCategorySettings(contest.id, { isActive: !contest.is_active })}
-                  style={{ 
-                    padding: '6px 12px', borderRadius: '6px', border: 'none', fontWeight: 800, fontSize: '10px', cursor: 'pointer',
-                    backgroundColor: contest.is_active ? '#f0fdf4' : '#fef2f2',
-                    color: contest.is_active ? '#16a34a' : '#ef4444'
-                  }}
-                >
-                  {contest.is_active ? 'ACTIVE' : 'PAUSED'}
-                </button>
-             </div>
+             <button 
+               onClick={() => updateCategorySettings(contest.id, { isActive: !contest.is_active })}
+               style={{ 
+                 padding: '6px 12px', borderRadius: '6px', border: 'none', fontWeight: 800, fontSize: '10px', cursor: 'pointer',
+                 backgroundColor: contest.is_active ? '#f0fdf4' : '#fef2f2',
+                 color: contest.is_active ? '#16a34a' : '#ef4444'
+               }}
+             >
+               {contest.is_active ? 'ACTIVE' : 'PAUSED'}
+             </button>
              <button 
                onClick={() => deleteCategory(contest.id)} 
-               style={{ background: 'none', border: 'none', color: '#ef4444', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' }}
+               style={{ background: 'none', border: 'none', color: '#ef4444', fontWeight: 700, cursor: 'pointer' }}
              >
-               <Trash2 size={14} /> DELETE CATEGORY
+               DELETE CATEGORY
              </button>
           </div>
         </div>
@@ -1154,7 +1149,7 @@ function CategoryItem({
               onClick={() => deleteCandidate(cand.id)}
               style={{ background: 'none', border: 'none', color: '#cbd5e1', cursor: 'pointer' }}
             >
-              <Trash2 size={14} />
+              DELETE
             </button>
           </div>
         ))}
