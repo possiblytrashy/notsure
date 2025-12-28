@@ -349,6 +349,7 @@ const deleteEntireCompetition = async (compId) => {
     setShowEditCompModal(comp);
   };
 
+  // Updated Save function to handle file upload
 const saveCompEdit = async () => {
   if (!showEditCompModal?.id) return;
   setIsProcessing(true);
@@ -357,8 +358,7 @@ const saveCompEdit = async () => {
 
     // If a new file was selected, upload it first
     if (editCompForm.image_file) {
-      const uploadedUrl = await uploadImage(editCompForm.image_file);
-      if (uploadedUrl) finalImageUrl = uploadedUrl;
+      finalImageUrl = await uploadToSupabase(editCompForm.image_file);
     }
 
     const { error } = await supabase
@@ -369,7 +369,7 @@ const saveCompEdit = async () => {
         category: editCompForm.category,
         vote_price: parseFloat(editCompForm.vote_price),
         is_active: editCompForm.is_active,
-        image_url: finalImageUrl // Save the new public URL
+        image_url: finalImageUrl 
       })
       .eq('id', showEditCompModal.id);
 
@@ -377,22 +377,26 @@ const saveCompEdit = async () => {
     setShowEditCompModal(null);
     await loadDashboardData(true);
   } catch (err) {
+    console.error(err);
     alert("Update failed.");
   } finally {
     setIsProcessing(false);
   }
 };
 
+// Delete the entire competition (Cascades to candidates if DB is set up)
 const deleteEntireCompetition = async (compId) => {
-  if (!confirm("CRITICAL: This will delete the competition, all nominees, and all recorded votes. Proceed?")) return;
+  const confirmDelete = confirm("CRITICAL: This will delete the competition and ALL candidates/votes. This cannot be undone.");
+  if (!confirmDelete) return;
+
   setIsProcessing(true);
   try {
-    // Supabase foreign keys should be set to 'CASCADE' to delete candidates automatically
     const { error } = await supabase.from('contests').delete().eq('id', compId);
     if (error) throw error;
+    setShowEditCompModal(null);
     await loadDashboardData(true);
   } catch (err) {
-    alert("Deletion failed.");
+    alert("Delete failed.");
   } finally {
     setIsProcessing(false);
   }
