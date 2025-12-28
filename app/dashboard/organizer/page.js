@@ -854,7 +854,7 @@ const deleteEntireCompetition = async (compId) => {
         </div>
       )}
 
-      {/* 4. QR PREVIEW MODAL */}
+
       {showQR && (
         <div style={overlay} onClick={() => setShowQR(null)}>
           <div style={modal} onClick={e => e.stopPropagation()}>
@@ -872,6 +872,8 @@ const deleteEntireCompetition = async (compId) => {
     </div>
   );
 }
+
+// --- LUXURY STYLES ---
 
 // --- LUXURY STYLES ---
 const skeletonStyles = {
