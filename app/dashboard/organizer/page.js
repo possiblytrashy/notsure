@@ -553,6 +553,7 @@ const handleEditSubmit = async (e) => {
       <div style={viewPort}>
         
         {/* 1. EVENTS VIEW */}
+
       {activeTab === 'events' && (
   <div style={fadeAnim}>
     <div style={viewHeader}>
@@ -561,7 +562,12 @@ const handleEditSubmit = async (e) => {
         <Plus size={18}/> NEW EVENT
       </button>
     </div>
-
+<style>{`
+  @keyframes modalSlideUp {
+    from { transform: translateY(30px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+`}</style>
     <div style={contestGrid}>
       {data.events.map((event) => (
         <div key={event.id} style={itemCard}>
