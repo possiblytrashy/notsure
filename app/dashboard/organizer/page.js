@@ -678,6 +678,9 @@ const deleteEntireCompetition = async (compId) => {
                 )}
               </div>
             ))}
+            {data.competitions.length === 0 && (
+               <div style={emptyState}>No competitions created. Click "Create Competition" to start.</div>
+            )}
           </div>
         </div>
       )}
@@ -747,6 +750,9 @@ const deleteEntireCompetition = async (compId) => {
                   <option value="">Select Network</option>
                   <option value="MTN">MTN Mobile Money</option>
                   <option value="VOD">Telecel (Vodafone) Cash</option>
+                  <option value="058">GT Bank</option>
+                  <option value="044">Access Bank</option>
+                  <option value="011">Zenith Bank</option>
                 </select>
               </div>
               <div style={inputStack}>
@@ -806,9 +812,29 @@ const deleteEntireCompetition = async (compId) => {
                 <label style={fieldLabel}>TITLE</label>
                 <input style={modalInput} value={editCompForm.title} onChange={(e) => setEditCompForm({ ...editCompForm, title: e.target.value })} />
               </div>
+              <div style={inputStack}>
+                <label style={fieldLabel}>CATEGORY HERO IMAGE</label>
+                <div style={uploadContainer}>
+                  {editCompForm.image_url && !editCompForm.image_file && (
+                    <img src={editCompForm.image_url} style={previewThumb} alt="Current" />
+                  )}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => setEditCompForm({ ...editCompForm, image_file: e.target.files[0] })}
+                    style={{ fontSize: '12px' }}
+                  />
+                </div>
+              </div>
               <button style={actionSubmitBtn(isProcessing)} onClick={saveCompEdit} disabled={isProcessing}>
                 {isProcessing ? <Loader2 className="animate-spin" size={18} /> : 'SAVE CHANGES'}
               </button>
+              <div style={dangerZone}>
+                <p style={dangerLabel}>DANGER ZONE</p>
+                <button style={deleteFullBtn} onClick={() => deleteEntireCompetition(showEditCompModal.id)}>
+                  <Trash2 size={14} /> DELETE ENTIRE COMPETITION
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -828,11 +854,11 @@ const deleteEntireCompetition = async (compId) => {
         </div>
       )}
 
-    </div> // This closes the main content wrapper
-  ); // This closes the return
-} // This closes the function
+    </div>
+  );
+}
 
-// --- LUXURY STYLES ---
+
 // --- LUXURY STYLES ---
 
 // Skeleton Styles
