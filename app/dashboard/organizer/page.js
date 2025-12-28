@@ -695,9 +695,12 @@ const handleEditSubmit = async (e) => {
   <div style={fadeAnim}>
     <div style={viewHeader}>
       <h2 style={viewTitle}>Competition Management</h2>
-      <button style={addBtn} onClick={() => setShowContestModal(true)}>
-        <Plus size={18}/> NEW COMPETITION
-      </button>
+      <button 
+    style={addBtn} 
+    onClick={() => router.push('/dashboard/organizer/contests/create')}
+  >
+    <Plus size={18}/> NEW EVENT
+  </button>
     </div>
 
     <div style={contestGrid}>
