@@ -41,7 +41,8 @@ export default function OrganizerDashboard() {
   const [showEditCompModal, setShowEditCompModal] = useState(null); // Holds competition object for editing details
   
   const [isProcessing, setIsProcessing] = useState(false);
-  
+  const [editingEvent, setEditingEvent] = useState(null); // Track event being edited
+const [showEventModal, setShowEventModal] = useState(false); // Reuse your existing modal state
   // Filters
   const [ticketSearch, setTicketSearch] = useState('');
   const [selectedEventFilter, setSelectedEventFilter] = useState('all');
@@ -255,7 +256,58 @@ useEffect(() => {
       setIsProcessing(false);
     }
   };
+// --- EVENT ACTIONS ---
 
+// --- EVENT ACTIONS ---
+
+const deleteEvent = async (eventId) => {
+  if (!confirm("Are you sure? This will delete the event and all associated data forever.")) return;
+
+  try {
+    const { error } = await supabase
+      .from('events')
+      .delete()
+      .eq('id', eventId);
+
+    if (error) throw error;
+
+    // Remove from local state instantly
+    setData(prev => ({
+      ...prev,
+      events: prev.events.filter(e => e.id !== eventId)
+    }));
+    
+  } catch (error) {
+    console.error("Delete error:", error);
+    alert("Could not delete event. Check your database RLS policies.");
+  }
+};
+
+const handleEditSubmit = async (e) => {
+  e.preventDefault();
+  const formData = new FormData(e.target);
+  const updatedFields = Object.fromEntries(formData.entries());
+
+  try {
+    const { error } = await supabase
+      .from('events')
+      .update(updatedFields)
+      .eq('id', editingEvent.id);
+
+    if (error) throw error;
+
+    // Sync UI
+    setData(prev => ({
+      ...prev,
+      events: prev.events.map(ev => ev.id === editingEvent.id ? { ...ev, ...updatedFields } : ev)
+    }));
+
+    setShowEventModal(false);
+    setEditingEvent(null);
+  } catch (error) {
+    console.error("Update error:", error);
+  }
+};
   // Add Candidate
   const addCandidate = async (compId) => {
     if (!newCandidate.name) return;
@@ -534,7 +586,37 @@ useEffect(() => {
                       <button style={fullWidthBtn} onClick={() => { setSelectedEventFilter(event.id); setActiveTab('sales'); }}>
                         VIEW SALES LEDGER
                       </button>
-                      {/* Placeholder for edit event logic */}
+                      {data.events.map((event) => (
+  <div key={event.id} style={eventCard}>
+    <div style={eventHeader}>
+      <div style={{ flex: 1 }}>
+        <h3 style={{ margin: 0, fontSize: '20px', fontWeight: 900 }}>{event.title}</h3>
+        <p style={perfSub}>{event.location} • {new Date(event.date).toLocaleDateString()}</p>
+      </div>
+      
+      <div style={{ display: 'flex', gap: '8px' }}>
+        {/* EDIT BUTTON */}
+        <button 
+          style={circleAction} 
+          onClick={() => {
+            // Set your modal state to this event's data to edit
+            setEditingEvent(event); 
+            setShowEventModal(true);
+          }}
+        >
+          <Edit3 size={16} />
+        </button>
+
+        {/* DELETE BUTTON */}
+        <button 
+          style={{ ...circleAction, color: '#ef4444' }} 
+          onClick={() => deleteEvent(event.id)}
+        >
+          <Trash2 size={16} />
+        </button>
+      </div>
+    </div>
+  
                       <button style={editBtnCircle}><Edit3 size={18}/></button>
                     </div>
                   </div>
@@ -715,6 +797,63 @@ useEffect(() => {
           </div>
         </div>
       )}
+{showEventModal && (
+  <div style={modalOverlay}>
+    <div style={luxuryModal}>
+      <div style={modalHeader}>
+        <h2 style={viewTitle}>{editingEvent ? 'EDIT EVENT' : 'CREATE NEW EVENT'}</h2>
+        <button onClick={() => { setShowEventModal(false); setEditingEvent(null); }} style={circleAction}><X /></button>
+      </div>
+
+      <form onSubmit={handleEditSubmit} style={{ marginTop: '20px' }}>
+        <div style={inputStack}>
+          <label style={fieldLabel}>EVENT TITLE</label>
+          <input 
+            name="title"
+            style={modalInput} 
+            defaultValue={editingEvent?.title || ''} 
+            placeholder="e.g. Luxury Gala 2025"
+            required
+          />
+        </div>
+
+        <div style={twoColumnGrid}>
+          <div style={inputStack}>
+            <label style={fieldLabel}>LOCATION</label>
+            <input 
+              name="location"
+              style={modalInput} 
+              defaultValue={editingEvent?.location || ''} 
+              placeholder="Venue Name"
+            />
+          </div>
+          <div style={inputStack}>
+            <label style={fieldLabel}>DATE</label>
+            <input 
+              name="date"
+              type="date" 
+              style={modalInput} 
+              defaultValue={editingEvent?.date || ''} 
+            />
+          </div>
+        </div>
+
+        <div style={inputStack}>
+          <label style={fieldLabel}>DESCRIPTION</label>
+          <textarea 
+            name="description"
+            style={{ ...modalInput, height: '100px', resize: 'none' }} 
+            defaultValue={editingEvent?.description || ''}
+          />
+        </div>
+
+        <button type="submit" style={actionBtnFull}>
+          {editingEvent ? 'SAVE CHANGES' : 'PUBLISH EVENT'}
+        </button>
+      </form>
+    </div>
+  </div>
+)}
 
       {showCandidateModal && (
         <div style={overlay} onClick={() => setShowCandidateModal(null)}>
