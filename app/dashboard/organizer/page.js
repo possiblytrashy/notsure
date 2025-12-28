@@ -593,136 +593,144 @@ const deleteEntireCompetition = async (compId) => {
           </div>
         )}
 
-        {/* 3. COMPETITIONS VIEW (Renamed from Contests) */}
-        {activeTab === 'competitions' && (
-          <div style={fadeAnim}>
-             <div style={sectionTitleRow}>
-                <div>
-                   <h2 style={viewTitle}>Competitions & Voting</h2>
-                   <p style={subLabel} style={{marginTop:'5px'}}>Manage categories, nominees, and monitor real-time votes.</p>
-                </div>
-                <button style={addBtn} onClick={() => router.push('/dashboard/organizer/contests/create')}>
-                  <Plus size={20}/> CREATE COMPETITION
-                </button>
-             </div>
-             
-             <div style={contestGrid}>
-                <div style={contestGrid}>
-  {data.competitions.map(comp => (
-    <div key={comp.id} style={contestCard}>
-      {/* 1. COMPETITION HEADER (The Main Event) */}
-      <div style={contestHeader}>
-        <div style={{ flex: 1 }}>
-          <div style={badgeLuxuryAlt}>OFFICIAL COMPETITION</div>
-          <h3 style={{ margin: '10px 0 5px', fontSize: '20px', fontWeight: 900 }}>{comp.title}</h3>
-          <p style={perfSub}>{comp.description || 'Luxury Event Portal'}</p>
-        </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <button style={miniAction} onClick={() => openEditCompModal(comp)} title="System Settings">
-            <Edit3 size={16} />
-          </button>
-          {/* Button to add a new CATEGORY (Contest) to this competition */}
-          <button style={miniAction} onClick={() => setShowContestModal(comp.id)} title="Add Category">
-            <Plus size={16} />
-          </button>
-        </div>
-      </div>
-
-      <div style={divider}></div>
-
-      {/* 2. CONTESTS LOOP (The Categories like Best Dancer, etc.) */}
-      {comp.contests?.length > 0 ? (
-        comp.contests.map(contest => (
-          <div key={contest.id} style={{ marginBottom: '30px', background: '#f8fafc', padding: '15px', borderRadius: '16px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-              <div>
-                <span style={{ fontSize: '10px', fontWeight: 900, color: '#64748b', textTransform: 'uppercase' }}>Category</span>
-                <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 800 }}>{contest.title}</h4>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <span style={metaTag}>GHS {contest.vote_price || '1.00'} / vote</span>
-                <button style={{...deleteMiniBtn, marginLeft: '10px'}} onClick={() => setShowCandidateModal(contest)}>
-                  <UserPlus size={14} />
-                </button>
-              </div>
+  {/* 3. COMPETITIONS VIEW (Organized Hierarchy) */}
+      {activeTab === 'competitions' && (
+        <div style={fadeAnim}>
+          <div style={sectionTitleRow}>
+            <div>
+              <h2 style={viewTitle}>Competitions & Voting</h2>
+              <p style={{ ...subLabel, marginTop: '5px' }}>Manage categories, nominees, and monitor real-time votes.</p>
             </div>
+            <button style={addBtn} onClick={() => router.push('/dashboard/organizer/contests/create')}>
+              <Plus size={20} /> CREATE COMPETITION
+            </button>
+          </div>
 
-            {/* 3. CANDIDATES LOOP (The Nominees inside this specific Category) */}
-            <div style={candidateList}>
-              {contest.candidates?.length > 0 ? (
-                // Sort by vote_count (bigint)
-                [...contest.candidates].sort((a, b) => b.vote_count - a.vote_count).map((cand, idx) => (
-                  <div key={cand.id} style={candidateRow}>
-                    <span style={rankNum}>#{idx + 1}</span>
-                    <div style={candInfo}>
-                      <p style={candName}>{cand.name}</p>
-                      <div style={voteBarContainer}>
-                        <div style={voteBarFill(idx === 0 ? 100 : (Number(cand.vote_count) / (Number(contest.candidates[0]?.vote_count) || 1)) * 100)}></div>
+          <div style={contestGrid}>
+            {data.competitions.map((comp) => (
+              <div key={comp.id} style={contestCard}>
+                {/* 1. COMPETITION HEADER (The Main Event) */}
+                <div style={contestHeader}>
+                  <div style={{ flex: 1 }}>
+                    <div style={badgeLuxuryAlt}>OFFICIAL COMPETITION</div>
+                    <h3 style={{ margin: '10px 0 5px', fontSize: '20px', fontWeight: 900 }}>{comp.title}</h3>
+                    <p style={perfSub}>{comp.description || 'Luxury Event Portal'}</p>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <button style={miniAction} onClick={() => openEditCompModal(comp)} title="System Settings">
+                      <Edit3 size={16} />
+                    </button>
+                    {/* Trigger Show Category Modal - pass competition ID */}
+                    <button style={miniAction} onClick={() => setShowContestModal(comp.id)} title="Add Category">
+                      <Plus size={16} />
+                    </button>
+                  </div>
+                </div>
+
+                <div style={divider}></div>
+
+                {/* 2. CONTESTS LOOP (Categories within the competition) */}
+                {comp.contests?.length > 0 ? (
+                  comp.contests.map((contest) => (
+                    <div key={contest.id} style={{ marginBottom: '30px', background: '#f8fafc', padding: '15px', borderRadius: '16px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                        <div>
+                          <span style={{ fontSize: '10px', fontWeight: 900, color: '#64748b', textTransform: 'uppercase' }}>Category</span>
+                          <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 800 }}>{contest.title}</h4>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <span style={metaTag}>GHS {contest.vote_price || '1.00'} / vote</span>
+                          <button 
+                            style={{ ...deleteMiniBtn, marginLeft: '10px', background: '#0ea5e9', color: 'white' }} 
+                            onClick={() => setShowCandidateModal(contest)}
+                            title="Add Nominee to this Category"
+                          >
+                            <UserPlus size={14} />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* 3. CANDIDATES LOOP (Nominees inside this Category) */}
+                      <div style={candidateList}>
+                        {contest.candidates?.length > 0 ? (
+                          [...contest.candidates]
+                            .sort((a, b) => Number(b.vote_count) - Number(a.vote_count))
+                            .map((cand, idx) => (
+                              <div key={cand.id} style={candidateRow}>
+                                <span style={rankNum}>#{idx + 1}</span>
+                                <div style={candInfo}>
+                                  <p style={candName}>{cand.name}</p>
+                                  <div style={voteBarContainer}>
+                                    <div style={voteBarFill(idx === 0 ? 100 : (Number(cand.vote_count) / (Number(contest.candidates[0]?.vote_count) || 1)) * 100)}></div>
+                                  </div>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                  <p style={candVotes}>{cand.vote_count}</p>
+                                  <button style={deleteMiniBtn} onClick={() => deleteCandidate(cand.id)}>
+                                    <Trash2 size={12} />
+                                  </button>
+                                </div>
+                              </div>
+                            ))
+                        ) : (
+                          <div style={emptySmall}>No nominees in this category yet.</div>
+                        )}
                       </div>
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                      <p style={candVotes}>{cand.vote_count}</p>
-                      <button style={deleteMiniBtn} onClick={() => deleteCandidate(cand.id)}>
-                        <Trash2 size={12} />
-                      </button>
+                  ))
+                ) : (
+                  <div style={emptySmall}>No categories created for this competition.</div>
+                )}
+              </div>
+            ))}
+            {data.competitions.length === 0 && (
+              <div style={emptyState}>No competitions created. Click "Create Competition" to start.</div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* 4. ANALYTICS VIEW */}
+      {activeTab === 'analytics' && (
+        <div style={fadeAnim}>
+          <div style={sectionTitleRow}>
+            <h2 style={viewTitle}>Performance Insights</h2>
+            <div style={activityBadge}><Activity size={14} /> LIVE ENGINE</div>
+          </div>
+          <div style={analyticsGrid}>
+            {data.events.map(event => {
+              const eventSales = data.tickets.filter(t => t.event_id === event.id);
+              const revenue = eventSales.reduce((acc, t) => acc + (parseFloat(t.amount) || 0), 0);
+              const scanned = eventSales.filter(t => t.is_scanned).length;
+              const rate = eventSales.length ? Math.round((scanned / eventSales.length) * 100) : 0;
+
+              return (
+                <div key={event.id} style={eventPerformanceCard}>
+                  <div style={perfHeader}>
+                    <h4 style={perfName}>{event.title}</h4>
+                    <span style={perfTag}>EVENT DATA</span>
+                  </div>
+                  <div style={perfMain}>
+                    <p style={perfLabel}>Gross Revenue Generated</p>
+                    <h3 style={perfValue}>GHS {revenue.toLocaleString()}</h3>
+                    <div style={shareRow}>
+                      <span>Organizer Share (95%)</span>
+                      <span>GHS {(revenue * 0.95).toLocaleString()}</span>
                     </div>
                   </div>
-                ))
-              ) : (
-                <div style={emptySmall}>No nominees in this category yet.</div>
-              )}
-            </div>
-          </div>
-        ))
-      ) : (
-        <div style={emptySmall}>No categories created for this competition.</div>
-      )}
-    </div>
-  ))}
-</div>
-
-        {/* 4. ANALYTICS VIEW */}
-        {activeTab === 'analytics' && (
-          <div style={fadeAnim}>
-             <div style={sectionTitleRow}>
-                <h2 style={viewTitle}>Performance Insights</h2>
-                <div style={activityBadge}><Activity size={14}/> LIVE ENGINE</div>
-             </div>
-             <div style={analyticsGrid}>
-                {data.events.map(event => {
-                  const eventSales = data.tickets.filter(t => t.event_id === event.id);
-                  const revenue = eventSales.reduce((acc, t) => acc + (parseFloat(t.amount) || 0), 0);
-                  const scanned = eventSales.filter(t => t.is_scanned).length;
-                  const rate = eventSales.length ? Math.round((scanned / eventSales.length) * 100) : 0;
-                  
-                  return (
-                    <div key={event.id} style={eventPerformanceCard}>
-                       <div style={perfHeader}>
-                          <h4 style={perfName}>{event.title}</h4>
-                          <span style={perfTag}>EVENT DATA</span>
-                       </div>
-                       <div style={perfMain}>
-                          <p style={perfLabel}>Gross Revenue Generated</p>
-                          <h3 style={perfValue}>GHS {revenue.toLocaleString()}</h3>
-                          <div style={shareRow}>
-                            <span>Organizer Share (95%)</span>
-                            <span>GHS {(revenue * 0.95).toLocaleString()}</span>
-                          </div>
-                       </div>
-                       <div style={perfFooter}>
-                          <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '12px', fontWeight: 600}}>
-                             <span>Check-in Progress</span>
-                             <span>{rate}% ({scanned}/{eventSales.length})</span>
-                          </div>
-                          <div style={progressBar}><div style={progressFill(rate)}></div></div>
-                       </div>
+                  <div style={perfFooter}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', fontSize: '12px', fontWeight: 600 }}>
+                      <span>Check-in Progress</span>
+                      <span>{rate}% ({scanned}/{eventSales.length})</span>
                     </div>
-                  );
-                })}
-             </div>
+                    <div style={progressBar}><div style={progressFill(rate)}></div></div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {/* --- MODALS SECTION --- */}
 
@@ -732,20 +740,20 @@ const deleteEntireCompetition = async (compId) => {
           <div style={modal} onClick={e => e.stopPropagation()}>
             <div style={modalHead}>
               <h2 style={modalTitle}>Payout Config</h2>
-              <button style={closeBtn} onClick={() => setShowSettingsModal(false)}><X size={20}/></button>
+              <button style={closeBtn} onClick={() => setShowSettingsModal(false)}><X size={20} /></button>
             </div>
             <div style={onboardingPromo}>
-              <CreditCard size={20} color="#0ea5e9"/>
-              <p style={{margin:0, fontSize: '13px'}}>Ensure bank details match your Paystack dashboard for 95% automated settlement.</p>
+              <CreditCard size={20} color="#0ea5e9" />
+              <p style={{ margin: 0, fontSize: '13px' }}>Ensure bank details match your Paystack dashboard for 95% automated settlement.</p>
             </div>
             <div style={modalBody}>
               <div style={inputStack}>
                 <label style={fieldLabel}>BUSINESS LEGAL NAME</label>
-                <input style={modalInput} value={paystackConfig.businessName} onChange={(e) => setPaystackConfig({...paystackConfig, businessName: e.target.value})} placeholder="e.g. Ousted Events Ltd"/>
+                <input style={modalInput} value={paystackConfig.businessName} onChange={(e) => setPaystackConfig({ ...paystackConfig, businessName: e.target.value })} placeholder="e.g. Ousted Events Ltd" />
               </div>
               <div style={inputStack}>
                 <label style={fieldLabel}>SETTLEMENT DESTINATION</label>
-                <select style={modalInput} value={paystackConfig.bankCode} onChange={(e) => setPaystackConfig({...paystackConfig, bankCode: e.target.value})}>
+                <select style={modalInput} value={paystackConfig.bankCode} onChange={(e) => setPaystackConfig({ ...paystackConfig, bankCode: e.target.value })}>
                   <option value="">Select Network</option>
                   <option value="MTN">MTN Mobile Money</option>
                   <option value="VOD">Telecel (Vodafone) Cash</option>
@@ -756,7 +764,7 @@ const deleteEntireCompetition = async (compId) => {
               </div>
               <div style={inputStack}>
                 <label style={fieldLabel}>ACCOUNT / WALLET NUMBER</label>
-                <input style={modalInput} value={paystackConfig.accountNumber} onChange={(e) => setPaystackConfig({...paystackConfig, accountNumber: e.target.value})} placeholder="055XXXXXXX"/>
+                <input style={modalInput} value={paystackConfig.accountNumber} onChange={(e) => setPaystackConfig({ ...paystackConfig, accountNumber: e.target.value })} placeholder="055XXXXXXX" />
               </div>
               <button style={actionSubmitBtn(isProcessing)} onClick={saveOnboardingDetails} disabled={isProcessing}>
                 {isProcessing ? 'UPDATING...' : 'CONFIRM SETTINGS'}
@@ -772,104 +780,101 @@ const deleteEntireCompetition = async (compId) => {
           <div style={modal} onClick={e => e.stopPropagation()}>
             <div style={modalHead}>
               <h2 style={modalTitle}>Add Nominee</h2>
-              <button style={closeBtn} onClick={() => setShowCandidateModal(null)}><X size={20}/></button>
+              <button style={closeBtn} onClick={() => setShowCandidateModal(null)}><X size={20} /></button>
             </div>
-            <p style={{fontSize: '13px', color: '#64748b', marginBottom: '20px'}}>Adding to: <strong>{showCandidateModal.title}</strong></p>
+            <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '20px' }}>
+              Adding to Category: <strong>{showCandidateModal.title}</strong>
+            </p>
             <div style={modalBody}>
-               <div style={inputStack}>
-                  <label style={fieldLabel}>FULL NAME</label>
-                  <input style={modalInput} value={newCandidate.name} onChange={(e) => setNewCandidate({...newCandidate, name: e.target.value})} placeholder="Candidate Name"/>
-               </div>
-               <div style={inputStack}>
-                  <label style={fieldLabel}>IMAGE URL (OPTIONAL)</label>
-                  <input style={modalInput} value={newCandidate.image_url} onChange={(e) => setNewCandidate({...newCandidate, image_url: e.target.value})} placeholder="https://..."/>
-               </div>
-               <button style={actionSubmitBtn(isProcessing)} onClick={() => addCandidate(showCandidateModal.id)} disabled={isProcessing}>
-                  {isProcessing ? 'ADDING...' : 'ADD TO COMPETITION'}
-               </button>
+              <div style={inputStack}>
+                <label style={fieldLabel}>FULL NAME</label>
+                <input style={modalInput} value={newCandidate.name} onChange={(e) => setNewCandidate({ ...newCandidate, name: e.target.value })} placeholder="Candidate Name" />
+              </div>
+              <div style={inputStack}>
+                <label style={fieldLabel}>IMAGE URL (OPTIONAL)</label>
+                <input style={modalInput} value={newCandidate.image_url} onChange={(e) => setNewCandidate({ ...newCandidate, image_url: e.target.value })} placeholder="https://..." />
+              </div>
+              <button style={actionSubmitBtn(isProcessing)} onClick={() => addCandidate(showCandidateModal.id)} disabled={isProcessing}>
+                {isProcessing ? 'ADDING...' : 'ADD TO CATEGORY'}
+              </button>
             </div>
           </div>
         </div>
       )}
 
       {/* 3. EDIT COMPETITION MODAL */}
-{/* 3. DEEP EDIT COMPETITION MODAL */}
-{/* 3. DEEP EDIT COMPETITION MODAL */}
-{showEditCompModal && (
-  <div style={overlay} onClick={() => setShowEditCompModal(null)}>
-    <div style={{...modal, width: '500px'}} onClick={e => e.stopPropagation()}>
-      <div style={modalHead}>
-        <div>
-          <h2 style={modalTitle}>Competition Settings</h2>
-          <p style={subLabel}>System ID: {showEditCompModal.id.split('-')[0]}...</p>
-        </div>
-        <button style={closeBtn} onClick={() => setShowEditCompModal(null)}><X size={20}/></button>
-      </div>
+      {showEditCompModal && (
+        <div style={overlay} onClick={() => setShowEditCompModal(null)}>
+          <div style={{ ...modal, width: '500px' }} onClick={e => e.stopPropagation()}>
+            <div style={modalHead}>
+              <div>
+                <h2 style={modalTitle}>Competition Settings</h2>
+                <p style={subLabel}>System ID: {showEditCompModal.id.split('-')[0]}...</p>
+              </div>
+              <button style={closeBtn} onClick={() => setShowEditCompModal(null)}><X size={20} /></button>
+            </div>
 
-      <div style={modalBody}>
-        {/* Toggle Switch */}
-        <div style={settingToggleRow}>
-          <div>
-            <p style={{fontWeight: 800, fontSize: '14px', margin: 0}}>VOTING STATUS</p>
-            <p style={{fontSize: '12px', color: '#64748b', margin: 0}}>Enable or disable live voting</p>
+            <div style={modalBody}>
+              <div style={settingToggleRow}>
+                <div>
+                  <p style={{ fontWeight: 800, fontSize: '14px', margin: 0 }}>VOTING STATUS</p>
+                  <p style={{ fontSize: '12px', color: '#64748b', margin: 0 }}>Enable or disable live voting</p>
+                </div>
+                <button
+                  onClick={() => setEditCompForm({ ...editCompForm, is_active: !editCompForm.is_active })}
+                  style={toggleStyle(editCompForm.is_active)}
+                >
+                  {editCompForm.is_active ? 'LIVE' : 'PAUSED'}
+                </button>
+              </div>
+
+              <div style={inputStack}>
+                <label style={fieldLabel}>COMPETITION TITLE</label>
+                <input style={modalInput} value={editCompForm.title} onChange={(e) => setEditCompForm({ ...editCompForm, title: e.target.value })} />
+              </div>
+
+              <div style={inputStack}>
+                <label style={fieldLabel}>CATEGORY HERO IMAGE</label>
+                <div style={uploadContainer}>
+                  {editCompForm.image_url && !editCompForm.image_file && (
+                    <img src={editCompForm.image_url} style={previewThumb} alt="Current" />
+                  )}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => setEditCompForm({ ...editCompForm, image_file: e.target.files[0] })}
+                    style={{ fontSize: '12px' }}
+                  />
+                </div>
+              </div>
+
+              <button style={actionSubmitBtn(isProcessing)} onClick={saveCompEdit} disabled={isProcessing}>
+                {isProcessing ? <Loader2 className="animate-spin" size={18} /> : 'SAVE SYSTEM CHANGES'}
+              </button>
+
+              <div style={dangerZone}>
+                <p style={dangerLabel}>DANGER ZONE</p>
+                <button style={deleteFullBtn} onClick={() => deleteEntireCompetition(showEditCompModal.id)}>
+                  <Trash2 size={14} /> DELETE ENTIRE COMPETITION
+                </button>
+              </div>
+            </div>
           </div>
-          <button 
-            onClick={() => setEditCompForm({...editCompForm, is_active: !editCompForm.is_active})}
-            style={toggleStyle(editCompForm.is_active)}
-          >
-            {editCompForm.is_active ? 'LIVE' : 'PAUSED'}
-          </button>
         </div>
-
-        <div style={inputStack}>
-          <label style={fieldLabel}>COMPETITION TITLE</label>
-          <input style={modalInput} value={editCompForm.title} onChange={(e) => setEditCompForm({...editCompForm, title: e.target.value})} />
-        </div>
-
-        {/* IMAGE UPLOAD SECTION */}
-        <div style={inputStack}>
-          <label style={fieldLabel}>CATEGORY HERO IMAGE</label>
-          <div style={uploadContainer}>
-             {editCompForm.image_url && !editCompForm.image_file && (
-               <img src={editCompForm.image_url} style={previewThumb} alt="Current" />
-             )}
-             <input 
-               type="file" 
-               accept="image/*" 
-               onChange={(e) => setEditCompForm({...editCompForm, image_file: e.target.files[0]})}
-               style={{fontSize: '12px'}}
-             />
-          </div>
-        </div>
-
-        <button style={actionSubmitBtn(isProcessing)} onClick={saveCompEdit} disabled={isProcessing}>
-          {isProcessing ? <Loader2 className="animate-spin" size={18}/> : 'SAVE SYSTEM CHANGES'}
-        </button>
-
-        {/* DANGER ZONE: DELETE ENTIRE COMPETITION */}
-        <div style={dangerZone}>
-           <p style={dangerLabel}>DANGER ZONE</p>
-           <button style={deleteFullBtn} onClick={() => deleteEntireCompetition(showEditCompModal.id)}>
-             <Trash2 size={14}/> DELETE ENTIRE COMPETITION
-           </button>
-        </div>
-      </div>
-    </div>
-  </div>
-)}
+      )}
 
       {/* 4. QR PREVIEW MODAL */}
       {showQR && (
         <div style={overlay} onClick={() => setShowQR(null)}>
           <div style={modal} onClick={e => e.stopPropagation()}>
             <div style={modalHead}>
-               <h2 style={modalTitle}>Portal QR</h2>
-               <button style={closeBtn} onClick={() => setShowQR(null)}><X size={20}/></button>
+              <h2 style={modalTitle}>Portal QR</h2>
+              <button style={closeBtn} onClick={() => setShowQR(null)}><X size={20} /></button>
             </div>
-            <div style={{display: 'flex', justifyContent: 'center', padding: '20px'}}>
-              <img src={showQR} alt="QR Code" style={{width: '250px', height: '250px', borderRadius: '20px'}} />
+            <div style={{ display: 'flex', justifyContent: 'center', padding: '20px' }}>
+              <img src={showQR} alt="QR Code" style={{ width: '250px', height: '250px', borderRadius: '20px' }} />
             </div>
-            <p style={{textAlign: 'center', fontSize: '12px', color: '#64748b'}}>Scan this to open the event portal.</p>
+            <p style={{ textAlign: 'center', fontSize: '12px', color: '#64748b' }}>Scan this to open the event portal.</p>
           </div>
         </div>
       )}
