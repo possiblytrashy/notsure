@@ -985,68 +985,63 @@ const dangerLabel = {
 };
 // This MUST be outside the main OrganizerDashboard function
 function CategoryItem({ 
-  contest, 
-  comp, // This is the data object, not a style
-  updateCategoryName, 
-  updateCategoryPrice, 
-  updateCategorySettings, 
-  deleteCategory, 
-  setShowCandidateModal, 
-  deleteCandidate 
+  contest, comp, updateCategoryName, updateCategoryPrice, 
+  updateCategorySettings, deleteCategory, setShowCandidateModal, 
+  deleteCandidate, fieldLabel, miniAction, modalInput, 
+  inputStack, twoColumnGrid, toggleStyle, deleteMiniBtn, 
+  candidateList, candidateRow, rankNum, candInfo, 
+  candName, voteBarContainer, voteBarFill, candVotes 
 }) {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
-  // If the mapping fails to pass comp, this prevents the crash
-  if (!comp) return null; 
+  // Safety check to prevent ReferenceError if comp is missing
+  if (!comp) return null;
 
   return (
     <div style={{ marginBottom: '20px', background: '#f8fafc', padding: '15px', borderRadius: '20px', border: '1px solid #f1f5f9' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <span style={{ fontSize: '10px', fontWeight: 900, color: '#64748b', textTransform: 'uppercase' }}>
-             Category for {comp.title} {/* This is where comp is used */}
-          </span>
+          <span style={fieldLabel}>CATEGORY</span>
           <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 800 }}>{contest.title}</h4>
         </div>
         
         <div style={{ display: 'flex', gap: '10px' }}>
           <button 
             onClick={() => setIsSettingsOpen(!isSettingsOpen)} 
-            style={{ 
-              display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 15px', 
-              borderRadius: '8px', border: '1px solid #e2e8f0', background: '#fff', 
-              fontSize: '11px', fontWeight: 800, cursor: 'pointer' 
-            }}
+            style={{ ...miniAction, width: 'auto', padding: '0 15px', gap: '8px', fontSize: '11px', fontWeight: 800 }}
           >
-            {isSettingsOpen ? 'CLOSE' : 'EDIT CATEGORY'}
+            {isSettingsOpen ? <ChevronDown size={14} /> : <Settings size={14} />}
+            {isSettingsOpen ? 'CLOSE SETTINGS' : 'EDIT CATEGORY'}
           </button>
           
           <button 
-            style={{ background: '#0ea5e9', color: 'white', border: 'none', borderRadius: '8px', padding: '8px', cursor: 'pointer' }} 
+            style={{ ...miniAction, background: '#0ea5e9', color: 'white' }} 
             onClick={() => setShowCandidateModal(contest)}
+            title="Add Nominee"
           >
-            Add Nominee
+            <UserPlus size={16} />
           </button>
         </div>
       </div>
 
+      {/* NESTED SETTINGS PANEL */}
       {isSettingsOpen && (
         <div style={{ marginTop: '20px', padding: '20px', background: '#fff', borderRadius: '15px', border: '1px solid #e2e8f0' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
-            <div>
-              <label style={{ fontSize: '10px', fontWeight: 900, color: '#94a3b8' }}>RENAME CATEGORY</label>
+          <div style={twoColumnGrid}>
+            <div style={inputStack}>
+              <label style={fieldLabel}>RENAME CATEGORY</label>
               <input 
-                style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', marginTop: '5px' }} 
+                style={modalInput} 
                 defaultValue={contest.title} 
                 onBlur={(e) => updateCategoryName(contest.id, e.target.value)} 
               />
             </div>
-            <div>
-              <label style={{ fontSize: '10px', fontWeight: 900, color: '#94a3b8' }}>VOTE PRICE (GHS)</label>
+            <div style={inputStack}>
+              <label style={fieldLabel}>VOTE PRICE (GHS)</label>
               <input 
                 type="number" 
                 step="0.01"
-                style={{ width: '100%', padding: '10px', borderRadius: '8px', border: '1px solid #e2e8f0', marginTop: '5px' }} 
+                style={modalInput} 
                 defaultValue={contest.vote_price} 
                 onBlur={(e) => updateCategoryPrice(contest.id, e.target.value)} 
               />
@@ -1054,47 +1049,36 @@ function CategoryItem({
           </div>
           
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '20px', paddingTop: '15px', borderTop: '1px solid #f1f5f9' }}>
-             <button 
-               onClick={() => updateCategorySettings(contest.id, { isActive: !contest.is_active })}
-               style={{ 
-                 padding: '6px 12px', borderRadius: '6px', border: 'none', fontWeight: 800, fontSize: '10px', cursor: 'pointer',
-                 backgroundColor: contest.is_active ? '#f0fdf4' : '#fef2f2',
-                 color: contest.is_active ? '#16a34a' : '#ef4444'
-               }}
-             >
-               {contest.is_active ? 'ACTIVE' : 'PAUSED'}
-             </button>
-             <button 
-               onClick={() => deleteCategory(contest.id)} 
-               style={{ background: 'none', border: 'none', color: '#ef4444', fontWeight: 700, cursor: 'pointer' }}
-             >
-               DELETE CATEGORY
+             <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <span style={fieldLabel}>STATUS:</span>
+                <button 
+                  onClick={() => updateCategorySettings(contest.id, { isActive: !contest.is_active })}
+                  style={toggleStyle(contest.is_active)}
+                >
+                  {contest.is_active ? 'ACTIVE' : 'PAUSED'}
+                </button>
+             </div>
+             <button onClick={() => deleteCategory(contest.id)} style={{ ...deleteMiniBtn, color: '#ef4444', fontWeight: 700 }}>
+               <Trash2 size={14} /> DELETE CATEGORY
              </button>
           </div>
         </div>
       )}
 
-      {/* NOMINEES LIST (Uses contest, not comp) */}
-      <div style={{ marginTop: '20px' }}>
+      {/* NOMINEE LIST */}
+      <div style={{ ...candidateList, marginTop: '20px' }}>
         {contest.candidates?.sort((a, b) => b.vote_count - a.vote_count).map((cand, idx) => (
-          <div key={cand.id} style={{ display: 'flex', alignItems: 'center', gap: '15px', padding: '10px 0', borderBottom: '1px solid #f1f5f9' }}>
-            <span style={{ fontWeight: 900, color: '#94a3b8', width: '30px' }}>#{idx + 1}</span>
-            <div style={{ flex: 1 }}>
-              <p style={{ margin: 0, fontWeight: 700, fontSize: '14px' }}>{cand.name}</p>
-              <div style={{ height: '6px', width: '100%', background: '#e2e8f0', borderRadius: '10px', marginTop: '5px', overflow: 'hidden' }}>
-                <div style={{ 
-                  height: '100%', 
-                  background: '#000', 
-                  width: `${idx === 0 ? 100 : (cand.vote_count / Math.max(contest.candidates[0]?.vote_count || 1, 1)) * 100}%` 
-                }}></div>
+          <div key={cand.id} style={candidateRow}>
+            <span style={rankNum}>#{idx + 1}</span>
+            <div style={candInfo}>
+              <p style={candName}>{cand.name}</p>
+              <div style={voteBarContainer}>
+                <div style={voteBarFill(idx === 0 ? 100 : (cand.vote_count / Math.max(contest.candidates[0]?.vote_count || 1, 1)) * 100)}></div>
               </div>
             </div>
-            <p style={{ fontWeight: 900, margin: 0 }}>{cand.vote_count}</p>
-            <button 
-              onClick={() => deleteCandidate(cand.id)}
-              style={{ background: 'none', border: 'none', color: '#cbd5e1', cursor: 'pointer' }}
-            >
-              DELETE
+            <p style={candVotes}>{cand.vote_count}</p>
+            <button style={deleteMiniBtn} onClick={() => deleteCandidate(cand.id)}>
+              <Trash2 size={12} />
             </button>
           </div>
         ))}
