@@ -554,9 +554,12 @@ const handleEditSubmit = async (e) => {
   <div style={fadeAnim}>
     <div style={viewHeader}>
       <h2 style={viewTitle}>Event Management</h2>
-      <button style={addBtn} onClick={() => { setEditingEvent(null); setShowEventModal(true); }}>
-        <Plus size={18}/> NEW EVENT
-      </button>
+      <button 
+      style={addBtn} 
+      onClick={() => router.push('/dashboard/organizer/create')}
+    >
+      <Plus size={18}/> NEW EVENT
+    </button>
     </div>
 <style>{`
   @keyframes modalSlideUp {
