@@ -685,7 +685,7 @@ const deleteEntireCompetition = async (compId) => {
         </div>
       )}
 
-      {/* 4. ANALYTICS VIEW */}
+     {/* 4. ANALYTICS VIEW */}
       {activeTab === 'analytics' && (
         <div style={fadeAnim}>
           <div style={sectionTitleRow}>
@@ -728,6 +728,8 @@ const deleteEntireCompetition = async (compId) => {
       )}
 
       {/* --- MODALS SECTION --- */}
+
+      {/* 1. SETTINGS / ONBOARDING MODAL */}
       {showSettingsModal && (
         <div style={overlay} onClick={() => setShowSettingsModal(false)}>
           <div style={modal} onClick={e => e.stopPropagation()}>
@@ -767,6 +769,7 @@ const deleteEntireCompetition = async (compId) => {
         </div>
       )}
 
+      {/* 2. ADD CANDIDATE MODAL */}
       {showCandidateModal && (
         <div style={overlay} onClick={() => setShowCandidateModal(null)}>
           <div style={modal} onClick={e => e.stopPropagation()}>
@@ -774,15 +777,17 @@ const deleteEntireCompetition = async (compId) => {
               <h2 style={modalTitle}>Add Nominee</h2>
               <button style={closeBtn} onClick={() => setShowCandidateModal(null)}><X size={20} /></button>
             </div>
-            <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '20px' }}>Adding to: <strong>{showCandidateModal.title}</strong></p>
+            <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '20px' }}>
+              Adding to Category: <strong>{showCandidateModal.title}</strong>
+            </p>
             <div style={modalBody}>
               <div style={inputStack}>
                 <label style={fieldLabel}>FULL NAME</label>
-                <input style={modalInput} value={newCandidate.name} onChange={(e) => setNewCandidate({ ...newCandidate, name: e.target.value })} />
+                <input style={modalInput} value={newCandidate.name} onChange={(e) => setNewCandidate({ ...newCandidate, name: e.target.value })} placeholder="Candidate Name" />
               </div>
               <div style={inputStack}>
-                <label style={fieldLabel}>IMAGE URL</label>
-                <input style={modalInput} value={newCandidate.image_url} onChange={(e) => setNewCandidate({ ...newCandidate, image_url: e.target.value })} />
+                <label style={fieldLabel}>IMAGE URL (OPTIONAL)</label>
+                <input style={modalInput} value={newCandidate.image_url} onChange={(e) => setNewCandidate({ ...newCandidate, image_url: e.target.value })} placeholder="https://..." />
               </div>
               <button style={actionSubmitBtn(isProcessing)} onClick={() => addCandidate(showCandidateModal.id)} disabled={isProcessing}>
                 {isProcessing ? 'ADDING...' : 'ADD TO CATEGORY'}
@@ -792,6 +797,7 @@ const deleteEntireCompetition = async (compId) => {
         </div>
       )}
 
+      {/* 3. EDIT COMPETITION MODAL */}
       {showEditCompModal && (
         <div style={overlay} onClick={() => setShowEditCompModal(null)}>
           <div style={{ ...modal, width: '500px' }} onClick={e => e.stopPropagation()}>
@@ -803,15 +809,21 @@ const deleteEntireCompetition = async (compId) => {
               <div style={settingToggleRow}>
                 <div>
                   <p style={{ fontWeight: 800, fontSize: '14px', margin: 0 }}>VOTING STATUS</p>
+                  <p style={{ fontSize: '12px', color: '#64748b', margin: 0 }}>Enable or disable live voting</p>
                 </div>
-                <button onClick={() => setEditCompForm({ ...editCompForm, is_active: !editCompForm.is_active })} style={toggleStyle(editCompForm.is_active)}>
+                <button
+                  onClick={() => setEditCompForm({ ...editCompForm, is_active: !editCompForm.is_active })}
+                  style={toggleStyle(editCompForm.is_active)}
+                >
                   {editCompForm.is_active ? 'LIVE' : 'PAUSED'}
                 </button>
               </div>
+
               <div style={inputStack}>
-                <label style={fieldLabel}>TITLE</label>
+                <label style={fieldLabel}>COMPETITION TITLE</label>
                 <input style={modalInput} value={editCompForm.title} onChange={(e) => setEditCompForm({ ...editCompForm, title: e.target.value })} />
               </div>
+
               <div style={inputStack}>
                 <label style={fieldLabel}>CATEGORY HERO IMAGE</label>
                 <div style={uploadContainer}>
@@ -826,9 +838,11 @@ const deleteEntireCompetition = async (compId) => {
                   />
                 </div>
               </div>
+
               <button style={actionSubmitBtn(isProcessing)} onClick={saveCompEdit} disabled={isProcessing}>
-                {isProcessing ? <Loader2 className="animate-spin" size={18} /> : 'SAVE CHANGES'}
+                {isProcessing ? <Loader2 className="animate-spin" size={18} /> : 'SAVE SYSTEM CHANGES'}
               </button>
+
               <div style={dangerZone}>
                 <p style={dangerLabel}>DANGER ZONE</p>
                 <button style={deleteFullBtn} onClick={() => deleteEntireCompetition(showEditCompModal.id)}>
@@ -840,6 +854,7 @@ const deleteEntireCompetition = async (compId) => {
         </div>
       )}
 
+      {/* 4. QR PREVIEW MODAL */}
       {showQR && (
         <div style={overlay} onClick={() => setShowQR(null)}>
           <div style={modal} onClick={e => e.stopPropagation()}>
@@ -850,18 +865,15 @@ const deleteEntireCompetition = async (compId) => {
             <div style={{ display: 'flex', justifyContent: 'center', padding: '20px' }}>
               <img src={showQR} alt="QR Code" style={{ width: '250px', height: '250px', borderRadius: '20px' }} />
             </div>
+            <p style={{ textAlign: 'center', fontSize: '12px', color: '#64748b' }}>Scan this to open the event portal.</p>
           </div>
         </div>
       )}
-
     </div>
   );
 }
 
-
 // --- LUXURY STYLES ---
-
-// Skeleton Styles
 const skeletonStyles = {
   wrapper: { height: '100vh', display: 'flex', flexDirection: 'column', padding: '50px 30px', background: '#fcfcfc', maxWidth: '1440px', margin: '0 auto' },
   header: { display: 'flex', justifyContent: 'space-between', marginBottom: '60px' },
