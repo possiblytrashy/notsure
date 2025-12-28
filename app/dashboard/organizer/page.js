@@ -57,7 +57,7 @@ export default function OrganizerDashboard() {
 
   // Candidate Creation Form State
   const [newCandidate, setNewCandidate] = useState({ name: '', image_url: '', bio: '' });
-
+const [showContestModal, setShowContestModal] = useState(null);
   // Competition Edit Form State
   const [editCompForm, setEditCompForm] = useState({ 
   title: '', 
@@ -109,112 +109,7 @@ const uploadToSupabase = async (file) => {
   return publicUrl;
 };
 
-// Updated Save function to handle file upload
-const saveCompEdit = async () => {
-  setIsProcessing(true);
-  try {
-    let finalImageUrl = editCompForm.image_url;
 
-    // Handle Image Upload to Storage
-    if (editCompForm.image_file) {
-      const fileExt = editCompForm.image_file.name.split('.').pop();
-      const fileName = `${Math.random()}.${fileExt}`;
-      const filePath = `competition-images/${fileName}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from('event-assets')
-        .upload(filePath, editCompForm.image_file);
-
-      if (uploadError) throw uploadError;
-
-      const { data: publicUrlData } = supabase.storage
-        .from('event-assets')
-        .getPublicUrl(filePath);
-        
-      finalImageUrl = publicUrlData.publicUrl;
-    }
-
-    // TARGETING THE MAIN COMPETITION TABLE
-    const { error } = await supabase
-      .from('competitions') 
-      .update({
-        title: editCompForm.title,
-        image_url: finalImageUrl,
-        is_active: editCompForm.is_active,
-      })
-      .eq('id', showEditCompModal.id);
-
-    if (error) throw error;
-
-    setShowEditCompModal(null);
-    await loadDashboardData(true);
-  } catch (err) {
-    console.error(err);
-    alert("Error updating competition settings.");
-  } finally {
-    setIsProcessing(false);
-  }
-};
-
-const deleteEntireCompetition = async (compId) => {
-  const confirmDelete = confirm("CRITICAL: This will permanently delete the Competition, all related Contests, and all Nominees/Votes. This cannot be undone.");
-  if (!confirmDelete) return;
-
-  setIsProcessing(true);
-  try {
-    // 1. Get the image URL before we delete the record
-    const { data: compData } = await supabase
-      .from('competitions')
-      .select('image_url')
-      .eq('id', compId)
-      .single();
-
-    // 2. Delete the parent record (SQL Cascade handles the rest)
-    const { error } = await supabase
-      .from('competitions') 
-      .delete()
-      .eq('id', compId);
-
-    if (error) throw error;
-
-    // 3. Clean up the image file from Storage if it exists
-    if (compData?.image_url) {
-      const fileName = compData.image_url.split('/').pop();
-      await supabase.storage
-        .from('event-assets')
-        .remove([`competition-images/${fileName}`]);
-    }
-
-    setShowEditCompModal(null);
-    await loadDashboardData(true);
-    alert("System Purge Complete. Storage assets released.");
-  } catch (err) {
-    console.error("Purge Error:", err);
-    alert("Delete failed. Ensure you have 'Delete' permissions on the 'competitions' table.");
-  } finally {
-    setIsProcessing(false);
-  }
-};
-
-  const deleteCandidate = async (candId) => {
-  if (!confirm("Remove this nominee from the competition?")) return;
-  
-  setIsProcessing(true);
-  try {
-    const { error } = await supabase
-      .from('candidates')
-      .delete()
-      .eq('id', candId);
-
-    if (error) throw error;
-    await loadDashboardData(true);
-  } catch (err) {
-    console.error(err);
-    alert("Failed to remove nominee.");
-  } finally {
-    setIsProcessing(false);
-  }
-};
   
   // --- 3. DATA ENGINE ---
   const loadDashboardData = useCallback(async (isSilent = false) => {
@@ -763,8 +658,7 @@ const deleteEntireCompetition = async (compId) => {
                     <div style={progressBar}><div style={progressFill(rate)}></div></div>
                   </div>
                 </div>
-              );
-            })}
+              )}
           </div>
         </div>
       )}
