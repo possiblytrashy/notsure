@@ -145,13 +145,19 @@ const saveCompEdit = async () => {
 };
 
 const deleteEntireCompetition = async (compId) => {
-  const confirmDelete = confirm("SYSTEM ALERT: This will permanently delete the Competition, all related Contests, and all Nominees/Votes. Proceed?");
-  
+  const confirmDelete = confirm("CRITICAL: This will permanently delete the Competition, all related Contests, and all Nominees/Votes. This cannot be undone.");
   if (!confirmDelete) return;
 
   setIsProcessing(true);
   try {
-    // We only delete the parent. SQL Cascade handles the rest.
+    // 1. Get the image URL before we delete the record
+    const { data: compData } = await supabase
+      .from('competitions')
+      .select('image_url')
+      .eq('id', compId)
+      .single();
+
+    // 2. Delete the parent record (SQL Cascade handles the rest)
     const { error } = await supabase
       .from('competitions') 
       .delete()
@@ -159,16 +165,45 @@ const deleteEntireCompetition = async (compId) => {
 
     if (error) throw error;
 
+    // 3. Clean up the image file from Storage if it exists
+    if (compData?.image_url) {
+      const fileName = compData.image_url.split('/').pop();
+      await supabase.storage
+        .from('event-assets')
+        .remove([`competition-images/${fileName}`]);
+    }
+
     setShowEditCompModal(null);
     await loadDashboardData(true);
-    alert("System Purge Complete.");
+    alert("System Purge Complete. Storage assets released.");
   } catch (err) {
     console.error("Purge Error:", err);
-    alert("Delete failed. Check if other tables are referencing these records.");
+    alert("Delete failed. Ensure you have 'Delete' permissions on the 'competitions' table.");
   } finally {
     setIsProcessing(false);
   }
 };
+
+  const deleteCandidate = async (candId) => {
+  if (!confirm("Remove this nominee from the competition?")) return;
+  
+  setIsProcessing(true);
+  try {
+    const { error } = await supabase
+      .from('candidates')
+      .delete()
+      .eq('id', candId);
+
+    if (error) throw error;
+    await loadDashboardData(true);
+  } catch (err) {
+    console.error(err);
+    alert("Failed to remove nominee.");
+  } finally {
+    setIsProcessing(false);
+  }
+};
+  
   // --- 3. DATA ENGINE ---
   const loadDashboardData = useCallback(async (isSilent = false) => {
     // Abort controller to prevent hanging requests
