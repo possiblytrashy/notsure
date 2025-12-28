@@ -144,19 +144,27 @@ const saveCompEdit = async () => {
   }
 };
 
-// Delete the entire competition (Cascades to candidates if DB is set up)
 const deleteEntireCompetition = async (compId) => {
-  const confirmDelete = confirm("CRITICAL: This will delete the competition and ALL candidates/votes. This cannot be undone.");
+  const confirmDelete = confirm("SYSTEM ALERT: This will permanently delete the Competition, all related Contests, and all Nominees/Votes. Proceed?");
+  
   if (!confirmDelete) return;
 
   setIsProcessing(true);
   try {
-    const { error } = await supabase.from('contests').delete().eq('id', compId);
+    // We only delete the parent. SQL Cascade handles the rest.
+    const { error } = await supabase
+      .from('competitions') 
+      .delete()
+      .eq('id', compId);
+
     if (error) throw error;
+
     setShowEditCompModal(null);
     await loadDashboardData(true);
+    alert("System Purge Complete.");
   } catch (err) {
-    alert("Delete failed.");
+    console.error("Purge Error:", err);
+    alert("Delete failed. Check if other tables are referencing these records.");
   } finally {
     setIsProcessing(false);
   }
