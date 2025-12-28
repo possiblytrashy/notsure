@@ -393,7 +393,80 @@ const deleteEntireCompetition = async (compId) => {
   };
 
   // Updated Save function to handle file upload
+// --- MISSING ACTION HANDLERS TO FIX BUILD ---
 
+  const saveCompEdit = async () => {
+    setIsProcessing(true);
+    try {
+      let finalImageUrl = editCompForm.image_url;
+
+      // Handle Image Upload if a new file was selected
+      if (editCompForm.image_file) {
+        const file = editCompForm.image_file;
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${Math.random()}.${fileExt}`;
+        const filePath = `competition-images/${fileName}`;
+
+        const { error: uploadError } = await supabase.storage
+          .from('event-assets')
+          .upload(filePath, file);
+
+        if (uploadError) throw uploadError;
+
+        const { data: urlData } = supabase.storage
+          .from('event-assets')
+          .getPublicUrl(filePath);
+          
+        finalImageUrl = urlData.publicUrl;
+      }
+
+      const { error } = await supabase
+        .from('competitions')
+        .update({
+          title: editCompForm.title,
+          description: editCompForm.description,
+          category: editCompForm.category,
+          vote_price: editCompForm.vote_price,
+          is_active: editCompForm.is_active,
+          image_url: finalImageUrl,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', showEditCompModal.id);
+
+      if (error) throw error;
+      
+      setShowEditCompModal(null);
+      loadDashboardData(true);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to update competition.");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const deleteCandidate = async (candId) => {
+    if (!confirm("Are you sure? This will delete all votes for this nominee.")) return;
+    try {
+      const { error } = await supabase.from('candidates').delete().eq('id', candId);
+      if (error) throw error;
+      loadDashboardData(true);
+    } catch (err) {
+      alert("Delete failed.");
+    }
+  };
+
+  const deleteEntireCompetition = async (compId) => {
+    if (!confirm("DANGER: This will delete the competition and all categories/nominees. Continue?")) return;
+    try {
+      const { error } = await supabase.from('competitions').delete().eq('id', compId);
+      if (error) throw error;
+      setShowEditCompModal(null);
+      loadDashboardData(true);
+    } catch (err) {
+      alert("Could not delete competition.");
+    }
+  };
   // --- 6. LOADING SKELETON ---
   if (loading) return (
     <div style={skeletonStyles.wrapper}>
