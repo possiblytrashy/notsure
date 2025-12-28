@@ -593,46 +593,43 @@ const uploadToSupabase = async (file) => {
                   </div>
                 </div>
                 <div style={divider}></div>
-                {comp.contests?.map((contest) => (
-                  <div key={contest.id} style={{ marginBottom: '30px', background: '#f8fafc', padding: '15px', borderRadius: '16px' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-                      <div>
-                        <span style={{ fontSize: '10px', fontWeight: 900, color: '#64748b', textTransform: 'uppercase' }}>Category</span>
-                        <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 800 }}>{contest.title}</h4>
+                {comp.contests?.map((contest) => {
+                  return (
+                    <div key={contest.id} style={{ marginBottom: '30px', background: '#f8fafc', padding: '15px', borderRadius: '16px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                        <div>
+                          <span style={{ fontSize: '10px', fontWeight: 900, color: '#64748b', textTransform: 'uppercase' }}>Category</span>
+                          <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 800 }}>{contest.title}</h4>
+                        </div>
+                        <div style={{ textAlign: 'right' }}>
+                          <span style={metaTag}>GHS {contest.vote_price || '1.00'} / vote</span>
+                          <button style={{ ...deleteMiniBtn, marginLeft: '10px', background: '#0ea5e9', color: 'white' }} onClick={() => setShowCandidateModal(contest)}>
+                            <UserPlus size={14} />
+                          </button>
+                        </div>
                       </div>
-                      <div style={{ textAlign: 'right' }}>
-                        <span style={metaTag}>GHS {contest.vote_price || '1.00'} / vote</span>
-                        <button style={{ ...deleteMiniBtn, marginLeft: '10px', background: '#0ea5e9', color: 'white' }} onClick={() => setShowCandidateModal(contest)}>
-                          <UserPlus size={14} />
-                        </button>
+                      <div style={candidateList}>
+                        {contest.candidates?.sort((a, b) => b.vote_count - a.vote_count).map((cand, idx) => (
+                          <div key={cand.id} style={candidateRow}>
+                            <span style={rankNum}>#{idx + 1}</span>
+                            <div style={candInfo}>
+                              <p style={candName}>{cand.name}</p>
+                              <div style={voteBarContainer}>
+                                <div style={voteBarFill(idx === 0 ? 100 : (cand.vote_count / (contest.candidates[0]?.vote_count || 1)) * 100)}></div>
+                              </div>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                              <p style={candVotes}>{cand.vote_count}</p>
+                              <button style={deleteMiniBtn} onClick={() => deleteCandidate(cand.id)}>
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
-                    <div style={candidateList}>
-                      {contest.candidates?.sort((a, b) => (b.vote_count || 0) - (a.vote_count || 0)).map((cand, idx) => {
-  const leaderVotes = contest.candidates[0]?.vote_count || 1;
-  const fillWidth = idx === 0 ? 100 : (cand.vote_count / leaderVotes) * 100;
-  
-  return (
-    <div key={cand.id} style={candidateRow}>
-      <span style={rankNum}>#{idx + 1}</span>
-      <div style={candInfo}>
-        <p style={candName}>{cand.name}</p>
-        <div style={voteBarContainer}>
-          <div style={voteBarFill(fillWidth)}></div>
-        </div>
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-        <p style={candVotes}>{cand.vote_count}</p>
-        <button style={deleteMiniBtn} onClick={() => deleteCandidate(cand.id)}>
-          <Trash2 size={12} />
-        </button>
-      </div>
-    </div>
-  );
-})}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             ))}
           </div>
@@ -663,7 +660,8 @@ const uploadToSupabase = async (file) => {
                     <div style={progressBar}><div style={progressFill(rate)}></div></div>
                   </div>
                 </div>
-              )}
+              );
+            })}
           </div>
         </div>
       )}
@@ -719,7 +717,7 @@ const uploadToSupabase = async (file) => {
         </div>
       )}
 
-   {showQR && (
+      {showQR && (
         <div style={overlay} onClick={() => setShowQR(null)}>
           <div style={modal} onClick={e => e.stopPropagation()}>
             <div style={modalHead}>
@@ -732,7 +730,8 @@ const uploadToSupabase = async (file) => {
       )}
     </div>
   );
-} // <--- ADD THIS CLOSING BRACE HERE
+}
+
 // --- LUXURY STYLES ---
 const skeletonStyles = {
   wrapper: { height: '100vh', display: 'flex', flexDirection: 'column', padding: '50px 30px', background: '#fcfcfc', maxWidth: '1440px', margin: '0 auto' },
