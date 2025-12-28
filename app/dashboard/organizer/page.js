@@ -366,27 +366,29 @@ useEffect(() => {
   };
 
   const updateCategoryPrice = async (contestId, newPrice) => {
-  setIsProcessing(true);
-  try {
     const { error } = await supabase
       .from('contests')
-      .update({ 
-        vote_price: parseFloat(newPrice),
-        updated_at: new Date().toISOString()
-      })
+      .update({ vote_price: parseFloat(newPrice) })
       .eq('id', contestId);
+    if (!error) loadDashboardData(true);
+  };
 
-    if (error) throw error;
-    
-    // Refresh the dashboard data to show the new price
-    loadDashboardData(true);
-  } catch (err) {
-    console.error(err);
-    alert("Failed to update category price.");
-  } finally {
-    setIsProcessing(false);
-  }
-};
+  const updateCategorySettings = async (contestId, updates) => {
+    const { error } = await supabase
+      .from('contests')
+      .update({ is_active: updates.isActive })
+      .eq('id', contestId);
+    if (!error) loadDashboardData(true);
+  };
+
+  const deleteCategory = async (contestId) => {
+    if (!confirm("Delete this category and all its nominees?")) return;
+    const { error } = await supabase
+      .from('contests')
+      .delete()
+      .eq('id', contestId);
+    if (!error) loadDashboardData(true);
+  };
   // --- 6. LOADING SKELETON ---
   if (loading) return (
     <div style={skeletonStyles.wrapper}>
@@ -587,6 +589,7 @@ useEffect(() => {
       )}
 
       {/* 3. COMPETITIONS VIEW */}
+     {/* 3. COMPETITIONS VIEW */}
       {activeTab === 'competitions' && (
         <div style={fadeAnim}>
           <div style={sectionTitleRow}>
@@ -618,64 +621,66 @@ useEffect(() => {
                   </div>
                 </div>
                 <div style={divider}></div>
+                
                 {comp.contests?.map((contest) => (
-  <div key={contest.id} style={categoryWrapper}>
-    <div style={{ display: 'flex', gap: '15px', alignItems: 'center', marginBottom: '10px' }}>
-      <div style={{ flex: 1 }}>
-        <p style={fieldLabel}>CATEGORY NAME</p>
-        <p style={{ fontWeight: 'bold' }}>{contest.title}</p>
-      </div>
+                  <div key={contest.id} style={{ marginBottom: '30px', background: '#f8fafc', padding: '15px', borderRadius: '16px', border: '1px solid #f1f5f9' }}>
+                    <div style={{ display: 'flex', gap: '15px', alignItems: 'center', marginBottom: '15px' }}>
+                      <div style={{ flex: 1 }}>
+                        <p style={fieldLabel}>CATEGORY NAME</p>
+                        <p style={{ fontWeight: 'bold', margin: 0 }}>{contest.title}</p>
+                      </div>
 
-      <div style={{ width: '120px' }}>
-        <label style={fieldLabel}>VOTE PRICE (GHS)</label>
-        <input 
-          type="number" 
-          step="0.01"
-          style={modalInput} 
-          defaultValue={contest.vote_price} 
-          onBlur={(e) => updateCategoryPrice(contest.id, e.target.value)}
-        />
-      </div>
+                      <div style={{ width: '120px' }}>
+                        <label style={fieldLabel}>VOTE PRICE (GHS)</label>
+                        <input 
+                          type="number" 
+                          step="0.01"
+                          style={{ ...modalInput, padding: '8px' }} 
+                          defaultValue={contest.vote_price} 
+                          onBlur={(e) => updateCategoryPrice(contest.id, e.target.value)}
+                        />
+                      </div>
 
-      <div style={{ display: 'flex', gap: '8px', marginTop: '15px' }}>
-        <button 
-          onClick={() => updateCategorySettings(contest.id, { isActive: !contest.is_active })}
-          style={statusBadge(contest.is_active)}
-        >
-          {contest.is_active ? 'ACTIVE' : 'PAUSED'}
-        </button>
-        <button onClick={() => deleteCategory(contest.id)} style={deleteMiniBtn}>
-          <Trash2 size={14} />
-        </button>
-      </div>
-    </div>
-    
-    {/* Candidate List remains below */}
- 
-                      <div style={candidateList}>
-                        {contest.candidates?.sort((a, b) => b.vote_count - a.vote_count).map((cand, idx) => (
-                          <div key={cand.id} style={candidateRow}>
-                            <span style={rankNum}>#{idx + 1}</span>
-                            <div style={candInfo}>
-                              <p style={candName}>{cand.name}</p>
-                              <div style={voteBarContainer}>
-                                <div style={voteBarFill(idx === 0 ? 100 : (cand.vote_count / (contest.candidates[0]?.vote_count || 1)) * 100)}></div>
-                              </div>
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                              <p style={candVotes}>{cand.vote_count}</p>
-                              <button style={deleteMiniBtn} onClick={() => deleteCandidate(cand.id)}>
-                                <Trash2 size={12} />
-                              </button>
-                            </div>
-                          </div>
-                        ))}
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '15px' }}>
+                        <button 
+                          onClick={() => updateCategorySettings(contest.id, { isActive: !contest.is_active })}
+                          style={toggleStyle(contest.is_active)}
+                        >
+                          {contest.is_active ? 'ACTIVE' : 'PAUSED'}
+                        </button>
+                        <button onClick={() => deleteCategory(contest.id)} style={deleteMiniBtn}>
+                          <Trash2 size={14} />
+                        </button>
+                        <button style={{ ...deleteMiniBtn, background: '#0ea5e9', color: 'white', borderRadius: '8px', padding: '5px 10px' }} onClick={() => setShowCandidateModal(contest)}>
+                          <UserPlus size={14} />
+                        </button>
                       </div>
                     </div>
- </div>
-))}
-                  );
-                })}
+
+                    <div style={candidateList}>
+                      {contest.candidates?.sort((a, b) => b.vote_count - a.vote_count).map((cand, idx) => (
+                        <div key={cand.id} style={candidateRow}>
+                          <span style={rankNum}>#{idx + 1}</span>
+                          <div style={candInfo}>
+                            <p style={candName}>{cand.name}</p>
+                            <div style={voteBarContainer}>
+                              <div style={voteBarFill(idx === 0 ? 100 : (cand.vote_count / Math.max(contest.candidates[0]?.vote_count || 1, 1)) * 100)}></div>
+                            </div>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <p style={candVotes}>{cand.vote_count}</p>
+                            <button style={deleteMiniBtn} onClick={() => deleteCandidate(cand.id)}>
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                      {(!contest.candidates || contest.candidates.length === 0) && (
+                        <p style={emptySmall}>No nominees yet. Click the blue icon to add one.</p>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
             ))}
           </div>
