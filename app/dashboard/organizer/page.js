@@ -90,6 +90,77 @@ const [uploading, setUploading] = useState(false);
   }
 };
 
+  // Function to handle the actual file upload to Supabase Storage
+const uploadToSupabase = async (file) => {
+  const fileExt = file.name.split('.').pop();
+  const fileName = `${Math.random()}.${fileExt}`;
+  const filePath = `competition-images/${fileName}`;
+
+  const { error: uploadError, data } = await supabase.storage
+    .from('event-assets') // Make sure this bucket exists in Supabase
+    .upload(filePath, file);
+
+  if (uploadError) throw uploadError;
+
+  const { data: { publicUrl } } = supabase.storage
+    .from('event-assets')
+    .getPublicUrl(filePath);
+
+  return publicUrl;
+};
+
+// Updated Save function to handle file upload
+const saveCompEdit = async () => {
+  if (!showEditCompModal?.id) return;
+  setIsProcessing(true);
+  try {
+    let finalImageUrl = editCompForm.image_url;
+
+    // If a new file was selected, upload it first
+    if (editCompForm.image_file) {
+      finalImageUrl = await uploadToSupabase(editCompForm.image_file);
+    }
+
+    const { error } = await supabase
+      .from('contests')
+      .update({ 
+        title: editCompForm.title,
+        description: editCompForm.description,
+        category: editCompForm.category,
+        vote_price: parseFloat(editCompForm.vote_price),
+        is_active: editCompForm.is_active,
+        image_url: finalImageUrl 
+      })
+      .eq('id', showEditCompModal.id);
+
+    if (error) throw error;
+    setShowEditCompModal(null);
+    await loadDashboardData(true);
+  } catch (err) {
+    console.error(err);
+    alert("Update failed.");
+  } finally {
+    setIsProcessing(false);
+  }
+};
+
+// Delete the entire competition (Cascades to candidates if DB is set up)
+const deleteEntireCompetition = async (compId) => {
+  const confirmDelete = confirm("CRITICAL: This will delete the competition and ALL candidates/votes. This cannot be undone.");
+  if (!confirmDelete) return;
+
+  setIsProcessing(true);
+  try {
+    const { error } = await supabase.from('contests').delete().eq('id', compId);
+    if (error) throw error;
+    setShowEditCompModal(null);
+    await loadDashboardData(true);
+  } catch (err) {
+    alert("Delete failed.");
+  } finally {
+    setIsProcessing(false);
+  }
+};
   // --- 3. DATA ENGINE ---
   const loadDashboardData = useCallback(async (isSilent = false) => {
     // Abort controller to prevent hanging requests
@@ -712,6 +783,7 @@ const deleteEntireCompetition = async (compId) => {
 
       {/* 3. EDIT COMPETITION MODAL */}
 {/* 3. DEEP EDIT COMPETITION MODAL */}
+{/* 3. DEEP EDIT COMPETITION MODAL */}
 {showEditCompModal && (
   <div style={overlay} onClick={() => setShowEditCompModal(null)}>
     <div style={{...modal, width: '500px'}} onClick={e => e.stopPropagation()}>
@@ -724,11 +796,11 @@ const deleteEntireCompetition = async (compId) => {
       </div>
 
       <div style={modalBody}>
-        {/* Toggle Switch for is_active */}
+        {/* Toggle Switch */}
         <div style={settingToggleRow}>
           <div>
             <p style={{fontWeight: 800, fontSize: '14px', margin: 0}}>VOTING STATUS</p>
-            <p style={{fontSize: '12px', color: '#64748b', margin: 0}}>Enable or disable live voting for this category</p>
+            <p style={{fontSize: '12px', color: '#64748b', margin: 0}}>Enable or disable live voting</p>
           </div>
           <button 
             onClick={() => setEditCompForm({...editCompForm, is_active: !editCompForm.is_active})}
@@ -743,50 +815,34 @@ const deleteEntireCompetition = async (compId) => {
           <input style={modalInput} value={editCompForm.title} onChange={(e) => setEditCompForm({...editCompForm, title: e.target.value})} />
         </div>
 
-        <div style={twoColumnGrid}>
-          <div style={inputStack}>
-            <label style={fieldLabel}>VOTE PRICE (GHS)</label>
-            <input type="number" style={modalInput} value={editCompForm.vote_price} onChange={(e) => setEditCompForm({...editCompForm, vote_price: e.target.value})} />
-          </div>
-          <div style={inputStack}>
-            <label style={fieldLabel}>CATEGORY TAG</label>
-            <input style={modalInput} value={editCompForm.category} onChange={(e) => setEditCompForm({...editCompForm, category: e.target.value})} placeholder="e.g. Fashion"/>
-          </div>
-        </div>
-
+        {/* IMAGE UPLOAD SECTION */}
         <div style={inputStack}>
-  <label style={fieldLabel}>CATEGORY HERO IMAGE</label>
-  <div style={uploadContainer}>
-    {editCompForm.image_url && !editCompForm.image_file && (
-      <img src={editCompForm.image_url} style={previewThumb} alt="Preview" />
-    )}
-    <input 
-      type="file" 
-      accept="image/*" 
-      onChange={(e) => setEditCompForm({...editCompForm, image_file: e.target.files[0]})}
-      style={fileInputStyle}
-    />
-  </div>
-</div>
-
-        <div style={inputStack}>
-          <label style={fieldLabel}>DESCRIPTION</label>
-          <textarea style={{...modalInput, height: '60px', resize:'none'}} value={editCompForm.description} onChange={(e) => setEditCompForm({...editCompForm, description: e.target.value})} />
+          <label style={fieldLabel}>CATEGORY HERO IMAGE</label>
+          <div style={uploadContainer}>
+             {editCompForm.image_url && !editCompForm.image_file && (
+               <img src={editCompForm.image_url} style={previewThumb} alt="Current" />
+             )}
+             <input 
+               type="file" 
+               accept="image/*" 
+               onChange={(e) => setEditCompForm({...editCompForm, image_file: e.target.files[0]})}
+               style={{fontSize: '12px'}}
+             />
+          </div>
         </div>
 
         <button style={actionSubmitBtn(isProcessing)} onClick={saveCompEdit} disabled={isProcessing}>
           {isProcessing ? <Loader2 className="animate-spin" size={18}/> : 'SAVE SYSTEM CHANGES'}
         </button>
-      </div>
+
+        {/* DANGER ZONE: DELETE ENTIRE COMPETITION */}
         <div style={dangerZone}>
-  <p style={dangerText}>DANGER ZONE</p>
-  <button 
-    style={deleteFullBtn} 
-    onClick={() => deleteEntireCompetition(showEditCompModal.id)}
-  >
-    <Trash2 size={14}/> DELETE ENTIRE COMPETITION
-  </button>
-</div>
+           <p style={dangerLabel}>DANGER ZONE</p>
+           <button style={deleteFullBtn} onClick={() => deleteEntireCompetition(showEditCompModal.id)}>
+             <Trash2 size={14}/> DELETE ENTIRE COMPETITION
+           </button>
+        </div>
+      </div>
     </div>
   </div>
 )}
@@ -1018,4 +1074,11 @@ const deleteFullBtn = {
   alignItems: 'center',
   justifyContent: 'center',
   gap: '8px'
+};
+const fileInputStyle = {
+  fontSize: '12px',
+  color: '#64748b',
+  width: '100%',
+  marginTop: '8px',
+  cursor: 'pointer'
 };
