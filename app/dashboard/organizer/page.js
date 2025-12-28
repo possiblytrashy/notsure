@@ -553,79 +553,81 @@ const handleEditSubmit = async (e) => {
       <div style={viewPort}>
         
         {/* 1. EVENTS VIEW */}
-        {activeTab === 'events' && (
-          <div style={fadeAnim}>
-            <div style={viewHeader}>
-              <h2 style={viewTitle}>Event Portfolio</h2>
-              <button style={addBtn} onClick={() => router.push('/dashboard/organizer/create')}>
-                <Plus size={18}/> CREATE NEW EVENT
-              </button>
-            </div>
-            <div style={cardGrid}>
-              {data.events.map(event => (
-                <div key={event.id} style={itemCard}>
-                  <div style={itemImage(event.images?.[0])}>
-                    <div style={imageOverlay}>
-                      <div style={cardQuickActions}>
-                        <button style={miniAction} onClick={() => copyLink('events', event.id)}>
-                          {copying === event.id ? <Check size={14} color="#22c55e"/> : <LinkIcon size={14}/>}
-                        </button>
-                        <button style={miniAction} onClick={() => setShowQR(`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${window.location.origin}/events/${event.id}`)}>
-                          <QrCode size={14}/>
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                  <div style={itemBody}>
-                    <h3 style={itemTitle}>{event.title}</h3>
-                    <div style={itemMeta}>
-                      <span style={metaLine}><Calendar size={14}/> {new Date(event.date).toLocaleDateString()}</span>
-                      <span style={metaLine}><MapPin size={14}/> {event.location}</span>
-                    </div>
-                    <div style={cardActionRow}>
-                      <button style={fullWidthBtn} onClick={() => { setSelectedEventFilter(event.id); setActiveTab('sales'); }}>
-                        VIEW SALES LEDGER
-                      </button>
-                      {data.events.map((event) => (
-  <div key={event.id} style={eventCard}>
-    <div style={eventHeader}>
-      <div style={{ flex: 1 }}>
-        <h3 style={{ margin: 0, fontSize: '20px', fontWeight: 900 }}>{event.title}</h3>
-        <p style={perfSub}>{event.location} • {new Date(event.date).toLocaleDateString()}</p>
-      </div>
-      
-      <div style={{ display: 'flex', gap: '8px' }}>
-        {/* EDIT BUTTON */}
-        <button 
-          style={circleAction} 
-          onClick={() => {
-            // Set your modal state to this event's data to edit
-            setEditingEvent(event); 
-            setShowEventModal(true);
-          }}
-        >
-          <Edit3 size={16} />
-        </button>
-
-        {/* DELETE BUTTON */}
-        <button 
-          style={{ ...circleAction, color: '#ef4444' }} 
-          onClick={() => deleteEvent(event.id)}
-        >
-          <Trash2 size={16} />
-        </button>
-      </div>
+      {activeTab === 'events' && (
+  <div style={fadeAnim}>
+    <div style={viewHeader}>
+      <h2 style={viewTitle}>Event Management</h2>
+      <button style={addBtn} onClick={() => { setEditingEvent(null); setShowEventModal(true); }}>
+        <Plus size={18}/> NEW EVENT
+      </button>
     </div>
-  
-                      <button style={editBtnCircle}><Edit3 size={18}/></button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-              {data.events.length === 0 && <div style={emptyState}>No events created yet. Start by clicking the button above.</div>}
+
+    <div style={contestGrid}>
+      {data.events.map((event) => (
+        <div key={event.id} style={itemCard}>
+          {/* IMAGE SECTION */}
+          <div style={itemImage(event.images?.[0])}>
+            <div style={imageOverlay}>
+              <div style={cardQuickActions}>
+                <button style={miniAction} onClick={() => copyLink('events', event.id)}>
+                  {copying === event.id ? <Check size={14} color="#22c55e"/> : <LinkIcon size={14}/>}
+                </button>
+                <button style={miniAction} onClick={() => setShowQR(`https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${window.location.origin}/events/${event.id}`)}>
+                  <QrCode size={14}/>
+                </button>
+              </div>
             </div>
           </div>
-        )}
+
+          {/* BODY SECTION */}
+          <div style={itemBody}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <h3 style={itemTitle}>{event.title}</h3>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                {/* EDIT BUTTON */}
+                <button 
+                  style={circleAction} 
+                  onClick={() => {
+                    setEditingEvent(event); 
+                    setShowEventModal(true);
+                  }}
+                >
+                  <Edit3 size={16} />
+                </button>
+
+                {/* DELETE BUTTON */}
+                <button 
+                  style={{ ...circleAction, color: '#ef4444' }} 
+                  onClick={() => deleteEvent(event.id)}
+                >
+                  <Trash2 size={16} />
+                </button>
+              </div>
+            </div>
+
+            <div style={itemMeta}>
+              <span style={metaLine}><Calendar size={14}/> {new Date(event.date).toLocaleDateString()}</span>
+              <span style={metaLine}><MapPin size={14}/> {event.location}</span>
+            </div>
+
+            <div style={cardActionRow}>
+              <button 
+                style={fullWidthBtn} 
+                onClick={() => { setSelectedEventFilter(event.id); setActiveTab('sales'); }}
+              >
+                VIEW SALES LEDGER
+              </button>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+    
+    {data.events.length === 0 && (
+      <div style={emptyState}>No events created yet. Start by clicking the button above.</div>
+    )}
+  </div>
+)}
 
   {/* 2. SALES LEDGER VIEW */}
       {activeTab === 'sales' && (
