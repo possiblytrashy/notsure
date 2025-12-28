@@ -218,19 +218,15 @@ const deleteEntireCompetition = async (compId) => {
   
   // --- 3. DATA ENGINE ---
   const loadDashboardData = useCallback(async (isSilent = false) => {
-    // Abort controller to prevent hanging requests
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s hard limit
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
 
     try {
       if (!isSilent) setLoading(true);
       else setRefreshing(true);
 
-      // 1. Auth Check
       const { data: authData, error: authError } = await supabase.auth.getUser();
-
       if (authError || !authData?.user) {
-        console.log("No valid session found, redirecting...");
         router.push('/login');
         return;
       }
@@ -238,42 +234,40 @@ const deleteEntireCompetition = async (compId) => {
       const user = authData.user;
 
       // 2. Parallel Data Fetching
-      // We use contests table but map it to 'competitions' in UI
-      const [profileRes, eventsRes, compsRes, ticketsRes, candidatesRes] = await Promise.allSettled([
+      // Note the nested select for competitions -> contests -> candidates
+      const [profileRes, eventsRes, compsRes, ticketsRes] = await Promise.allSettled([
         supabase.from('profiles').select('*').eq('id', user.id).single(),
         supabase.from('events').select('*').eq('organizer_id', user.id).order('created_at', { ascending: false }),
-        supabase.from('contests').select('*').eq('organizer_id', user.id).order('created_at', { ascending: false }),
+        supabase.from('competitions').select(`
+          *,
+          contests (
+            *,
+            candidates (*)
+          )
+        `).eq('organizer_id', user.id).order('created_at', { ascending: false }),
         supabase.from('tickets').select('*, events!inner(title, organizer_id)').eq('events.organizer_id', user.id),
-        supabase.from('candidates').select('*')
       ]);
 
       clearTimeout(timeoutId);
 
-      // Helper to extract data safely
       const getRes = (res) => (res.status === 'fulfilled' ? res.value.data : []);
       const getSingle = (res) => (res.status === 'fulfilled' ? res.value.data : null);
 
       const profileData = getSingle(profileRes);
       const eventsData = getRes(eventsRes);
-      const compsData = getRes(compsRes);
+      const rawCompsData = getRes(compsRes); // Now contains nested contests & candidates
       const ticketsData = getRes(ticketsRes);
-      const candidatesData = getRes(candidatesRes);
 
-      // 3. Data Mapping & Relations
-      // Attach candidates to their respective competitions
-      const finalCompetitions = (compsData || []).map(comp => ({
-        ...comp,
-        candidates: (candidatesData || []).filter(c => c.contest_id === comp.id)
-      }));
-
+      // 3. Data Mapping 
+      // Since Supabase did the nesting, we just ensure it's formatted for our Luxury UI
       setData({
         events: eventsData || [],
-        competitions: finalCompetitions,
+        competitions: rawCompsData || [],
         tickets: ticketsData || [],
         profile: { ...user, ...profileData }
       });
 
-      // 4. Populate Onboarding State
+      // 4. Onboarding State
       if (profileData) {
         setPaystackConfig({
           businessName: profileData.business_name || "",
@@ -291,12 +285,6 @@ const deleteEntireCompetition = async (compId) => {
       setRefreshing(false);
     }
   }, [router]);
-
-  // Initial Load
-  useEffect(() => {
-    loadDashboardData();
-  }, [loadDashboardData]);
-
 
   // --- 4. COMPUTED ANALYTICS (95/5 SPLIT) ---
   const stats = useMemo(() => {
@@ -619,65 +607,79 @@ const deleteEntireCompetition = async (compId) => {
              </div>
              
              <div style={contestGrid}>
-                {data.competitions.map(comp => {
-                  const sortedCandidates = [...(comp.candidates || [])].sort((a,b) => b.vote_count - a.vote_count);
-                  
-                  return (
-                    <div key={comp.id} style={contestCard}>
-                       <div style={contestHeader}>
-                          <div style={{flex: 1}}>
-                            <div style={badgeLuxuryAlt}>COMPETITION</div>
-                            <h3 style={{margin:'10px 0 5px', fontSize: '20px', fontWeight: 900}}>{comp.title}</h3>
-                            <p style={perfSub}>{comp.description || 'No description provided.'}</p>
-                            <div style={{display:'flex', gap:'10px', marginTop:'10px'}}>
-                                <span style={metaTag}>{sortedCandidates.length} Nominees</span>
-                                <span style={metaTag}>Category: {comp.category || 'General'}</span>
-                            </div>
-                          </div>
-                          <div style={{display:'flex', flexDirection:'column', gap:'8px'}}>
-                             <button style={miniAction} onClick={() => openEditCompModal(comp)} title="Edit Details">
-                                <Edit3 size={16}/>
-                             </button>
-                             <button style={miniAction} onClick={() => setShowCandidateModal(comp)} title="Add Candidate">
-                                <UserPlus size={16}/>
-                             </button>
-                             <button style={miniAction} onClick={() => copyLink('voting', comp.id)} title="Copy Link">
-                                {copying === comp.id ? <Check size={16} color="green"/> : <LinkIcon size={16}/>}
-                             </button>
-                          </div>
-                       </div>
-                       
-                       <div style={divider}></div>
-                       
- {/* ... inside candidateList ... */}
-{sortedCandidates.map((cand, idx) => ( // <--- Added idx here
-  <div key={cand.id} style={candidateRow}>
-    <span style={rankNum}>#{idx + 1}</span>
-    <div style={candInfo}>
-      <p style={candName}>{cand.name}</p>
-      <div style={voteBarContainer}>
-        <div style={voteBarFill(idx === 0 ? 100 : (cand.vote_count / (sortedCandidates[0]?.vote_count || 1)) * 100)}></div>
+                <div style={contestGrid}>
+  {data.competitions.map(comp => (
+    <div key={comp.id} style={contestCard}>
+      {/* 1. COMPETITION HEADER (The Main Event) */}
+      <div style={contestHeader}>
+        <div style={{ flex: 1 }}>
+          <div style={badgeLuxuryAlt}>OFFICIAL COMPETITION</div>
+          <h3 style={{ margin: '10px 0 5px', fontSize: '20px', fontWeight: 900 }}>{comp.title}</h3>
+          <p style={perfSub}>{comp.description || 'Luxury Event Portal'}</p>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <button style={miniAction} onClick={() => openEditCompModal(comp)} title="System Settings">
+            <Edit3 size={16} />
+          </button>
+          {/* Button to add a new CATEGORY (Contest) to this competition */}
+          <button style={miniAction} onClick={() => setShowContestModal(comp.id)} title="Add Category">
+            <Plus size={16} />
+          </button>
+        </div>
       </div>
-    </div>
-    <div style={{textAlign: 'right', minWidth: '60px', display: 'flex', alignItems: 'center', gap: '10px'}}>
-      <p style={candVotes}>{cand.vote_count}</p>
-      <button  
-        style={deleteMiniBtn} 
-        onClick={() => deleteCandidate(cand.id)}
-        title="Remove Nominee"
-      >
-        <Trash2 size={12}/>
-      </button>
-    </div>
-  </div>
-))}
+
+      <div style={divider}></div>
+
+      {/* 2. CONTESTS LOOP (The Categories like Best Dancer, etc.) */}
+      {comp.contests?.length > 0 ? (
+        comp.contests.map(contest => (
+          <div key={contest.id} style={{ marginBottom: '30px', background: '#f8fafc', padding: '15px', borderRadius: '16px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+              <div>
+                <span style={{ fontSize: '10px', fontWeight: 900, color: '#64748b', textTransform: 'uppercase' }}>Category</span>
+                <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 800 }}>{contest.title}</h4>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <span style={metaTag}>GHS {contest.vote_price || '1.00'} / vote</span>
+                <button style={{...deleteMiniBtn, marginLeft: '10px'}} onClick={() => setShowCandidateModal(contest)}>
+                  <UserPlus size={14} />
+                </button>
+              </div>
+            </div>
+
+            {/* 3. CANDIDATES LOOP (The Nominees inside this specific Category) */}
+            <div style={candidateList}>
+              {contest.candidates?.length > 0 ? (
+                // Sort by vote_count (bigint)
+                [...contest.candidates].sort((a, b) => b.vote_count - a.vote_count).map((cand, idx) => (
+                  <div key={cand.id} style={candidateRow}>
+                    <span style={rankNum}>#{idx + 1}</span>
+                    <div style={candInfo}>
+                      <p style={candName}>{cand.name}</p>
+                      <div style={voteBarContainer}>
+                        <div style={voteBarFill(idx === 0 ? 100 : (Number(cand.vote_count) / (Number(contest.candidates[0]?.vote_count) || 1)) * 100)}></div>
+                      </div>
                     </div>
-                  );
-                })}
-             </div>
-             {data.competitions.length === 0 && <div style={emptyState}>No competitions created. Click "Create Competition" to start.</div>}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <p style={candVotes}>{cand.vote_count}</p>
+                      <button style={deleteMiniBtn} onClick={() => deleteCandidate(cand.id)}>
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div style={emptySmall}>No nominees in this category yet.</div>
+              )}
+            </div>
           </div>
-        )}
+        ))
+      ) : (
+        <div style={emptySmall}>No categories created for this competition.</div>
+      )}
+    </div>
+  ))}
+</div>
 
         {/* 4. ANALYTICS VIEW */}
         {activeTab === 'analytics' && (
