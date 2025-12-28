@@ -261,28 +261,24 @@ useEffect(() => {
 // --- EVENT ACTIONS ---
 
 const deleteEvent = async (eventId) => {
-  if (!confirm("Are you sure? This will delete the event and all associated data forever.")) return;
+  if (!confirm("Are you sure? This will hide the event from the dashboard.")) return;
 
   try {
     const { error } = await supabase
       .from('events')
-      .delete()
+      .update({ is_deleted: true }) // Update instead of Delete
       .eq('id', eventId);
 
     if (error) throw error;
 
-    // Remove from local state instantly
     setData(prev => ({
       ...prev,
       events: prev.events.filter(e => e.id !== eventId)
     }));
-    
   } catch (error) {
-    console.error("Delete error:", error);
-    alert("Could not delete event. Check your database RLS policies.");
+    console.error("Soft delete error:", error);
   }
 };
-
 const handleEditSubmit = async (e) => {
   e.preventDefault();
   const formData = new FormData(e.target);
