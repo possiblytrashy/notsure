@@ -601,39 +601,70 @@ useEffect(() => {
 
    {/* CATEGORY (CONTEST) MAPPING */}
 {/* CATEGORY (CONTEST) MAPPING */}
-{comp.contests?.map((contest) => (
-  <CategoryItem 
-    key={contest.id} 
-    contest={contest} 
-    comp={comp} // Pass the parent competition object here
-    updateCategoryName={updateCategoryName}
-    updateCategoryPrice={updateCategoryPrice}
-    updateCategorySettings={updateCategorySettings}
-    deleteCategory={deleteCategory}
-    setShowCandidateModal={setShowCandidateModal}
-    deleteCandidate={deleteCandidate}
-    // Pass your style objects/helpers
-    fieldLabel={fieldLabel}
-    miniAction={miniAction}
-    modalInput={modalInput}
-    inputStack={inputStack}
-    twoColumnGrid={twoColumnGrid}
-    toggleStyle={toggleStyle}
-    deleteMiniBtn={deleteMiniBtn}
-    candidateList={candidateList}
-    candidateRow={candidateRow}
-    rankNum={rankNum}
-    candInfo={candInfo}
-    candName={candName}
-    voteBarContainer={voteBarContainer}
-    voteBarFill={voteBarFill}
-    candVotes={candVotes}
-  />
-))}
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+{/* 3. COMPETITIONS VIEW */}
+{activeTab === 'competitions' && (
+  <div style={fadeAnim}>
+    <div style={viewHeader}>
+      <h2 style={viewTitle}>Competition Management</h2>
+      <button style={addBtn} onClick={() => setShowContestModal(true)}>
+        <Plus size={18}/> NEW COMPETITION
+      </button>
+    </div>
 
- 
+    <div style={contestGrid}>
+      {data.competitions.map((comp) => (
+        <div key={comp.id} style={contestCard}>
+          <div style={contestHeader}>
+            <div style={{ flex: 1 }}>
+              <span style={badgeLuxuryAlt}>COMPETITION</span>
+              <h3 style={{ margin: '10px 0 5px', fontSize: '22px', fontWeight: 950 }}>{comp.title}</h3>
+              <p style={perfSub}>{comp.description}</p>
+            </div>
+            <button style={circleAction} onClick={() => openEditCompModal(comp)}>
+              <Settings size={18} />
+            </button>
+          </div>
 
+          <div style={divider}></div>
+
+          {/* CATEGORY (CONTEST) MAPPING - NOW INSIDE THE COMP LOOP */}
+          {comp.contests?.map((contest) => (
+            <CategoryItem 
+              key={contest.id} 
+              contest={contest} 
+              comp={comp} 
+              updateCategoryName={updateCategoryName}
+              updateCategoryPrice={updateCategoryPrice}
+              updateCategorySettings={updateCategorySettings}
+              deleteCategory={deleteCategory}
+              setShowCandidateModal={setShowCandidateModal}
+              deleteCandidate={deleteCandidate}
+              fieldLabel={fieldLabel}
+              miniAction={miniAction}
+              modalInput={modalInput}
+              inputStack={inputStack}
+              twoColumnGrid={twoColumnGrid}
+              toggleStyle={toggleStyle}
+              deleteMiniBtn={deleteMiniBtn}
+              candidateList={candidateList}
+              candidateRow={candidateRow}
+              rankNum={rankNum}
+              candInfo={candInfo}
+              candName={candName}
+              voteBarContainer={voteBarContainer}
+              voteBarFill={voteBarFill}
+              candVotes={candVotes}
+            />
+          ))}
+
+          {(!comp.contests || comp.contests.length === 0) && (
+            <div style={emptySmall}>No categories created. Edit competition to add one.</div>
+          )}
+        </div>
+      ))}
+    </div>
+  </div>
+)}
       {/* 4. ANALYTICS VIEW */}
       {activeTab === 'analytics' && (
         <div style={fadeAnim}>
