@@ -608,23 +608,28 @@ const uploadToSupabase = async (file) => {
                       </div>
                     </div>
                     <div style={candidateList}>
-                      {contest.candidates?.sort((a, b) => b.vote_count - a.vote_count).map((cand, idx) => (
-                        <div key={cand.id} style={candidateRow}>
-                          <span style={rankNum}>#{idx + 1}</span>
-                          <div style={candInfo}>
-                            <p style={candName}>{cand.name}</p>
-                            <div style={voteBarContainer}>
-                              <div style={voteBarFill(idx === 0 ? 100 : (cand.vote_count / (contest.candidates[0]?.vote_count || 1)) * 100)}></div>
-                            </div>
-                          </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <p style={candVotes}>{cand.vote_count}</p>
-                            <button style={deleteMiniBtn} onClick={() => deleteCandidate(cand.id)}>
-                              <Trash2 size={12} />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
+                      {contest.candidates?.sort((a, b) => (b.vote_count || 0) - (a.vote_count || 0)).map((cand, idx) => {
+  const leaderVotes = contest.candidates[0]?.vote_count || 1;
+  const fillWidth = idx === 0 ? 100 : (cand.vote_count / leaderVotes) * 100;
+  
+  return (
+    <div key={cand.id} style={candidateRow}>
+      <span style={rankNum}>#{idx + 1}</span>
+      <div style={candInfo}>
+        <p style={candName}>{cand.name}</p>
+        <div style={voteBarContainer}>
+          <div style={voteBarFill(fillWidth)}></div>
+        </div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <p style={candVotes}>{cand.vote_count}</p>
+        <button style={deleteMiniBtn} onClick={() => deleteCandidate(cand.id)}>
+          <Trash2 size={12} />
+        </button>
+      </div>
+    </div>
+  );
+})}
                     </div>
                   </div>
                 ))}
@@ -714,7 +719,7 @@ const uploadToSupabase = async (file) => {
         </div>
       )}
 
-      {showQR && (
+   {showQR && (
         <div style={overlay} onClick={() => setShowQR(null)}>
           <div style={modal} onClick={e => e.stopPropagation()}>
             <div style={modalHead}>
@@ -727,8 +732,7 @@ const uploadToSupabase = async (file) => {
       )}
     </div>
   );
-}
-
+} // <--- ADD THIS CLOSING BRACE HERE
 // --- LUXURY STYLES ---
 const skeletonStyles = {
   wrapper: { height: '100vh', display: 'flex', flexDirection: 'column', padding: '50px 30px', background: '#fcfcfc', maxWidth: '1440px', margin: '0 auto' },
