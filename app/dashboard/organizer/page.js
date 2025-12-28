@@ -539,61 +539,61 @@ const deleteEntireCompetition = async (compId) => {
           </div>
         )}
 
-        {/* 2. SALES LEDGER VIEW */}
-        {activeTab === 'sales' && (
-          <div style={fadeAnim}>
-             <div style={viewHeader}>
-              <h2 style={viewTitle}>Sales Ledger</h2>
-              <div style={filterGroup}>
-                <div style={searchBox}>
-                  <Search size={18} color="#94a3b8"/>
-                  <input style={searchInputField} placeholder="Guest or Ref..." value={ticketSearch} onChange={(e) => setTicketSearch(e.target.value)}/>
-                </div>
-                <select style={eventDropdown} value={selectedEventFilter} onChange={(e) => setSelectedEventFilter(e.target.value)}>
-                  <option value="all">All Events</option>
-                  {data.events.map(e => <option key={e.id} value={e.id}>{e.title}</option>)}
-                </select>
-                <button style={outlineBtn}><Download size={16}/> EXPORT CSV</button>
+  {/* 2. SALES LEDGER VIEW */}
+      {activeTab === 'sales' && (
+        <div style={fadeAnim}>
+          <div style={viewHeader}>
+            <h2 style={viewTitle}>Sales Ledger</h2>
+            <div style={filterGroup}>
+              <div style={searchBox}>
+                <Search size={18} color="#94a3b8" />
+                <input style={searchInputField} placeholder="Guest or Ref..." value={ticketSearch} onChange={(e) => setTicketSearch(e.target.value)} />
               </div>
-            </div>
-            <div style={tableWrapper}>
-              <table style={dataTable}>
-                <thead>
-                  <tr>
-                    <th style={tableTh}>GUEST / REFERENCE</th>
-                    <th style={tableTh}>EVENT</th>
-                    <th style={tableTh}>GROSS (100%)</th>
-                    <th style={tableTh}>YOUR NET (95%)</th>
-                    <th style={tableTh}>STATUS</th>
-                    <th style={tableTh}>DATE</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredTickets.map((t) => (
-                    <tr key={t.id} style={tableTr}>
-                      <td style={tableTd}>
-                        <p style={guestBold}>{t.guest_name}</p>
-                        <p style={guestMuted}>{t.reference}</p>
-                      </td>
-                      <td style={tableTd}>{t.events?.title}</td>
-                      <td style={tableTd}>GHS {t.amount}</td>
-                      <td style={tableTd} style={{fontWeight: 900, color: '#16a34a'}}>
-                        GHS {(t.amount * 0.95).toFixed(2)}
-                      </td>
-                      <td style={tableTd}>
-                        {t.is_scanned ? <span style={scannedPill}>CHECKED IN</span> : <span style={activePill}>VALID</span>}
-                      </td>
-                      <td style={tableTd}>{new Date(t.created_at).toLocaleDateString()}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {filteredTickets.length === 0 && <div style={emptyTableState}>No sales records found matching your filters.</div>}
+              <select style={eventDropdown} value={selectedEventFilter} onChange={(e) => setSelectedEventFilter(e.target.value)}>
+                <option value="all">All Events</option>
+                {data.events.map(e => <option key={e.id} value={e.id}>{e.title}</option>)}
+              </select>
+              <button style={outlineBtn}><Download size={16} /> EXPORT CSV</button>
             </div>
           </div>
-        )}
+          <div style={tableWrapper}>
+            <table style={dataTable}>
+              <thead>
+                <tr>
+                  <th style={tableTh}>GUEST / REFERENCE</th>
+                  <th style={tableTh}>EVENT</th>
+                  <th style={tableTh}>GROSS (100%)</th>
+                  <th style={tableTh}>YOUR NET (95%)</th>
+                  <th style={tableTh}>STATUS</th>
+                  <th style={tableTh}>DATE</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredTickets.map((t) => (
+                  <tr key={t.id} style={tableTr}>
+                    <td style={tableTd}>
+                      <p style={guestBold}>{t.guest_name}</p>
+                      <p style={guestMuted}>{t.reference}</p>
+                    </td>
+                    <td style={tableTd}>{t.events?.title}</td>
+                    <td style={tableTd}>GHS {t.amount}</td>
+                    <td style={{ ...tableTd, fontWeight: 900, color: '#16a34a' }}>
+                      GHS {(t.amount * 0.95).toFixed(2)}
+                    </td>
+                    <td style={tableTd}>
+                      {t.is_scanned ? <span style={scannedPill}>CHECKED IN</span> : <span style={activePill}>VALID</span>}
+                    </td>
+                    <td style={tableTd}>{new Date(t.created_at).toLocaleDateString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {filteredTickets.length === 0 && <div style={emptyTableState}>No sales records found matching your filters.</div>}
+          </div>
+        </div>
+      )}
 
-  {/* 3. COMPETITIONS VIEW (Organized Hierarchy) */}
+      {/* 3. COMPETITIONS VIEW */}
       {activeTab === 'competitions' && (
         <div style={fadeAnim}>
           <div style={sectionTitleRow}>
@@ -609,7 +609,6 @@ const deleteEntireCompetition = async (compId) => {
           <div style={contestGrid}>
             {data.competitions.map((comp) => (
               <div key={comp.id} style={contestCard}>
-                {/* 1. COMPETITION HEADER (The Main Event) */}
                 <div style={contestHeader}>
                   <div style={{ flex: 1 }}>
                     <div style={badgeLuxuryAlt}>OFFICIAL COMPETITION</div>
@@ -620,7 +619,6 @@ const deleteEntireCompetition = async (compId) => {
                     <button style={miniAction} onClick={() => openEditCompModal(comp)} title="System Settings">
                       <Edit3 size={16} />
                     </button>
-                    {/* Trigger Show Category Modal - pass competition ID */}
                     <button style={miniAction} onClick={() => setShowContestModal(comp.id)} title="Add Category">
                       <Plus size={16} />
                     </button>
@@ -629,7 +627,6 @@ const deleteEntireCompetition = async (compId) => {
 
                 <div style={divider}></div>
 
-                {/* 2. CONTESTS LOOP (Categories within the competition) */}
                 {comp.contests?.length > 0 ? (
                   comp.contests.map((contest) => (
                     <div key={contest.id} style={{ marginBottom: '30px', background: '#f8fafc', padding: '15px', borderRadius: '16px' }}>
@@ -640,17 +637,15 @@ const deleteEntireCompetition = async (compId) => {
                         </div>
                         <div style={{ textAlign: 'right' }}>
                           <span style={metaTag}>GHS {contest.vote_price || '1.00'} / vote</span>
-                          <button 
-                            style={{ ...deleteMiniBtn, marginLeft: '10px', background: '#0ea5e9', color: 'white' }} 
+                          <button
+                            style={{ ...deleteMiniBtn, marginLeft: '10px', background: '#0ea5e9', color: 'white' }}
                             onClick={() => setShowCandidateModal(contest)}
-                            title="Add Nominee to this Category"
                           >
                             <UserPlus size={14} />
                           </button>
                         </div>
                       </div>
 
-                      {/* 3. CANDIDATES LOOP (Nominees inside this Category) */}
                       <div style={candidateList}>
                         {contest.candidates?.length > 0 ? (
                           [...contest.candidates]
@@ -683,9 +678,6 @@ const deleteEntireCompetition = async (compId) => {
                 )}
               </div>
             ))}
-            {data.competitions.length === 0 && (
-              <div style={emptyState}>No competitions created. Click "Create Competition" to start.</div>
-            )}
           </div>
         </div>
       )}
@@ -733,8 +725,6 @@ const deleteEntireCompetition = async (compId) => {
       )}
 
       {/* --- MODALS SECTION --- */}
-
-      {/* 1. SETTINGS / ONBOARDING MODAL */}
       {showSettingsModal && (
         <div style={overlay} onClick={() => setShowSettingsModal(false)}>
           <div style={modal} onClick={e => e.stopPropagation()}>
@@ -744,12 +734,12 @@ const deleteEntireCompetition = async (compId) => {
             </div>
             <div style={onboardingPromo}>
               <CreditCard size={20} color="#0ea5e9" />
-              <p style={{ margin: 0, fontSize: '13px' }}>Ensure bank details match your Paystack dashboard for 95% automated settlement.</p>
+              <p style={{ margin: 0, fontSize: '13px' }}>Ensure bank details match your Paystack dashboard.</p>
             </div>
             <div style={modalBody}>
               <div style={inputStack}>
                 <label style={fieldLabel}>BUSINESS LEGAL NAME</label>
-                <input style={modalInput} value={paystackConfig.businessName} onChange={(e) => setPaystackConfig({ ...paystackConfig, businessName: e.target.value })} placeholder="e.g. Ousted Events Ltd" />
+                <input style={modalInput} value={paystackConfig.businessName} onChange={(e) => setPaystackConfig({ ...paystackConfig, businessName: e.target.value })} />
               </div>
               <div style={inputStack}>
                 <label style={fieldLabel}>SETTLEMENT DESTINATION</label>
@@ -757,14 +747,11 @@ const deleteEntireCompetition = async (compId) => {
                   <option value="">Select Network</option>
                   <option value="MTN">MTN Mobile Money</option>
                   <option value="VOD">Telecel (Vodafone) Cash</option>
-                  <option value="058">GT Bank</option>
-                  <option value="044">Access Bank</option>
-                  <option value="011">Zenith Bank</option>
                 </select>
               </div>
               <div style={inputStack}>
                 <label style={fieldLabel}>ACCOUNT / WALLET NUMBER</label>
-                <input style={modalInput} value={paystackConfig.accountNumber} onChange={(e) => setPaystackConfig({ ...paystackConfig, accountNumber: e.target.value })} placeholder="055XXXXXXX" />
+                <input style={modalInput} value={paystackConfig.accountNumber} onChange={(e) => setPaystackConfig({ ...paystackConfig, accountNumber: e.target.value })} />
               </div>
               <button style={actionSubmitBtn(isProcessing)} onClick={saveOnboardingDetails} disabled={isProcessing}>
                 {isProcessing ? 'UPDATING...' : 'CONFIRM SETTINGS'}
@@ -774,7 +761,6 @@ const deleteEntireCompetition = async (compId) => {
         </div>
       )}
 
-      {/* 2. ADD CANDIDATE MODAL */}
       {showCandidateModal && (
         <div style={overlay} onClick={() => setShowCandidateModal(null)}>
           <div style={modal} onClick={e => e.stopPropagation()}>
@@ -782,17 +768,15 @@ const deleteEntireCompetition = async (compId) => {
               <h2 style={modalTitle}>Add Nominee</h2>
               <button style={closeBtn} onClick={() => setShowCandidateModal(null)}><X size={20} /></button>
             </div>
-            <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '20px' }}>
-              Adding to Category: <strong>{showCandidateModal.title}</strong>
-            </p>
+            <p style={{ fontSize: '13px', color: '#64748b', marginBottom: '20px' }}>Adding to: <strong>{showCandidateModal.title}</strong></p>
             <div style={modalBody}>
               <div style={inputStack}>
                 <label style={fieldLabel}>FULL NAME</label>
-                <input style={modalInput} value={newCandidate.name} onChange={(e) => setNewCandidate({ ...newCandidate, name: e.target.value })} placeholder="Candidate Name" />
+                <input style={modalInput} value={newCandidate.name} onChange={(e) => setNewCandidate({ ...newCandidate, name: e.target.value })} />
               </div>
               <div style={inputStack}>
-                <label style={fieldLabel}>IMAGE URL (OPTIONAL)</label>
-                <input style={modalInput} value={newCandidate.image_url} onChange={(e) => setNewCandidate({ ...newCandidate, image_url: e.target.value })} placeholder="https://..." />
+                <label style={fieldLabel}>IMAGE URL</label>
+                <input style={modalInput} value={newCandidate.image_url} onChange={(e) => setNewCandidate({ ...newCandidate, image_url: e.target.value })} />
               </div>
               <button style={actionSubmitBtn(isProcessing)} onClick={() => addCandidate(showCandidateModal.id)} disabled={isProcessing}>
                 {isProcessing ? 'ADDING...' : 'ADD TO CATEGORY'}
@@ -802,68 +786,34 @@ const deleteEntireCompetition = async (compId) => {
         </div>
       )}
 
-      {/* 3. EDIT COMPETITION MODAL */}
       {showEditCompModal && (
         <div style={overlay} onClick={() => setShowEditCompModal(null)}>
           <div style={{ ...modal, width: '500px' }} onClick={e => e.stopPropagation()}>
             <div style={modalHead}>
-              <div>
-                <h2 style={modalTitle}>Competition Settings</h2>
-                <p style={subLabel}>System ID: {showEditCompModal.id.split('-')[0]}...</p>
-              </div>
+              <h2 style={modalTitle}>Competition Settings</h2>
               <button style={closeBtn} onClick={() => setShowEditCompModal(null)}><X size={20} /></button>
             </div>
-
             <div style={modalBody}>
               <div style={settingToggleRow}>
                 <div>
                   <p style={{ fontWeight: 800, fontSize: '14px', margin: 0 }}>VOTING STATUS</p>
-                  <p style={{ fontSize: '12px', color: '#64748b', margin: 0 }}>Enable or disable live voting</p>
                 </div>
-                <button
-                  onClick={() => setEditCompForm({ ...editCompForm, is_active: !editCompForm.is_active })}
-                  style={toggleStyle(editCompForm.is_active)}
-                >
+                <button onClick={() => setEditCompForm({ ...editCompForm, is_active: !editCompForm.is_active })} style={toggleStyle(editCompForm.is_active)}>
                   {editCompForm.is_active ? 'LIVE' : 'PAUSED'}
                 </button>
               </div>
-
               <div style={inputStack}>
-                <label style={fieldLabel}>COMPETITION TITLE</label>
+                <label style={fieldLabel}>TITLE</label>
                 <input style={modalInput} value={editCompForm.title} onChange={(e) => setEditCompForm({ ...editCompForm, title: e.target.value })} />
               </div>
-
-              <div style={inputStack}>
-                <label style={fieldLabel}>CATEGORY HERO IMAGE</label>
-                <div style={uploadContainer}>
-                  {editCompForm.image_url && !editCompForm.image_file && (
-                    <img src={editCompForm.image_url} style={previewThumb} alt="Current" />
-                  )}
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => setEditCompForm({ ...editCompForm, image_file: e.target.files[0] })}
-                    style={{ fontSize: '12px' }}
-                  />
-                </div>
-              </div>
-
               <button style={actionSubmitBtn(isProcessing)} onClick={saveCompEdit} disabled={isProcessing}>
-                {isProcessing ? <Loader2 className="animate-spin" size={18} /> : 'SAVE SYSTEM CHANGES'}
+                {isProcessing ? <Loader2 className="animate-spin" size={18} /> : 'SAVE CHANGES'}
               </button>
-
-              <div style={dangerZone}>
-                <p style={dangerLabel}>DANGER ZONE</p>
-                <button style={deleteFullBtn} onClick={() => deleteEntireCompetition(showEditCompModal.id)}>
-                  <Trash2 size={14} /> DELETE ENTIRE COMPETITION
-                </button>
-              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* 4. QR PREVIEW MODAL */}
       {showQR && (
         <div style={overlay} onClick={() => setShowQR(null)}>
           <div style={modal} onClick={e => e.stopPropagation()}>
@@ -874,14 +824,15 @@ const deleteEntireCompetition = async (compId) => {
             <div style={{ display: 'flex', justifyContent: 'center', padding: '20px' }}>
               <img src={showQR} alt="QR Code" style={{ width: '250px', height: '250px', borderRadius: '20px' }} />
             </div>
-            <p style={{ textAlign: 'center', fontSize: '12px', color: '#64748b' }}>Scan this to open the event portal.</p>
           </div>
         </div>
       )}
-    </div>
-  );
-}
 
+    </div> // This closes the main content wrapper
+  ); // This closes the return
+} // This closes the function
+
+// --- LUXURY STYLES ---
 // --- LUXURY STYLES ---
 
 // Skeleton Styles
