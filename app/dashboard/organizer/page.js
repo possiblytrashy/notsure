@@ -873,7 +873,7 @@ const deleteEntireCompetition = async (compId) => {
   );
 }
 
-// --- LUXURY STYLES ---
+}// --- LUXURY STYLES ---
 
 // --- LUXURY STYLES ---
 const skeletonStyles = {
