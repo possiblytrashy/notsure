@@ -364,6 +364,29 @@ useEffect(() => {
       alert("Could not delete competition.");
     }
   };
+
+  const updateCategoryPrice = async (contestId, newPrice) => {
+  setIsProcessing(true);
+  try {
+    const { error } = await supabase
+      .from('contests')
+      .update({ 
+        vote_price: parseFloat(newPrice),
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', contestId);
+
+    if (error) throw error;
+    
+    // Refresh the dashboard data to show the new price
+    loadDashboardData(true);
+  } catch (err) {
+    console.error(err);
+    alert("Failed to update category price.");
+  } finally {
+    setIsProcessing(false);
+  }
+};
   // --- 6. LOADING SKELETON ---
   if (loading) return (
     <div style={skeletonStyles.wrapper}>
@@ -595,21 +618,40 @@ useEffect(() => {
                   </div>
                 </div>
                 <div style={divider}></div>
-                {comp.contests?.map((contest) => {
-                  return (
-                    <div key={contest.id} style={{ marginBottom: '30px', background: '#f8fafc', padding: '15px', borderRadius: '16px' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
-                        <div>
-                          <span style={{ fontSize: '10px', fontWeight: 900, color: '#64748b', textTransform: 'uppercase' }}>Category</span>
-                          <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 800 }}>{contest.title}</h4>
-                        </div>
-                        <div style={{ textAlign: 'right' }}>
-                          <span style={metaTag}>GHS {contest.vote_price || '1.00'} / vote</span>
-                          <button style={{ ...deleteMiniBtn, marginLeft: '10px', background: '#0ea5e9', color: 'white' }} onClick={() => setShowCandidateModal(contest)}>
-                            <UserPlus size={14} />
-                          </button>
-                        </div>
-                      </div>
+                {comp.contests?.map((contest) => (
+  <div key={contest.id} style={categoryWrapper}>
+    <div style={{ display: 'flex', gap: '15px', alignItems: 'center', marginBottom: '10px' }}>
+      <div style={{ flex: 1 }}>
+        <p style={fieldLabel}>CATEGORY NAME</p>
+        <p style={{ fontWeight: 'bold' }}>{contest.title}</p>
+      </div>
+
+      <div style={{ width: '120px' }}>
+        <label style={fieldLabel}>VOTE PRICE (GHS)</label>
+        <input 
+          type="number" 
+          step="0.01"
+          style={modalInput} 
+          defaultValue={contest.vote_price} 
+          onBlur={(e) => updateCategoryPrice(contest.id, e.target.value)}
+        />
+      </div>
+
+      <div style={{ display: 'flex', gap: '8px', marginTop: '15px' }}>
+        <button 
+          onClick={() => updateCategorySettings(contest.id, { isActive: !contest.is_active })}
+          style={statusBadge(contest.is_active)}
+        >
+          {contest.is_active ? 'ACTIVE' : 'PAUSED'}
+        </button>
+        <button onClick={() => deleteCategory(contest.id)} style={deleteMiniBtn}>
+          <Trash2 size={14} />
+        </button>
+      </div>
+    </div>
+    
+    {/* Candidate List remains below */}
+ 
                       <div style={candidateList}>
                         {contest.candidates?.sort((a, b) => b.vote_count - a.vote_count).map((cand, idx) => (
                           <div key={cand.id} style={candidateRow}>
