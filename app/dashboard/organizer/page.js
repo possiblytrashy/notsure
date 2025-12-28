@@ -600,8 +600,36 @@ useEffect(() => {
       )}
 
    {/* CATEGORY (CONTEST) MAPPING */}
-{comp.contests?.map((contest) => {
-  // Local state to toggle the nested settings for each category
+{/* CATEGORY (CONTEST) MAPPING */}
+{comp.contests?.map((contest) => (
+  <CategoryItem 
+    key={contest.id} 
+    contest={contest} 
+    comp={comp} // Pass the parent competition object here
+    updateCategoryName={updateCategoryName}
+    updateCategoryPrice={updateCategoryPrice}
+    updateCategorySettings={updateCategorySettings}
+    deleteCategory={deleteCategory}
+    setShowCandidateModal={setShowCandidateModal}
+    deleteCandidate={deleteCandidate}
+    // Pass your style objects/helpers
+    fieldLabel={fieldLabel}
+    miniAction={miniAction}
+    modalInput={modalInput}
+    inputStack={inputStack}
+    twoColumnGrid={twoColumnGrid}
+    toggleStyle={toggleStyle}
+    deleteMiniBtn={deleteMiniBtn}
+    candidateList={candidateList}
+    candidateRow={candidateRow}
+    rankNum={rankNum}
+    candInfo={candInfo}
+    candName={candName}
+    voteBarContainer={voteBarContainer}
+    voteBarFill={voteBarFill}
+    candVotes={candVotes}
+  />
+))}
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   return (
