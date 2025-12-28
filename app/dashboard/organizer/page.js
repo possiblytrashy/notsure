@@ -855,6 +855,7 @@ const deleteEntireCompetition = async (compId) => {
       )}
 
 
+ {/* 4. QR MODAL */}
       {showQR && (
         <div style={overlay} onClick={() => setShowQR(null)}>
           <div style={modal} onClick={e => e.stopPropagation()}>
@@ -873,8 +874,6 @@ const deleteEntireCompetition = async (compId) => {
   );
 }
 
-}// --- LUXURY STYLES ---
-
 // --- LUXURY STYLES ---
 const skeletonStyles = {
   wrapper: { height: '100vh', display: 'flex', flexDirection: 'column', padding: '50px 30px', background: '#fcfcfc', maxWidth: '1440px', margin: '0 auto' },
@@ -884,7 +883,6 @@ const skeletonStyles = {
   grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '30px' },
   card: { height: '300px', background: '#f5f5f5', borderRadius: '24px', animation: 'pulse 1.5s infinite ease-in-out' }
 };
-
 // CSS Injection for Skeleton Animation
 if (typeof document !== 'undefined') {
   const styleSheet = document.createElement("style");
