@@ -389,6 +389,17 @@ useEffect(() => {
       .eq('id', contestId);
     if (!error) loadDashboardData(true);
   };
+
+  const updateCategoryName = async (contestId, newTitle) => {
+  if (!newTitle) return;
+  const { error } = await supabase
+    .from('contests')
+    .update({ title: newTitle })
+    .eq('id', contestId);
+    
+  if (!error) loadDashboardData(true);
+  else alert("Failed to rename category.");
+};
   // --- 6. LOADING SKELETON ---
   if (loading) return (
     <div style={skeletonStyles.wrapper}>
@@ -588,104 +599,101 @@ useEffect(() => {
         </div>
       )}
 
-      {/* 3. COMPETITIONS VIEW */}
-     {/* 3. COMPETITIONS VIEW */}
-      {activeTab === 'competitions' && (
-        <div style={fadeAnim}>
-          <div style={sectionTitleRow}>
-            <div>
-              <h2 style={viewTitle}>Competitions & Voting</h2>
-              <p style={{ ...subLabel, marginTop: '5px' }}>Manage categories, nominees, and monitor real-time votes.</p>
+   {/* CATEGORY (CONTEST) MAPPING */}
+{comp.contests?.map((contest) => {
+  // Local state to toggle the nested settings for each category
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  return (
+    <div key={contest.id} style={{ marginBottom: '20px', background: '#f8fafc', padding: '15px', borderRadius: '20px', border: '1px solid #f1f5f9' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <span style={fieldLabel}>CATEGORY</span>
+          <h4 style={{ margin: 0, fontSize: '16px', fontWeight: 800 }}>{contest.title}</h4>
+        </div>
+        
+        <div style={{ display: 'flex', gap: '10px' }}>
+          {/* THE NESTING BUTTON */}
+          <button 
+            onClick={() => setIsSettingsOpen(!isSettingsOpen)} 
+            style={{ ...miniAction, width: 'auto', padding: '0 15px', gap: '8px', fontSize: '11px', fontWeight: 800 }}
+          >
+            {isSettingsOpen ? <ChevronDown size={14} /> : <Settings size={14} />}
+            {isSettingsOpen ? 'CLOSE SETTINGS' : 'EDIT CATEGORY'}
+          </button>
+          
+          <button 
+            style={{ ...miniAction, background: '#0ea5e9', color: 'white' }} 
+            onClick={() => setShowCandidateModal(contest)}
+            title="Add Nominee"
+          >
+            <UserPlus size={16} />
+          </button>
+        </div>
+      </div>
+
+      {/* NESTED SETTINGS PANEL */}
+      {isSettingsOpen && (
+        <div style={{ marginTop: '20px', padding: '20px', background: '#fff', borderRadius: '15px', border: '1px solid #e2e8f0', animation: 'fadeIn 0.3s ease' }}>
+          <div style={twoColumnGrid}>
+            <div style={inputStack}>
+              <label style={fieldLabel}>RENAME CATEGORY</label>
+              <input 
+                style={modalInput} 
+                defaultValue={contest.title} 
+                onBlur={(e) => updateCategoryName(contest.id, e.target.value)} 
+              />
             </div>
-            <button style={addBtn} onClick={() => router.push('/dashboard/organizer/contests/create')}>
-              <Plus size={20} /> CREATE COMPETITION
-            </button>
+            <div style={inputStack}>
+              <label style={fieldLabel}>VOTE PRICE (GHS)</label>
+              <input 
+                type="number" 
+                step="0.01"
+                style={modalInput} 
+                defaultValue={contest.vote_price} 
+                onBlur={(e) => updateCategoryPrice(contest.id, e.target.value)} 
+              />
+            </div>
           </div>
-
-          <div style={contestGrid}>
-            {data.competitions.map((comp) => (
-              <div key={comp.id} style={contestCard}>
-                <div style={contestHeader}>
-                  <div style={{ flex: 1 }}>
-                    <div style={badgeLuxuryAlt}>OFFICIAL COMPETITION</div>
-                    <h3 style={{ margin: '10px 0 5px', fontSize: '20px', fontWeight: 900 }}>{comp.title}</h3>
-                    <p style={perfSub}>{comp.description || 'Luxury Event Portal'}</p>
-                  </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <button style={miniAction} onClick={() => openEditCompModal(comp)} title="System Settings">
-                      <Edit3 size={16} />
-                    </button>
-                    <button style={miniAction} onClick={() => setShowContestModal(comp.id)} title="Add Category">
-                      <Plus size={16} />
-                    </button>
-                  </div>
-                </div>
-                <div style={divider}></div>
-                
-                {comp.contests?.map((contest) => (
-                  <div key={contest.id} style={{ marginBottom: '30px', background: '#f8fafc', padding: '15px', borderRadius: '16px', border: '1px solid #f1f5f9' }}>
-                    <div style={{ display: 'flex', gap: '15px', alignItems: 'center', marginBottom: '15px' }}>
-                      <div style={{ flex: 1 }}>
-                        <p style={fieldLabel}>CATEGORY NAME</p>
-                        <p style={{ fontWeight: 'bold', margin: 0 }}>{contest.title}</p>
-                      </div>
-
-                      <div style={{ width: '120px' }}>
-                        <label style={fieldLabel}>VOTE PRICE (GHS)</label>
-                        <input 
-                          type="number" 
-                          step="0.01"
-                          style={{ ...modalInput, padding: '8px' }} 
-                          defaultValue={contest.vote_price} 
-                          onBlur={(e) => updateCategoryPrice(contest.id, e.target.value)}
-                        />
-                      </div>
-
-                      <div style={{ display: 'flex', gap: '8px', marginTop: '15px' }}>
-                        <button 
-                          onClick={() => updateCategorySettings(contest.id, { isActive: !contest.is_active })}
-                          style={toggleStyle(contest.is_active)}
-                        >
-                          {contest.is_active ? 'ACTIVE' : 'PAUSED'}
-                        </button>
-                        <button onClick={() => deleteCategory(contest.id)} style={deleteMiniBtn}>
-                          <Trash2 size={14} />
-                        </button>
-                        <button style={{ ...deleteMiniBtn, background: '#0ea5e9', color: 'white', borderRadius: '8px', padding: '5px 10px' }} onClick={() => setShowCandidateModal(contest)}>
-                          <UserPlus size={14} />
-                        </button>
-                      </div>
-                    </div>
-
-                    <div style={candidateList}>
-                      {contest.candidates?.sort((a, b) => b.vote_count - a.vote_count).map((cand, idx) => (
-                        <div key={cand.id} style={candidateRow}>
-                          <span style={rankNum}>#{idx + 1}</span>
-                          <div style={candInfo}>
-                            <p style={candName}>{cand.name}</p>
-                            <div style={voteBarContainer}>
-                              <div style={voteBarFill(idx === 0 ? 100 : (cand.vote_count / Math.max(contest.candidates[0]?.vote_count || 1, 1)) * 100)}></div>
-                            </div>
-                          </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <p style={candVotes}>{cand.vote_count}</p>
-                            <button style={deleteMiniBtn} onClick={() => deleteCandidate(cand.id)}>
-                              <Trash2 size={12} />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                      {(!contest.candidates || contest.candidates.length === 0) && (
-                        <p style={emptySmall}>No nominees yet. Click the blue icon to add one.</p>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ))}
+          
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '20px', paddingTop: '15px', borderTop: '1px solid #f1f5f9' }}>
+             <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                <span style={fieldLabel}>STATUS:</span>
+                <button 
+                  onClick={() => updateCategorySettings(contest.id, { isActive: !contest.is_active })}
+                  style={toggleStyle(contest.is_active)}
+                >
+                  {contest.is_active ? 'ACTIVE' : 'PAUSED'}
+                </button>
+             </div>
+             <button onClick={() => deleteCategory(contest.id)} style={{ ...deleteMiniBtn, color: '#ef4444', fontWeight: 700 }}>
+               <Trash2 size={14} /> DELETE CATEGORY
+             </button>
           </div>
         </div>
       )}
+
+      {/* NOMINEE LIST - Remains visible below settings */}
+      <div style={{ ...candidateList, marginTop: '20px' }}>
+        {contest.candidates?.sort((a, b) => b.vote_count - a.vote_count).map((cand, idx) => (
+          <div key={cand.id} style={candidateRow}>
+            <span style={rankNum}>#{idx + 1}</span>
+            <div style={candInfo}>
+              <p style={candName}>{cand.name}</p>
+              <div style={voteBarContainer}>
+                <div style={voteBarFill(idx === 0 ? 100 : (cand.vote_count / Math.max(contest.candidates[0]?.vote_count || 1, 1)) * 100)}></div>
+              </div>
+            </div>
+            <p style={candVotes}>{cand.vote_count}</p>
+            <button style={deleteMiniBtn} onClick={() => deleteCandidate(cand.id)}>
+              <Trash2 size={12} />
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+})}
 
       {/* 4. ANALYTICS VIEW */}
       {activeTab === 'analytics' && (
