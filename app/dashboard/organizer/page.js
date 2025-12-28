@@ -325,7 +325,6 @@ useEffect(() => {
       .update({
         title: editCompForm.title,
         description: editCompForm.description,
-        vote_price: editCompForm.vote_price,
         is_active: editCompForm.is_active, // Toggle for pausing voting
         image_url: finalImageUrl,
       })
