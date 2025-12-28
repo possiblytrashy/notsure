@@ -111,34 +111,46 @@ const uploadToSupabase = async (file) => {
 
 // Updated Save function to handle file upload
 const saveCompEdit = async () => {
-  if (!showEditCompModal?.id) return;
   setIsProcessing(true);
   try {
     let finalImageUrl = editCompForm.image_url;
 
-    // If a new file was selected, upload it first
+    // Handle Image Upload to Storage
     if (editCompForm.image_file) {
-      finalImageUrl = await uploadToSupabase(editCompForm.image_file);
+      const fileExt = editCompForm.image_file.name.split('.').pop();
+      const fileName = `${Math.random()}.${fileExt}`;
+      const filePath = `competition-images/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('event-assets')
+        .upload(filePath, editCompForm.image_file);
+
+      if (uploadError) throw uploadError;
+
+      const { data: publicUrlData } = supabase.storage
+        .from('event-assets')
+        .getPublicUrl(filePath);
+        
+      finalImageUrl = publicUrlData.publicUrl;
     }
 
+    // TARGETING THE MAIN COMPETITION TABLE
     const { error } = await supabase
-      .from('contests')
-      .update({ 
+      .from('competitions') 
+      .update({
         title: editCompForm.title,
-        description: editCompForm.description,
-        category: editCompForm.category,
-        vote_price: parseFloat(editCompForm.vote_price),
+        image_url: finalImageUrl,
         is_active: editCompForm.is_active,
-        image_url: finalImageUrl 
       })
       .eq('id', showEditCompModal.id);
 
     if (error) throw error;
+
     setShowEditCompModal(null);
     await loadDashboardData(true);
   } catch (err) {
     console.error(err);
-    alert("Update failed.");
+    alert("Error updating competition settings.");
   } finally {
     setIsProcessing(false);
   }
