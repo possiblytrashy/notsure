@@ -20,7 +20,13 @@ export default function Home() {
   useEffect(() => {
     async function load() {
       try {
-        const { data } = await supabase.from('events').select('*').order('date', { ascending: true });
+        // --- UPDATED QUERY: Filter out deleted events ---
+        const { data } = await supabase
+          .from('events')
+          .select('*')
+          .eq('is_deleted', false) // Only show events that are NOT deleted
+          .order('date', { ascending: true });
+        
         setEvents(data || []);
       } catch (err) {
         console.error(err);
@@ -65,7 +71,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* --- FEATURED SECTION (Only shows if not searching) --- */}
+      {/* --- FEATURED SECTION --- */}
       {!search && featuredEvent && !loading && (
         <section style={styles.section}>
           <div style={styles.sectionHeader}>
@@ -135,6 +141,7 @@ export default function Home() {
   );
 }
 
+// Styles remain unchanged
 const styles = {
   pageWrapper: { maxWidth: '1200px', margin: '0 auto', padding: '0 20px 100px' },
   heroSection: { textAlign: 'center', padding: '80px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center' },
@@ -143,16 +150,13 @@ const styles = {
   searchContainer: { position: 'relative', width: '100%', maxWidth: '550px', marginTop: '40px' },
   searchIcon: { position: 'absolute', left: '25px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' },
   searchInput: { width: '100%', padding: '25px 30px 25px 65px', borderRadius: '30px', border: 'none', background: '#fff', fontSize: '16px', fontWeight: 600, boxShadow: '0 20px 40px rgba(0,0,0,0.06)', outline: 'none' },
-  
   section: { marginTop: '60px' },
   sectionHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px' },
   sectionTitle: { fontSize: '24px', fontWeight: 900, display: 'flex', alignItems: 'center', gap: '12px', margin: 0 },
   countBadge: { background: '#000', color: '#fff', padding: '4px 12px', borderRadius: '8px', fontSize: '12px', fontWeight: 800 },
-  
   featuredCard: { position: 'relative', display: 'block', borderRadius: '40px', overflow: 'hidden', textDecoration: 'none', color: '#fff' },
   featuredOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: '40px', background: 'linear-gradient(to top, rgba(0,0,0,0.8), transparent)' },
   featuredTitle: { fontSize: '42px', fontWeight: 900, margin: '10px 0' },
-  
   grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '30px' },
   card: { textDecoration: 'none', color: 'inherit', background: '#fff', borderRadius: '35px', padding: '15px', display: 'flex', flexDirection: 'column', transition: 'transform 0.2s', boxShadow: '0 10px 30px rgba(0,0,0,0.02)' },
   cardImg: { width: '100%', height: '240px', borderRadius: '25px', backgroundSize: 'cover', backgroundPosition: 'center', backgroundRepeat: 'no-repeat', backgroundColor: '#f1f5f9' },
@@ -164,7 +168,6 @@ const styles = {
   cardFooter: { marginTop: '20px', paddingTop: '15px', borderTop: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
   priceTag: { fontWeight: 900, fontSize: '18px' },
   arrowCircle: { background: '#000', color: '#fff', width: '40px', height: '40px', borderRadius: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center' },
-  
   ctaBox: { marginTop: '100px', padding: '60px 20px', borderRadius: '50px', background: '#000', color: '#fff', textAlign: 'center' },
   ctaTitle: { fontSize: '36px', fontWeight: 900, marginBottom: '15px' },
   ctaText: { color: '#94a3b8', fontSize: '18px', maxWidth: '500px', margin: '0 auto 40px' },
