@@ -699,7 +699,7 @@ const handleEditSubmit = async (e) => {
     style={addBtn} 
     onClick={() => router.push('/dashboard/organizer/contests/create')}
   >
-    <Plus size={18}/> NEW EVENT
+    <Plus size={18}/> NEW COMPETITION
   </button>
     </div>
 
