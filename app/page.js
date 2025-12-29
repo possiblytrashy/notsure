@@ -1,316 +1,178 @@
-"use client"; 
-
+"use client";
 import { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase'; 
-import { Outfit } from 'next/font/google';
-import { 
-  ScanLine, 
-  LayoutDashboard, 
-  LogIn, 
-  Vote, 
-  Ticket,
-  LogOut
-} from 'lucide-react'; 
+import { supabase } from '../lib/supabase';
+import { Search, MapPin, Calendar, ArrowRight, Zap, Flame, Ticket, LayoutGrid } from 'lucide-react';
 
-const outfit = Outfit({ subsets: ['latin'] });
+// Enhanced Skeleton with Pulse Animation
+const Skeleton = () => (
+  <div style={styles.card}>
+    <div style={{ height: '200px', background: '#eee', borderRadius: '25px', animation: 'pulse 1.5s infinite ease-in-out' }} />
+    <div style={{ height: '20px', width: '70%', background: '#eee', marginTop: '15px', borderRadius: '10px' }} />
+    <div style={{ height: '15px', width: '40%', background: '#eee', marginTop: '10px', borderRadius: '10px' }} />
+  </div>
+);
 
-export default function RootLayout({ children }) {
-  const [user, setUser] = useState(null);
+export default function Home() {
+  const [events, setEvents] = useState([]);
+  const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const getInitialSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      setUser(session?.user ?? null);
-      setLoading(false);
-    };
-    getInitialSession();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
-    });
-
-    return () => subscription.unsubscribe();
+    async function load() {
+      try {
+        // --- UPDATED QUERY: Filter out deleted events ---
+        const { data } = await supabase
+          .from('events')
+          .select('*')
+          .eq('is_deleted', false) // Only show events that are NOT deleted
+          .order('date', { ascending: true });
+        
+        setEvents(data || []);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
   }, []);
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-    window.location.href = '/';
-  };
+  const filtered = events.filter(e => e.title.toLowerCase().includes(search.toLowerCase()));
+  
+  // Logic for Sections
+  const featuredEvent = filtered[0];
+  const upcomingEvents = filtered.slice(1);
 
   return (
-    <html lang="en" style={{ scrollBehavior: 'smooth' }}>
-      <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0" />
-        <style>{`
-          @keyframes mesh {
-            0% { background-position: 0% 50%; }
-            50% { background-position: 100% 50%; }
-            100% { background-position: 0% 50%; }
-          }
-          
-          .background-canvas {
-            position: fixed;
-            top: 0; left: 0; width: 100vw; height: 100vh;
-            z-index: -1;
-            background: linear-gradient(-45deg, #ee7752, #e73c7e, #23a6d5, #23d5ab);
-            background-size: 400% 400%;
-            animation: mesh 15s ease infinite;
-          }
+    <div style={styles.pageWrapper}>
+      <style>{`
+        @keyframes pulse { 0% { opacity: 0.6; } 50% { opacity: 1; } 100% { opacity: 0.6; } }
+        @media (max-width: 768px) {
+          .hero-title { font-size: 45px !important; }
+          .grid-container { grid-template-columns: 1fr !important; }
+          .hero-section { padding: 40px 10px !important; }
+        }
+      `}</style>
 
-          .glass-panel {
-            background: rgba(255, 255, 255, 0.72);
-            backdrop-filter: blur(20px) saturate(180%);
-            -webkit-backdrop-filter: blur(20px) saturate(180%);
-            border: 1px solid rgba(255, 255, 255, 0.35);
-          }
-
-          .glass-nav {
-            position: fixed;
-            top: 20px; left: 50%; transform: translateX(-50%);
-            width: 95%; maxWidth: 1200px;
-            border-radius: 22px;
-            padding: 8px 20px;
-            display: flex; 
-            justify-content: space-between; /* Pushes content to edges */
-            align-items: center;
-            z-index: 10000;
-          }
-
-          .nav-logo {
-            text-decoration: none; color: #000; font-weight: 950; font-size: 22px;
-            letter-spacing: -1.5px;
-            flex-shrink: 0; /* Prevents logo from squishing */
-            margin-right: 20px; /* Forced minimum gap */
-          }
-
-          .nav-actions { 
-            display: flex; 
-            gap: 10px; 
-            align-items: center;
-            justify-content: flex-end;
-            flex: 1; /* Takes up remaining space to push logo away */
-          }
-
-          .btn-nav {
-            text-decoration: none; color: #000; font-size: 10px; font-weight: 900;
-            letter-spacing: 0.5px; display: flex; alignItems: center; gap: 6px;
-            padding: 10px 14px; border-radius: 12px; transition: 0.2s;
-            cursor: pointer; border: none;
-            white-space: nowrap;
-          }
-
-          .btn-outline { border: 2px solid #000; background: rgba(255,255,255,0.3); }
-          .btn-solid { background: #000; color: #fff; }
-          .btn-vote { color: #fff; background: #e73c7e; box-shadow: 0 4px 12px rgba(231, 60, 126, 0.3); }
-
-          /* --- MOBILE OPTIMIZATION --- */
-          @media (max-width: 640px) {
-            .glass-nav { padding: 8px 12px; width: 94%; top: 12px; }
-            .nav-logo { font-size: 19px; margin-right: 10px; }
-            
-            .hide-mobile-text { display: none; }
-            .vote-text { display: inline !important; font-size: 10px; }
-
-            .btn-nav { padding: 8px 10px; gap: 4px; }
-            .nav-actions { gap: 6px; }
-          }
-          
-          * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-        `}</style>
-      </head>
-      
-      <body className={outfit.className} style={{ margin: 0, minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
-        <div className="background-canvas"></div>
-
-        <nav className="glass-nav glass-panel">
-          <a href="/" className="nav-logo">
-            OUSTED<span style={{ color: '#e73c7e' }}>.</span>
-          </a>
-          
-          <div className="nav-actions">
-            {/* VOTE: Primary Action - High contrast pink button */}
-            <a href="/voting" className="btn-nav btn-vote">
-              <Vote size={15} />
-              <span className="vote-text">VOTE</span>
-            </a>
-            
-            {!loading && (
-              user ? (
-                <a href="/dashboard/organizer" className="btn-nav btn-outline">
-                  <LayoutDashboard size={16} />
-                  <span className="hide-mobile-text">DASHBOARD</span>
-                </a>
-              ) : (
-                <a href="/login" className="btn-nav btn-outline">
-                  <LogIn size={16} />
-                  <span className="hide-mobile-text">SIGN IN</span>
-                </a>
-              )
-            )}
-
-            <a href="/admin/scan" className="btn-nav btn-solid">
-              <ScanLine size={16} />
-              <span className="hide-mobile-text">SCANNER</span>
-            </a>
-          </div>
-        </nav>
-
-        <main style={{ paddingTop: '100px', flex: 1 }}>
-          {children}
-        </main>
+      {/* --- HERO SECTION --- */}
+      <section style={styles.heroSection} className="hero-section">
+        <div style={styles.badge}><Flame size={14} /> NOW TRENDING IN ACCRA</div>
+        <h1 style={styles.heroTitle} className="hero-title">
+          Experience <br/><span style={{ color: 'rgba(0,0,0,0.3)' }}>Everything.</span>
+        </h1>
         
-       /* --- ADD THIS INSIDE YOUR BODY, AFTER <main>{children}</main> --- */
+        <div style={styles.searchContainer}>
+          <Search size={20} style={styles.searchIcon} />
+          <input 
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search parties, concerts, or art..." 
+            style={styles.searchInput}
+          />
+        </div>
+      </section>
 
-<footer className="glass-footer glass-panel">
-  <style jsx>{`
-    .glass-footer {
-      margin: 80px auto 30px;
-      width: 95%;
-      max-width: 1200px;
-      border-radius: 35px;
-      padding: 60px 40px;
-      display: grid;
-      grid-template-columns: 1.5fr 1fr 1fr;
-      gap: 40px;
-      color: #000;
-      position: relative;
-      zIndex: 1;
-    }
-
-    .footer-brand h2 {
-      font-size: 28px;
-      font-weight: 950;
-      letter-spacing: -1.5px;
-      margin: 0 0 15px 0;
-    }
-
-    .footer-brand p {
-      font-size: 14px;
-      line-height: 1.6;
-      opacity: 0.7;
-      max-width: 300px;
-    }
-
-    .footer-col h4 {
-      font-size: 11px;
-      font-weight: 800;
-      text-transform: uppercase;
-      letter-spacing: 1.5px;
-      margin-bottom: 25px;
-      color: rgba(0,0,0,0.4);
-    }
-
-    .footer-link {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      text-decoration: none;
-      color: #000;
-      font-size: 15px;
-      font-weight: 600;
-      margin-bottom: 15px;
-      transition: 0.2s;
-    }
-
-    .footer-link:hover {
-      opacity: 0.5;
-      transform: translateX(5px);
-    }
-
-    .user-status-card {
-      background: rgba(255, 255, 255, 0.4);
-      padding: 20px;
-      border-radius: 20px;
-      border: 1px solid rgba(255, 255, 255, 0.5);
-    }
-
-    .status-indicator {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-size: 11px;
-      font-weight: 900;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      margin-bottom: 12px;
-    }
-
-    .dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      box-shadow: 0 0 10px rgba(0,0,0,0.1);
-    }
-
-    /* --- FOOTER MOBILE --- */
-    @media (max-width: 850px) {
-      .glass-footer {
-        grid-template-columns: 1fr;
-        text-align: center;
-        padding: 40px 24px;
-        gap: 40px;
-      }
-      .footer-brand p {
-        margin: 10px auto;
-      }
-      .footer-link {
-        justify-content: center;
-      }
-      .footer-link:hover {
-        transform: none;
-      }
-    }
-  `}</style>
-
-  {/* Brand Section */}
-  <div className="footer-brand">
-    <h2>OUSTED<span style={{ color: '#e73c7e' }}>.</span></h2>
-    <p>
-      The premium choice for event organizers and voters. 
-      Secure, transparent, and built for luxury experiences.
-    </p>
-  </div>
-
-  {/* Navigation Section */}
-  <div className="footer-col">
-    <h4>Platform</h4>
-    <a href="/voting" className="footer-link"><Vote size={16} /> Voting Console</a>
-    <a href="/events" className="footer-link"><Ticket size={16} /> All Events</a>
-    <a href="/dashboard/organizer/contests/create" className="footer-link">Host a Contest</a>
-  </div>
-
-  {/* Status & Account Section */}
-  <div className="footer-col">
-    <h4>Account Status</h4>
-    <div className="user-status-card">
-      {!loading && (
-        <>
-          <div className="status-indicator">
-            <div className="dot" style={{ background: user ? '#10b981' : '#f59e0b', boxShadow: user ? '0 0 12px #10b981' : 'none' }}></div>
-            {user ? 'Verified Session' : 'Guest Access'}
+      {/* --- FEATURED SECTION --- */}
+      {!search && featuredEvent && !loading && (
+        <section style={styles.section}>
+          <div style={styles.sectionHeader}>
+            <h2 style={styles.sectionTitle}><Zap size={22} color="#e73c7e" /> Featured Experience</h2>
           </div>
-          
-          {user ? (
-            <div style={{ textAlign: 'left' }}>
-              <p style={{ fontSize: '12px', opacity: 0.6, margin: '0 0 15px 0', wordBreak: 'break-all' }}>
-                {user.email}
-              </p>
-              <button onClick={handleLogout} className="btn-nav btn-solid" style={{ width: '100%', justifyContent: 'center' }}>
-                <LogOut size={14} /> SIGN OUT
-              </button>
+          <a href={`/events/${featuredEvent.id}`} style={styles.featuredCard}>
+            <div style={{...styles.cardImg, backgroundImage: `url(${featuredEvent.images?.[0]})`, height: '400px'}} />
+            <div style={styles.featuredOverlay}>
+              <span style={styles.dateTag}>{featuredEvent.date}</span>
+              <h3 style={styles.featuredTitle}>{featuredEvent.title}</h3>
+              <p style={styles.locationTag}><MapPin size={16} /> {featuredEvent.location}</p>
             </div>
-          ) : (
-            <a href="/login" className="btn-nav btn-solid" style={{ width: '100%', justifyContent: 'center' }}>
-              LOGIN TO VOTE
-            </a>
-          )}
-        </>
+          </a>
+        </section>
       )}
+
+      {/* --- UPCOMING EVENTS GRID --- */}
+      <section style={styles.section}>
+        <div style={styles.sectionHeader}>
+          <h2 style={styles.sectionTitle}><LayoutGrid size={22} /> {search ? 'Results' : 'Upcoming Events'}</h2>
+          <span style={styles.countBadge}>{filtered.length} Events</span>
+        </div>
+
+        <div style={styles.grid} className="grid-container">
+          {loading ? (
+            [1, 2, 3].map(n => <Skeleton key={n} />)
+          ) : (
+            (search ? filtered : upcomingEvents).map(event => (
+              <a key={event.id} href={`/events/${event.id}`} style={styles.card}>
+                <div style={{...styles.cardImg, backgroundImage: `url(${event.images?.[0]})` }} />
+                <div style={styles.cardContent}>
+                  <div style={styles.cardHeader}>
+                    <span style={styles.dateTagSmall}>{event.date}</span>
+                    <Zap size={14} color="#e73c7e" />
+                  </div>
+                  <h3 style={styles.cardTitle}>{event.title}</h3>
+                  <p style={styles.cardLocation}><MapPin size={14} /> {event.location}</p>
+                  
+                  <div style={styles.cardFooter}>
+                    <span style={styles.priceTag}>GHS {event.price}</span>
+                    <div style={styles.arrowCircle}><ArrowRight size={18} /></div>
+                  </div>
+                </div>
+              </a>
+            ))
+          )}
+        </div>
+        
+        {!loading && filtered.length === 0 && (
+          <div style={styles.noResults}>
+            <Ticket size={48} color="#ccc" />
+            <p>No events found matching your search.</p>
+          </div>
+        )}
+      </section>
+
+      {/* --- ORGANIZER CTA --- */}
+      <section style={styles.ctaBox}>
+        <h2 style={styles.ctaTitle}>Hosting an event?</h2>
+        <p style={styles.ctaText}>Join Accra's most exclusive network. Sell tickets and manage entries with ease.</p>
+        <div style={styles.ctaBtns}>
+          <a href="/login" style={styles.btnWhite}>CREATE EVENT</a>
+          <a href="/login" style={styles.btnOutline}>ORGANIZER LOGIN</a>
+        </div>
+      </section>
     </div>
-  </div>
-</footer>
-      </body>
-    </html>
   );
 }
+
+// Styles remain unchanged
+const styles = {
+  pageWrapper: { maxWidth: '1200px', margin: '0 auto', padding: '0 20px 100px' },
+  heroSection: { textAlign: 'center', padding: '80px 20px', display: 'flex', flexDirection: 'column', alignItems: 'center' },
+  badge: { background: '#f1f5f9', padding: '8px 16px', borderRadius: '100px', fontSize: '11px', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px' },
+  heroTitle: { fontSize: '80px', fontWeight: 950, margin: 0, letterSpacing: '-5px', lineHeight: 0.85 },
+  searchContainer: { position: 'relative', width: '100%', maxWidth: '550px', marginTop: '40px' },
+  searchIcon: { position: 'absolute', left: '25px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' },
+  searchInput: { width: '100%', padding: '25px 30px 25px 65px', borderRadius: '30px', border: 'none', background: '#fff', fontSize: '16px', fontWeight: 600, boxShadow: '0 20px 40px rgba(0,0,0,0.06)', outline: 'none' },
+  section: { marginTop: '60px' },
+  sectionHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px' },
+  sectionTitle: { fontSize: '24px', fontWeight: 900, display: 'flex', alignItems: 'center', gap: '12px', margin: 0 },
+  countBadge: { background: '#000', color: '#fff', padding: '4px 12px', borderRadius: '8px', fontSize: '12px', fontWeight: 800 },
+  featuredCard: { position: 'relative', display: 'block', borderRadius: '40px', overflow: 'hidden', textDecoration: 'none', color: '#fff' },
+  featuredOverlay: { position: 'absolute', bottom: 0, left: 0, right: 0, padding: '40px', background: 'linear-gradient(to top, rgba(0,0,0,0.8), transparent)' },
+  featuredTitle: { fontSize: '42px', fontWeight: 900, margin: '10px 0' },
+  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '30px' },
+  card: { textDecoration: 'none', color: 'inherit', background: '#fff', borderRadius: '35px', padding: '15px', display: 'flex', flexDirection: 'column', transition: 'transform 0.2s', boxShadow: '0 10px 30px rgba(0,0,0,0.02)' },
+  cardImg: { width: '100%', height: '240px', borderRadius: '25px', backgroundSize: 'cover', backgroundPosition: 'center', backgroundRepeat: 'no-repeat', backgroundColor: '#f1f5f9' },
+  cardContent: { padding: '15px 10px' },
+  cardHeader: { display: 'flex', justifyContent: 'space-between', marginBottom: '10px' },
+  dateTagSmall: { fontSize: '11px', fontWeight: 900, color: '#e73c7e' },
+  cardTitle: { fontSize: '22px', fontWeight: 900, margin: '0 0 5px 0', lineHeight: 1.2 },
+  cardLocation: { fontSize: '14px', color: '#64748b', display: 'flex', alignItems: 'center', gap: '4px', margin: 0 },
+  cardFooter: { marginTop: '20px', paddingTop: '15px', borderTop: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+  priceTag: { fontWeight: 900, fontSize: '18px' },
+  arrowCircle: { background: '#000', color: '#fff', width: '40px', height: '40px', borderRadius: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  ctaBox: { marginTop: '100px', padding: '60px 20px', borderRadius: '50px', background: '#000', color: '#fff', textAlign: 'center' },
+  ctaTitle: { fontSize: '36px', fontWeight: 900, marginBottom: '15px' },
+  ctaText: { color: '#94a3b8', fontSize: '18px', maxWidth: '500px', margin: '0 auto 40px' },
+  ctaBtns: { display: 'flex', gap: '15px', justifyContent: 'center', flexWrap: 'wrap' },
+  btnWhite: { background: '#fff', color: '#000', padding: '20px 40px', borderRadius: '20px', fontWeight: 900, textDecoration: 'none' },
+  btnOutline: { border: '1px solid rgba(255,255,255,0.2)', color: '#fff', padding: '20px 40px', borderRadius: '20px', fontWeight: 900, textDecoration: 'none' },
+  noResults: { padding: '100px 0', textAlign: 'center', color: '#94a3b8' }
+};
