@@ -1131,7 +1131,6 @@ const perfFooter = { marginTop: 'auto' };
 const progressBar = { height: '8px', background: '#f1f5f9', borderRadius: '4px', overflow: 'hidden' };
 const progressFill = (pct) => ({ height: '100%', width: `${pct}%`, background: '#16a34a' });
 const overlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, backdropFilter: 'blur(5px)' };
-const modal = { background: '#fff', width: '450px', borderRadius: '30px', padding: '30px', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)' };
 const modalHead = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' };
 const modalTitle = { margin: 0, fontSize: '20px', fontWeight: 900 };
 const closeBtn = { background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' };
