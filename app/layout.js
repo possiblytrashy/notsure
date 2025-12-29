@@ -8,6 +8,7 @@ import {
   LayoutDashboard, 
   LogIn, 
   Vote, 
+  Ticket,
   LogOut
 } from 'lucide-react'; 
 
@@ -70,55 +71,52 @@ export default function RootLayout({ children }) {
             width: 95%; maxWidth: 1200px;
             border-radius: 22px;
             padding: 8px 20px;
-            display: flex; justifyContent: space-between; alignItems: center;
+            display: flex; 
+            justify-content: space-between; /* Pushes content to edges */
+            align-items: center;
             z-index: 10000;
           }
 
           .nav-logo {
             text-decoration: none; color: #000; font-weight: 950; font-size: 22px;
             letter-spacing: -1.5px;
-            min-width: 100px; /* Ensures space after logo */
+            flex-shrink: 0; /* Prevents logo from squishing */
+            margin-right: 20px; /* Forced minimum gap */
           }
 
-          .nav-actions { display: flex; gap: 8px; alignItems: center; }
+          .nav-actions { 
+            display: flex; 
+            gap: 10px; 
+            align-items: center;
+            justify-content: flex-end;
+            flex: 1; /* Takes up remaining space to push logo away */
+          }
 
           .btn-nav {
             text-decoration: none; color: #000; font-size: 10px; font-weight: 900;
             letter-spacing: 0.5px; display: flex; alignItems: center; gap: 6px;
             padding: 10px 14px; border-radius: 12px; transition: 0.2s;
             cursor: pointer; border: none;
+            white-space: nowrap;
           }
 
           .btn-outline { border: 2px solid #000; background: rgba(255,255,255,0.3); }
           .btn-solid { background: #000; color: #fff; }
-          .btn-vote { color: #e73c7e; background: rgba(231, 60, 126, 0.1); }
-
-          /* FOOTER STYLES */
-          .glass-footer {
-            margin: 80px auto 30px; width: 95%; maxWidth: 1200px;
-            border-radius: 35px; padding: 40px;
-            display: grid; grid-template-columns: 1.5fr 1fr 1fr; gap: 40px;
-          }
-          .footer-link { display: block; text-decoration: none; color: #000; font-size: 15px; font-weight: 600; margin-bottom: 15px; }
-
-          * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+          .btn-vote { color: #fff; background: #e73c7e; box-shadow: 0 4px 12px rgba(231, 60, 126, 0.3); }
 
           /* --- MOBILE OPTIMIZATION --- */
           @media (max-width: 640px) {
             .glass-nav { padding: 8px 12px; width: 94%; top: 12px; }
-            .nav-logo { font-size: 18px; min-width: 80px; }
+            .nav-logo { font-size: 19px; margin-right: 10px; }
             
-            /* HIDE TEXT for Dashboard/Scanner to make room for VOTE */
             .hide-mobile-text { display: none; }
-            
-            /* KEEP VOTE TEXT visible but smaller */
-            .vote-text { display: inline !important; font-size: 9px; }
+            .vote-text { display: inline !important; font-size: 10px; }
 
             .btn-nav { padding: 8px 10px; gap: 4px; }
-            .nav-actions { gap: 5px; }
-
-            .glass-footer { grid-template-columns: 1fr; text-align: center; }
+            .nav-actions { gap: 6px; }
           }
+          
+          * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
         `}</style>
       </head>
       
@@ -131,9 +129,9 @@ export default function RootLayout({ children }) {
           </a>
           
           <div className="nav-actions">
-            {/* VOTE: Priority Action - Text stays visible on mobile */}
+            {/* VOTE: Primary Action - High contrast pink button */}
             <a href="/voting" className="btn-nav btn-vote">
-              <Vote size={16} />
+              <Vote size={15} />
               <span className="vote-text">VOTE</span>
             </a>
             
@@ -161,26 +159,157 @@ export default function RootLayout({ children }) {
         <main style={{ paddingTop: '100px', flex: 1 }}>
           {children}
         </main>
+        
+       /* --- ADD THIS INSIDE YOUR BODY, AFTER <main>{children}</main> --- */
 
-        <footer className="glass-footer glass-panel">
-          <div>
-            <h2 style={{fontWeight: 900, letterSpacing: '-1.5px', margin: 0}}>OUSTED<span style={{color: '#e73c7e'}}>.</span></h2>
-            <p style={{fontSize: '13px', opacity: 0.6}}>Premium Experience Platform.</p>
+<footer className="glass-footer glass-panel">
+  <style jsx>{`
+    .glass-footer {
+      margin: 80px auto 30px;
+      width: 95%;
+      max-width: 1200px;
+      border-radius: 35px;
+      padding: 60px 40px;
+      display: grid;
+      grid-template-columns: 1.5fr 1fr 1fr;
+      gap: 40px;
+      color: #000;
+      position: relative;
+      zIndex: 1;
+    }
+
+    .footer-brand h2 {
+      font-size: 28px;
+      font-weight: 950;
+      letter-spacing: -1.5px;
+      margin: 0 0 15px 0;
+    }
+
+    .footer-brand p {
+      font-size: 14px;
+      line-height: 1.6;
+      opacity: 0.7;
+      max-width: 300px;
+    }
+
+    .footer-col h4 {
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      margin-bottom: 25px;
+      color: rgba(0,0,0,0.4);
+    }
+
+    .footer-link {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      text-decoration: none;
+      color: #000;
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 15px;
+      transition: 0.2s;
+    }
+
+    .footer-link:hover {
+      opacity: 0.5;
+      transform: translateX(5px);
+    }
+
+    .user-status-card {
+      background: rgba(255, 255, 255, 0.4);
+      padding: 20px;
+      border-radius: 20px;
+      border: 1px solid rgba(255, 255, 255, 0.5);
+    }
+
+    .status-indicator {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 11px;
+      font-weight: 900;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 12px;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    }
+
+    /* --- FOOTER MOBILE --- */
+    @media (max-width: 850px) {
+      .glass-footer {
+        grid-template-columns: 1fr;
+        text-align: center;
+        padding: 40px 24px;
+        gap: 40px;
+      }
+      .footer-brand p {
+        margin: 10px auto;
+      }
+      .footer-link {
+        justify-content: center;
+      }
+      .footer-link:hover {
+        transform: none;
+      }
+    }
+  `}</style>
+
+  {/* Brand Section */}
+  <div className="footer-brand">
+    <h2>OUSTED<span style={{ color: '#e73c7e' }}>.</span></h2>
+    <p>
+      The premium choice for event organizers and voters. 
+      Secure, transparent, and built for luxury experiences.
+    </p>
+  </div>
+
+  {/* Navigation Section */}
+  <div className="footer-col">
+    <h4>Platform</h4>
+    <a href="/voting" className="footer-link"><Vote size={16} /> Voting Console</a>
+    <a href="/events" className="footer-link"><Ticket size={16} /> All Events</a>
+    <a href="/dashboard/organizer/contests/create" className="footer-link">Host a Contest</a>
+  </div>
+
+  {/* Status & Account Section */}
+  <div className="footer-col">
+    <h4>Account Status</h4>
+    <div className="user-status-card">
+      {!loading && (
+        <>
+          <div className="status-indicator">
+            <div className="dot" style={{ background: user ? '#10b981' : '#f59e0b', boxShadow: user ? '0 0 12px #10b981' : 'none' }}></div>
+            {user ? 'Verified Session' : 'Guest Access'}
           </div>
-          <div>
-            <p style={{fontWeight: 800, fontSize: '12px', opacity: 0.4, textTransform: 'uppercase'}}>Quick Links</p>
-            <a href="/voting" className="footer-link">Voting Console</a>
-            <a href="/events" className="footer-link">All Events</a>
-          </div>
-          <div>
-             <p style={{fontWeight: 800, fontSize: '12px', opacity: 0.4, textTransform: 'uppercase'}}>Account</p>
-             {user ? (
-               <button onClick={handleLogout} className="btn-nav btn-solid" style={{width: '100%', justifyContent: 'center'}}>LOGOUT</button>
-             ) : (
-               <a href="/login" className="btn-nav btn-solid" style={{width: '100%', justifyContent: 'center'}}>LOGIN</a>
-             )}
-          </div>
-        </footer>
+          
+          {user ? (
+            <div style={{ textAlign: 'left' }}>
+              <p style={{ fontSize: '12px', opacity: 0.6, margin: '0 0 15px 0', wordBreak: 'break-all' }}>
+                {user.email}
+              </p>
+              <button onClick={handleLogout} className="btn-nav btn-solid" style={{ width: '100%', justifyContent: 'center' }}>
+                <LogOut size={14} /> SIGN OUT
+              </button>
+            </div>
+          ) : (
+            <a href="/login" className="btn-nav btn-solid" style={{ width: '100%', justifyContent: 'center' }}>
+              LOGIN TO VOTE
+            </a>
+          )}
+        </>
+      )}
+    </div>
+  </div>
+</footer>
       </body>
     </html>
   );
