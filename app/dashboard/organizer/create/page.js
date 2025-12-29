@@ -25,7 +25,6 @@ export default function CreateEvent() {
   const [dragActive, setDragActive] = useState(false);
   const [formError, setFormError] = useState(null);
 
-  // Core Event Data
   const [eventData, setEventData] = useState({
     title: '',
     description: '',
@@ -39,7 +38,6 @@ export default function CreateEvent() {
     is_published: true,
   });
 
-  // Ticket Tiers Data
   const [tiers, setTiers] = useState([
     { 
       id: crypto.randomUUID(),
@@ -60,7 +58,6 @@ export default function CreateEvent() {
       }
       setUser(user);
 
-      // Verify the organizer has a payout account for the 5% split
       const { data: profile } = await supabase
         .from('profiles')
         .select('paystack_subaccount_code')
@@ -165,7 +162,7 @@ export default function CreateEvent() {
     setTiers(tiers.map(t => t.id === id ? { ...t, [field]: value } : t));
   };
 
-  // --- 5. SUBMISSION ENGINE (WITH 5% SPLIT LOGIC) ---
+  // --- 5. SUBMISSION ENGINE ---
   const handleSubmit = async (e) => {
     e.preventDefault();
     
@@ -188,7 +185,7 @@ export default function CreateEvent() {
         .from('events')
         .insert([{
           organizer_id: user.id,
-          organizer_subaccount: organizerSubaccount, // Linked for payments
+          organizer_subaccount: organizerSubaccount,
           title: eventData.title,
           description: eventData.description,
           date: eventData.date,
@@ -221,60 +218,69 @@ export default function CreateEvent() {
     }
   };
 
-  // --- 6. LUXURY STYLING ---
+  // --- 6. UPDATED RESPONSIVE STYLING ---
   const styles = {
-    pageContainer: { padding: '40px 24px 100px', maxWidth: '1280px', margin: '0 auto', minHeight: '100vh', backgroundColor: '#fcfdfe', fontFamily: '"Inter", sans-serif' },
-    topHeader: { display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '48px' },
-    backBtn: { background: 'none', border: 'none', color: '#64748b', fontSize: '14px', fontWeight: '700', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' },
-    mainTitle: { fontSize: '40px', fontWeight: '950', letterSpacing: '-0.04em', margin: '0', color: '#000' },
-    errorBanner: { display: 'flex', alignItems: 'center', gap: '12px', padding: '16px 20px', backgroundColor: '#fef2f2', border: '1px solid #fee2e2', borderRadius: '16px', color: '#991b1b', fontSize: '14px', fontWeight: '600', marginBottom: '32px' },
-    formLayout: { display: 'grid', gridTemplateColumns: 'minmax(0, 1.4fr) minmax(0, 1fr)', gap: '40px' },
-    formColumn: { display: 'flex', flexDirection: 'column', gap: '32px' },
-    formSection: { backgroundColor: '#ffffff', borderRadius: '32px', padding: '40px', border: '1px solid #f1f5f9', boxShadow: '0 4px 12px rgba(0,0,0,0.03)' },
-    sectionTitleRow: { display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '32px' },
-    iconBox: (color) => ({ width: '44px', height: '44px', borderRadius: '14px', backgroundColor: `${color}10`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: color }),
-    sectionHeading: { fontSize: '20px', fontWeight: '800', margin: '0' },
+    pageContainer: { padding: '24px 16px 100px', maxWidth: '1280px', margin: '0 auto', minHeight: '100vh', backgroundColor: '#fcfdfe', fontFamily: '"Inter", sans-serif' },
+    topHeader: { display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '32px' },
+    backBtn: { background: 'none', border: 'none', color: '#64748b', fontSize: '13px', fontWeight: '700', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' },
+    mainTitle: { fontSize: '32px', fontWeight: '950', letterSpacing: '-0.04em', margin: '0', color: '#000' },
+    errorBanner: { display: 'flex', alignItems: 'center', gap: '12px', padding: '16px', backgroundColor: '#fef2f2', border: '1px solid #fee2e2', borderRadius: '16px', color: '#991b1b', fontSize: '13px', fontWeight: '600', marginBottom: '24px' },
+    formLayout: { display: 'flex', flexDirection: 'column', gap: '24px' },
+    formColumn: { display: 'flex', flexDirection: 'column', gap: '24px' },
+    formSection: { backgroundColor: '#ffffff', borderRadius: '28px', padding: '24px', border: '1px solid #f1f5f9', boxShadow: '0 4px 12px rgba(0,0,0,0.03)' },
+    sectionTitleRow: { display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px' },
+    iconBox: (color) => ({ width: '40px', height: '40px', borderRadius: '12px', backgroundColor: `${color}10`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: color }),
+    sectionHeading: { fontSize: '18px', fontWeight: '800', margin: '0' },
     
     dropZone: (active) => ({
-      width: '100%',
-      minHeight: '220px',
-      borderRadius: '24px',
+      width: '100%', minHeight: '180px', borderRadius: '20px',
       border: active ? '3px solid #0ea5e9' : '2px dashed #e2e8f0',
       backgroundColor: active ? '#f0f9ff' : '#f8fafc',
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      position: 'relative',
-      cursor: 'pointer',
-      transition: '0.3s',
-      marginBottom: '20px'
+      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      position: 'relative', cursor: 'pointer', transition: '0.3s', marginBottom: '15px'
     }),
-    imageGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: '15px', marginTop: '20px' },
-    imageThumb: { position: 'relative', height: '120px', borderRadius: '15px', overflow: 'hidden', border: '1px solid #e2e8f0' },
+    imageGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: '12px', marginTop: '15px' },
+    imageThumb: { position: 'relative', height: '100px', borderRadius: '12px', overflow: 'hidden', border: '1px solid #e2e8f0' },
     thumbImg: { width: '100%', height: '100%', objectFit: 'cover' },
-    removeBtnSmall: { position: 'absolute', top: '5px', right: '5px', background: 'rgba(0,0,0,0.6)', color: '#fff', border: 'none', borderRadius: '5px', padding: '4px', cursor: 'pointer' },
+    removeBtnSmall: { position: 'absolute', top: '4px', right: '4px', background: 'rgba(0,0,0,0.6)', color: '#fff', border: 'none', borderRadius: '4px', padding: '4px', cursor: 'pointer' },
 
-    timePickerContainer: { display: 'flex', gap: '12px', alignItems: 'center' },
+    timePickerContainer: { display: 'flex', gap: '8px', alignItems: 'center' },
     timeSelectBox: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' },
-    timeInput: { width: '60px', textAlign: 'center', padding: '12px', borderRadius: '12px', border: '2px solid #f1f5f9', fontSize: '18px', fontWeight: '800', backgroundColor: '#f8fafc', outline: 'none' },
-    periodToggle: (active) => ({ padding: '12px 16px', borderRadius: '12px', border: 'none', backgroundColor: active ? '#000' : '#f1f5f9', color: active ? '#fff' : '#64748b', fontWeight: '800', cursor: 'pointer', transition: '0.2s' }),
+    timeInput: { width: '50px', textAlign: 'center', padding: '10px', borderRadius: '12px', border: '2px solid #f1f5f9', fontSize: '16px', fontWeight: '800', backgroundColor: '#f8fafc', outline: 'none' },
+    periodToggle: (active) => ({ padding: '10px 14px', borderRadius: '12px', border: 'none', backgroundColor: active ? '#000' : '#f1f5f9', color: active ? '#fff' : '#64748b', fontWeight: '800', cursor: 'pointer', transition: '0.2s', fontSize: '13px' }),
 
-    inputGroup: { display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '24px' },
-    label: { fontSize: '12px', fontWeight: '800', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' },
-    input: { width: '100%', backgroundColor: '#f8fafc', border: '2px solid #f1f5f9', borderRadius: '16px', padding: '16px', fontSize: '16px', fontWeight: '600', outline: 'none' },
-    textarea: { width: '100%', backgroundColor: '#f8fafc', border: '2px solid #f1f5f9', borderRadius: '16px', padding: '16px', fontSize: '16px', fontWeight: '600', outline: 'none', minHeight: '100px' },
+    inputGroup: { display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '20px' },
+    label: { fontSize: '11px', fontWeight: '800', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' },
+    input: { width: '100%', backgroundColor: '#f8fafc', border: '2px solid #f1f5f9', borderRadius: '16px', padding: '14px', fontSize: '16px', fontWeight: '600', outline: 'none' },
+    textarea: { width: '100%', backgroundColor: '#f8fafc', border: '2px solid #f1f5f9', borderRadius: '16px', padding: '14px', fontSize: '16px', fontWeight: '600', outline: 'none', minHeight: '100px' },
     
-    tierCard: { backgroundColor: '#f8fafc', borderRadius: '24px', padding: '24px', border: '1px solid #f1f5f9', marginBottom: '16px' },
-    tierInput: { background: 'none', border: 'none', borderBottom: '2px solid #e2e8f0', fontSize: '18px', fontWeight: '900', padding: '4px 0', outline: 'none', width: '100%', marginBottom: '15px' },
-    addTierBtn: { width: '100%', padding: '18px', borderRadius: '18px', border: '2px dashed #e2e8f0', background: 'none', color: '#64748b', fontWeight: '800', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' },
+    tierCard: { backgroundColor: '#f8fafc', borderRadius: '20px', padding: '20px', border: '1px solid #f1f5f9', marginBottom: '16px' },
+    tierInput: { background: 'none', border: 'none', borderBottom: '2px solid #e2e8f0', fontSize: '16px', fontWeight: '900', padding: '4px 0', outline: 'none', width: '100%', marginBottom: '12px' },
+    addTierBtn: { width: '100%', padding: '16px', borderRadius: '16px', border: '2px dashed #e2e8f0', background: 'none', color: '#64748b', fontWeight: '800', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' },
     
-    publishCard: { position: 'sticky', top: '40px', backgroundColor: '#0f172a', borderRadius: '32px', padding: '40px', color: '#fff' },
-    submitBtn: { width: '100%', backgroundColor: '#fff', color: '#0f172a', border: 'none', padding: '20px', borderRadius: '20px', fontSize: '16px', fontWeight: '900', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', cursor: 'pointer' }
+    publishCard: { backgroundColor: '#0f172a', borderRadius: '28px', padding: '32px', color: '#fff' },
+    submitBtn: { width: '100%', backgroundColor: '#fff', color: '#0f172a', border: 'none', padding: '18px', borderRadius: '18px', fontSize: '16px', fontWeight: '900', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', cursor: 'pointer' }
   };
 
   return (
     <div style={styles.pageContainer}>
+      {/* Desktop Overrides */}
+      <style>{`
+        @media (min-width: 1024px) {
+          .create-form-layout {
+            display: grid !important;
+            grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) !important;
+            gap: 40px !important;
+          }
+          .publish-column {
+            position: sticky !important;
+            top: 20px;
+            height: fit-content;
+          }
+          h1 { font-size: 40px !important; }
+        }
+      `}</style>
+
       <div style={styles.topHeader}>
         <button style={styles.backBtn} onClick={() => router.back()}><ChevronLeft size={18} /> BACK</button>
         <h1 style={styles.mainTitle}>New Experience</h1>
@@ -283,11 +289,11 @@ export default function CreateEvent() {
       {formError && (
         <div style={styles.errorBanner}>
           <AlertCircle size={20} />
-          {formError}
+          <span>{formError}</span>
           {!organizerSubaccount && (
             <button 
               onClick={() => router.push('/dashboard/onboarding')} 
-              style={{ marginLeft: 'auto', background: '#991b1b', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '8px', cursor: 'pointer' }}
+              style={{ marginLeft: 'auto', background: '#991b1b', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '8px', cursor: 'pointer', whiteSpace: 'nowrap' }}
             >
               Link Now
             </button>
@@ -295,7 +301,7 @@ export default function CreateEvent() {
         </div>
       )}
 
-      <form onSubmit={handleSubmit} style={styles.formLayout}>
+      <form onSubmit={handleSubmit} style={styles.formLayout} className="create-form-layout">
         <div style={styles.formColumn}>
           
           {/* MEDIA SECTION */}
@@ -310,12 +316,11 @@ export default function CreateEvent() {
               onClick={() => fileInputRef.current.click()}
             >
               {uploading ? (
-                <div style={{textAlign: 'center'}}><Loader2 className="animate-spin" size={32} /> <p>Syncing Media... {uploadProgress}%</p></div>
+                <div style={{textAlign: 'center'}}><Loader2 className="animate-spin" size={32} /> <p>Syncing... {uploadProgress}%</p></div>
               ) : (
                 <div style={{textAlign: 'center'}}>
                   <Upload size={30} color="#94a3b8" style={{marginBottom: '10px'}}/>
-                  <p style={{fontWeight: 800, margin: 0}}>Add Multiple Images</p>
-                  <p style={{fontSize: '12px', color: '#94a3b8'}}>Drag and drop or click to upload</p>
+                  <p style={{fontWeight: 800, margin: 0}}>Add Images</p>
                 </div>
               )}
               <input type="file" multiple ref={fileInputRef} style={{display:'none'}} accept="image/*" onChange={(e) => handleFileUpload(e.target.files)} />
@@ -343,7 +348,7 @@ export default function CreateEvent() {
               <input style={styles.input} placeholder="Epic Night Accra..." value={eventData.title} onChange={(e) => setEventData({...eventData, title: e.target.value})} />
             </div>
 
-            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'25px'}}>
+            <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'20px'}}>
               <div style={styles.inputGroup}>
                 <label style={styles.label}>Date</label>
                 <input type="date" style={styles.input} value={eventData.date} onChange={(e) => setEventData({...eventData, date: e.target.value})} />
@@ -352,14 +357,10 @@ export default function CreateEvent() {
               <div style={styles.inputGroup}>
                 <label style={styles.label}>Start Time</label>
                 <div style={styles.timePickerContainer}>
-                  <div style={styles.timeSelectBox}>
-                    <input style={styles.timeInput} maxLength="2" value={eventData.hour} onChange={(e) => setEventData({...eventData, hour: e.target.value})} />
-                  </div>
-                  <span style={{fontWeight:900, fontSize:'20px'}}>:</span>
-                  <div style={styles.timeSelectBox}>
-                    <input style={styles.timeInput} maxLength="2" value={eventData.minute} onChange={(e) => setEventData({...eventData, minute: e.target.value})} />
-                  </div>
-                  <div style={{display:'flex', gap:'5px', marginLeft:'10px'}}>
+                  <input style={styles.timeInput} maxLength="2" value={eventData.hour} onChange={(e) => setEventData({...eventData, hour: e.target.value})} />
+                  <span style={{fontWeight:900, fontSize:'18px'}}>:</span>
+                  <input style={styles.timeInput} maxLength="2" value={eventData.minute} onChange={(e) => setEventData({...eventData, minute: e.target.value})} />
+                  <div style={{display:'flex', gap:'4px', marginLeft:'4px'}}>
                     <button type="button" style={styles.periodToggle(eventData.period === 'AM')} onClick={() => setEventData({...eventData, period: 'AM'})}>AM</button>
                     <button type="button" style={styles.periodToggle(eventData.period === 'PM')} onClick={() => setEventData({...eventData, period: 'PM'})}>PM</button>
                   </div>
@@ -383,7 +384,7 @@ export default function CreateEvent() {
         </div>
 
         {/* TICKETING & SUBMIT */}
-        <div style={styles.formColumn}>
+        <div style={styles.formColumn} className="publish-column">
           <div style={styles.formSection}>
             <div style={styles.sectionTitleRow}>
               <div style={styles.iconBox('#f59e0b')}><Ticket size={22} /></div>
@@ -405,17 +406,17 @@ export default function CreateEvent() {
           </div>
 
           <div style={styles.publishCard}>
-             <div style={{display:'flex', gap:'20px', marginBottom:'30px'}}>
+             <div style={{display:'flex', gap:'20px', marginBottom:'24px'}}>
                 <div style={styles.iconBox('#4ade80')}><Zap size={24}/></div>
                 <div>
-                   <h3 style={{margin:0, fontWeight:900}}>Ready to launch?</h3>
-                   <p style={{margin:0, color:'#94a3b8', fontSize:'14px'}}>Posters, details, and tickets are set.</p>
+                   <h3 style={{margin:0, fontWeight:900, fontSize: '18px'}}>Ready to launch?</h3>
+                   <p style={{margin:0, color:'#94a3b8', fontSize:'13px'}}>Posters and tickets are set.</p>
                 </div>
              </div>
              <button type="submit" style={styles.submitBtn} disabled={loading || uploading}>
                 {loading ? <Loader2 className="animate-spin" size={24}/> : <><CheckCircle2 size={24}/> PUBLISH NOW</>}
              </button>
-             <div style={{display:'flex', justifyContent:'center', marginTop:'20px', color:'#4ade80', fontSize:'12px', fontWeight:800, gap:'5px'}}>
+             <div style={{display:'flex', justifyContent:'center', marginTop:'16px', color:'#4ade80', fontSize:'11px', fontWeight:800, gap:'5px'}}>
                 <ShieldCheck size={14}/> SECURE CONNECTION
              </div>
           </div>
