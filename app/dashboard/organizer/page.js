@@ -187,6 +187,25 @@ const uploadToSupabase = async (file) => {
 useEffect(() => {
   loadDashboardData();
 }, [loadDashboardData]);
+  useEffect(() => {
+  if (typeof document !== 'undefined') {
+    const style = document.createElement('style');
+    style.innerHTML = `
+      /* Hide scrollbars for the tab bar but keep functionality */
+      div::-webkit-scrollbar { display: none; }
+      
+      /* Smooth transitions for mobile buttons */
+      button:active { transform: scale(0.96); }
+
+      /* Responsive adjustments for the balance text */
+      @media (max-width: 768px) {
+        h2[style*="fontSize: 56px"] { font-size: 40px !important; }
+        div[style*="padding: 50px"] { padding: 30px !important; }
+      }
+    `;
+    document.head.appendChild(style);
+  }
+}, []);
   // --- 4. COMPUTED ANALYTICS (95/5 SPLIT) ---
   const stats = useMemo(() => {
     const totalGross = data.tickets.reduce((acc, t) => acc + (parseFloat(t.amount) || 0), 0);
@@ -467,28 +486,63 @@ const handleEditSubmit = async (e) => {
   return (
     <div style={mainWrapper}>
       
-      {/* HEADER SECTION */}
-      <div style={topNav}>
-        <div>
-          <h1 style={logoText}>OUSTED <span style={badgeLuxury}>ORGANIZER</span></h1>
-          <p style={subLabel}>System v2.5 • Luxury Event Management</p>
-        </div>
-        <div style={headerActions}>
-           <div style={userBrief}>
-             <p style={userEmail}>{data.profile?.email}</p>
-             <div style={onboardingBadge(paystackConfig.subaccountCode)}>
-               <div style={dot(paystackConfig.subaccountCode)}></div>
-               {paystackConfig.subaccountCode ? 'PAYOUTS ACTIVE (95/5)' : 'ACTION REQUIRED: SETUP PAYOUT'}
-             </div>
-           </div>
-           <button style={circleAction} onClick={() => loadDashboardData(true)}>
-             <RefreshCcw size={18} className={refreshing ? 'animate-spin' : ''}/>
-           </button>
-           <button style={logoutCircle} onClick={handleLogout}>
-             <LogOut size={18}/>
-           </button>
-        </div>
-      </div>
+     {/* HEADER SECTION - UPDATED FOR MOBILE RESPONSIVENESS */}
+<div style={{
+  ...topNav, 
+  flexDirection: typeof window !== 'undefined' && window.innerWidth < 768 ? 'column' : 'row',
+  alignItems: typeof window !== 'undefined' && window.innerWidth < 768 ? 'flex-start' : 'center',
+  gap: '20px'
+}}>
+  <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    <div>
+      <h1 style={logoText}>OUSTED <span style={badgeLuxury}>ORGANIZER</span></h1>
+      {/* Hide sub-label on very small screens to maintain luxury minimalism */}
+      {typeof window !== 'undefined' && window.innerWidth > 600 && (
+        <p style={subLabel}>System v2.5 • Luxury Event Management</p>
+      )}
+    </div>
+    
+    {/* On mobile, move logout/refresh to the top right to save vertical space */}
+    {typeof window !== 'undefined' && window.innerWidth < 768 && (
+       <div style={{ display: 'flex', gap: '10px' }}>
+         <button style={circleAction} onClick={() => loadDashboardData(true)}>
+           <RefreshCcw size={16} className={refreshing ? 'animate-spin' : ''}/>
+         </button>
+         <button style={logoutCircle} onClick={handleLogout}>
+           <LogOut size={16}/>
+         </button>
+       </div>
+    )}
+  </div>
+
+  <div style={{
+    ...headerActions, 
+    width: typeof window !== 'undefined' && window.innerWidth < 768 ? '100%' : 'auto',
+    justifyContent: 'space-between',
+    borderTop: typeof window !== 'undefined' && window.innerWidth < 768 ? '1px solid #f0f0f0' : 'none',
+    paddingTop: typeof window !== 'undefined' && window.innerWidth < 768 ? '15px' : '0'
+  }}>
+     <div style={userBrief}>
+       <p style={userEmail}>{data.profile?.email}</p>
+       <div style={onboardingBadge(paystackConfig.subaccountCode)}>
+         <div style={dot(paystackConfig.subaccountCode)}></div>
+         {paystackConfig.subaccountCode ? 'PAYOUTS ACTIVE (95/5)' : 'ACTION REQUIRED: SETUP PAYOUT'}
+       </div>
+     </div>
+
+     {/* Show desktop actions only on larger screens */}
+     {typeof window !== 'undefined' && window.innerWidth >= 768 && (
+       <>
+         <button style={circleAction} onClick={() => loadDashboardData(true)}>
+           <RefreshCcw size={18} className={refreshing ? 'animate-spin' : ''}/>
+         </button>
+         <button style={logoutCircle} onClick={handleLogout}>
+           <LogOut size={18}/>
+         </button>
+       </>
+     )}
+  </div>
+</div>
 
       {/* FINANCE HERO (95/5 SPLIT) */}
       <div style={financeGrid}>
@@ -633,27 +687,49 @@ const handleEditSubmit = async (e) => {
     )}
   </div>
 )}
+{/* 2. SALES LEDGER VIEW */}
+{activeTab === 'sales' && (
+  <div style={fadeAnim}>
+    <div style={{...viewHeader, flexDirection: isMobile ? 'column' : 'row', alignItems: 'flex-start', gap: '20px'}}>
+      <h2 style={viewTitle}>Sales Ledger</h2>
+      <div style={{...filterGroup, flexWrap: 'wrap', width: '100%'}}>
+        <div style={{...searchBox, flex: 1}}>
+          <Search size={18} color="#94a3b8" />
+          <input style={searchInputField} placeholder="Search..." value={ticketSearch} onChange={(e) => setTicketSearch(e.target.value)} />
+        </div>
+        <select style={{...eventDropdown, flex: isMobile ? '1' : 'auto'}} value={selectedEventFilter} onChange={(e) => setSelectedEventFilter(e.target.value)}>
+          <option value="all">All Events</option>
+          {data.events.map(e => <option key={e.id} value={e.id}>{e.title}</option>)}
+        </select>
+      </div>
+    </div>
 
-  {/* 2. SALES LEDGER VIEW */}
-      {activeTab === 'sales' && (
-        <div style={fadeAnim}>
-          <div style={viewHeader}>
-            <h2 style={viewTitle}>Sales Ledger</h2>
-            <div style={filterGroup}>
-              <div style={searchBox}>
-                <Search size={18} color="#94a3b8" />
-                <input style={searchInputField} placeholder="Guest or Ref..." value={ticketSearch} onChange={(e) => setTicketSearch(e.target.value)} />
+    {/* MOBILE CARD VIEW */}
+    {isMobile ? (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+        {filteredTickets.map((t) => (
+          <div key={t.id} style={{...itemCard, padding: '20px', border: '1px solid #eee'}}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
+              <p style={guestBold}>{t.guest_name}</p>
+              <span style={t.is_scanned ? scannedPill : activePill}>
+                {t.is_scanned ? 'SCANNED' : 'VALID'}
+              </span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div>
+                <p style={guestMuted}>{t.events?.title}</p>
+                <p style={{...guestMuted, fontSize: '10px'}}>{new Date(t.created_at).toLocaleDateString()}</p>
               </div>
-              <select style={eventDropdown} value={selectedEventFilter} onChange={(e) => setSelectedEventFilter(e.target.value)}>
-                <option value="all">All Events</option>
-                {data.events.map(e => <option key={e.id} value={e.id}>{e.title}</option>)}
-              </select>
-              <button style={outlineBtn}><Download size={16} /> EXPORT CSV</button>
+              <p style={{ fontWeight: 900, color: '#16a34a' }}>GHS {(t.amount * 0.95).toFixed(2)}</p>
             </div>
           </div>
-          <div style={tableWrapper}>
-            <table style={dataTable}>
-              <thead>
+        ))}
+      </div>
+    ) : (
+      /* DESKTOP TABLE VIEW */
+      <div style={tableWrapper}>
+        <table style={dataTable}>
+          <thead>
                 <tr>
                   <th style={tableTh}>GUEST / REFERENCE</th>
                   <th style={tableTh}>EVENT</th>
@@ -682,12 +758,12 @@ const handleEditSubmit = async (e) => {
                   </tr>
                 ))}
               </tbody>
-            </table>
-            {filteredTickets.length === 0 && <div style={emptyTableState}>No sales records found matching your filters.</div>}
-          </div>
-        </div>
-      )}
-
+        </table>
+      </div>
+    )}
+  </div>
+)}
+  
    {/* CATEGORY (CONTEST) MAPPING */}
 {/* CATEGORY (CONTEST) MAPPING */}
 {/* 3. COMPETITIONS VIEW */}
@@ -1210,6 +1286,48 @@ const actionBtnFull = {
   cursor: 'pointer',
   marginTop: '20px',
   transition: 'transform 0.2s ease'
+};
+
+// Add this helper to your file or use standard CSS
+const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+
+const financeGrid = { 
+  display: 'grid', 
+  gridTemplateColumns: isMobile ? '1fr' : '1.4fr 2fr', 
+  gap: '20px', 
+  marginBottom: '40px' 
+};
+
+const quickStatsGrid = { 
+  display: 'grid', 
+  gridTemplateColumns: isMobile ? '1fr 1fr' : '1fr 1fr', // Keep 2x2 or 1x4
+  gap: '15px' 
+};
+
+const modal = { 
+  background: '#fff', 
+  width: isMobile ? '95%' : '450px', 
+  maxHeight: isMobile ? '90vh' : 'auto',
+  overflowY: 'auto',
+  borderRadius: '30px', 
+  padding: isMobile ? '20px' : '30px', 
+  boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)' 
+};
+
+const tabBar = { 
+  display: 'flex', 
+  gap: isMobile ? '20px' : '45px', 
+  borderBottom: '1px solid #eee', 
+  marginBottom: '40px',
+  overflowX: 'auto', // Enable horizontal scroll for tabs
+  paddingBottom: '5px',
+  WebkitOverflowScrolling: 'touch'
+};
+
+const contestGrid = { 
+  display: 'grid', 
+  gridTemplateColumns: '1fr', // Stack competitions vertically on all screens for focus
+  gap: '20px' 
 };
 // This MUST be outside the main OrganizerDashboard function
 function CategoryItem({ 
