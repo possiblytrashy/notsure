@@ -8,6 +8,7 @@ import {
   LayoutDashboard, 
   LogIn, 
   Vote, 
+  Ticket,
   LogOut
 } from 'lucide-react'; 
 
