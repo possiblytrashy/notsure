@@ -89,7 +89,6 @@ export default function EventPage() {
   };
 
   const recordPayment = async (response, tier) => {
-    // Note: The Webhook will also catch this to send the email via Resend
     const ticketData = {
       event_id: id,
       tier_id: tier.id,
@@ -136,7 +135,6 @@ export default function EventPage() {
     if (e) e.preventDefault();
     if (selectedTier === null || !event || isProcessing) return;
     
-    // Safety check for Onboarding
     if (!event.organizer_subaccount) {
       alert("This event is not yet set up for payments. Please contact the organizer.");
       return;
@@ -153,8 +151,8 @@ export default function EventPage() {
         email: guestEmail.trim(),
         amount: Math.round(parseFloat(tier.price) * 100),
         currency: "GHS",
-        subaccount: event.organizer_subaccount, // 5% split handled here
-        bearer: "subaccount",                  // Organizer covers processing fees
+        subaccount: event.organizer_subaccount,
+        bearer: "subaccount",
         metadata: {
           type: 'TICKET_PURCHASE',
           event_id: id,
@@ -188,7 +186,10 @@ export default function EventPage() {
   );
 
   if (paymentSuccess) {
-    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${paymentSuccess.reference}`;
+    // SECURITY: Tie the QR to both the unique reference AND the event ID
+    const qrPayload = encodeURIComponent(`REF:${paymentSuccess.reference}|EVT:${id}`);
+    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${qrPayload}`;
+    
     return (
       <div style={styles.ticketWrapper}>
         <div style={styles.ticketCard} className="printable-ticket">
@@ -227,10 +228,14 @@ export default function EventPage() {
   return (
     <div style={styles.pageLayout}>
       <style>{`
-        /* Fix for mobile sideways shifting */
+        /* Fix for mobile edge clipping and sideways shifting */
+        * { box-sizing: border-box; }
+        
         html, body { 
           overflow-x: hidden !important; 
-          width: 100vw;
+          width: 100%;
+          margin: 0;
+          padding: 0;
           position: relative;
         }
 
@@ -327,7 +332,7 @@ export default function EventPage() {
 }
 
 const styles = {
-  pageLayout: { maxWidth: '1300px', margin: '0 auto', padding: '20px 24px 100px', fontFamily: '"Inter", sans-serif', overflowX: 'hidden' },
+  pageLayout: { maxWidth: '1300px', margin: '0 auto', padding: '20px 16px 100px', fontFamily: '"Inter", sans-serif', overflowX: 'hidden' },
   navBar: { display: 'flex', justifyContent: 'space-between', marginBottom: '30px' },
   backBtn: { background: '#f8fafc', border: '1px solid #f1f5f9', padding: '10px 20px', borderRadius: '12px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' },
   shareBtn: { width: '40px', height: '40px', borderRadius: '12px', background: '#fff', border: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' },
@@ -370,7 +375,7 @@ const styles = {
   finalSubmitBtn: (dis) => ({ width: '100%', background: dis ? '#cbd5e1' : '#000', color: '#fff', padding: '22px', borderRadius: '22px', border: 'none', fontWeight: 900, fontSize: '18px', cursor: dis ? 'not-allowed' : 'pointer', display: 'flex', justifyContent: 'center', gap: '10px' }),
   trustFooter: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', fontSize: '12px', color: '#94a3b8', marginTop: '20px', fontWeight: 600 },
   loadingOverlay: { height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#fff' },
-  ticketWrapper: { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fcfdfe', padding: '40px' },
+  ticketWrapper: { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fcfdfe', padding: '20px' },
   ticketCard: { maxWidth: '480px', width: '100%', background: '#fff', borderRadius: '40px', padding: '50px', boxShadow: '0 40px 80px rgba(0,0,0,0.12)', border: '1px solid #f1f5f9' },
   successIconWrap: { width: '80px', height: '80px', borderRadius: '25px', background: '#f0fdf4', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 25px' },
   ticketTitle: { fontSize: '28px', fontWeight: 950, letterSpacing: '-1px', margin: '0 0 10px' },
