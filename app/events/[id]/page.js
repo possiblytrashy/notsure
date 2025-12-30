@@ -89,7 +89,6 @@ export default function EventPage() {
   };
 
   const recordPayment = async (response, tier) => {
-    // Note: The Webhook will also catch this to send the email via Resend
     const ticketData = {
       event_id: id,
       tier_id: tier.id,
@@ -119,7 +118,6 @@ export default function EventPage() {
     if (e) e.preventDefault();
     if (selectedTier === null || !event || isProcessing) return;
     
-    // Safety check for Onboarding
     if (!event.organizer_subaccount) {
       alert("This event is not yet set up for payments. Please contact the organizer.");
       return;
@@ -136,8 +134,8 @@ export default function EventPage() {
         email: guestEmail.trim(),
         amount: Math.round(parseFloat(tier.price) * 100),
         currency: "GHS",
-        subaccount: event.organizer_subaccount, // 5% split handled here
-        bearer: "subaccount",                  // Organizer covers processing fees
+        subaccount: event.organizer_subaccount,
+        bearer: "subaccount",
         metadata: {
           type: 'TICKET_PURCHASE',
           event_id: id,
@@ -209,14 +207,29 @@ export default function EventPage() {
   // --- 5. MAIN UI ---
   return (
     <div style={styles.pageLayout}>
-      <div style={styles.navBar}>
+      <style>{`
+        @media (max-width: 992px) {
+          .content-grid { grid-template-columns: 1fr !important; gap: 40px !important; }
+          .main-frame { height: 450px !important; border-radius: 30px !important; }
+          .event-title { font-size: 36px !important; }
+          .sticky-sidebar { position: relative !important; top: 0 !important; }
+          .desktop-nav { margin-bottom: 20px !important; }
+          .ticket-card-ui { padding: 30px 20px !important; }
+        }
+        @media (max-width: 600px) {
+          .specs-grid { grid-template-columns: 1fr !important; }
+          .main-frame { height: 350px !important; }
+        }
+      `}</style>
+
+      <div style={styles.navBar} className="desktop-nav">
         <button onClick={() => router.back()} style={styles.backBtn}><ChevronLeft size={20} /> BACK</button>
         <button style={styles.shareBtn}><Share2 size={18} /></button>
       </div>
 
-      <div style={styles.contentGrid}>
+      <div style={styles.contentGrid} className="content-grid">
         <div style={styles.galleryColumn}>
-          <div style={styles.mainDisplayFrame}>
+          <div style={styles.mainDisplayFrame} className="main-frame">
             <img src={event.images?.[currentImg] || 'https://via.placeholder.com/800'} style={styles.mainImg} alt="Visual" />
             {event.images?.length > 1 && (
               <div style={styles.galleryNav}>
@@ -241,18 +254,18 @@ export default function EventPage() {
         </div>
 
         <div style={styles.sidebarColumn}>
-          <div style={styles.stickyContent}>
+          <div style={styles.stickyContent} className="sticky-sidebar">
             <div style={styles.eventHeader}>
               <span style={styles.categoryBadge}>{event.category || 'Luxury Experience'}</span>
-              <h1 style={styles.eventTitle}>{event.title}</h1>
+              <h1 style={styles.eventTitle} className="event-title">{event.title}</h1>
             </div>
 
-            <div style={styles.specsGrid}>
+            <div style={styles.specsGrid} className="specs-grid">
               <div style={styles.specItem}><Calendar size={20} color="#0ea5e9" /><div><p style={styles.specLabel}>DATE</p><p style={styles.specValue}>{event.date}</p></div></div>
               <div style={styles.specItem}><MapPin size={20} color="#f43f5e" /><div><p style={styles.specLabel}>LOCATION</p><p style={styles.specValue}>{event.location}</p></div></div>
             </div>
 
-            <div style={styles.checkoutCard}>
+            <div style={styles.checkoutCard} className="ticket-card-ui">
               <form onSubmit={handlePurchase}>
                 <div style={styles.formSection}>
                   <h3 style={styles.formHeading}>1. GUEST IDENTITY</h3>
