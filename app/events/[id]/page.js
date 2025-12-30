@@ -213,6 +213,29 @@ export default function EventPage() {
     }
   };
 
+  useEffect(() => {
+  // Listen for new tickets being inserted
+  const channel = supabase
+    .channel('realtime_tickets')
+    .on('postgres_changes', { 
+      event: 'INSERT', 
+      schema: 'public', 
+      table: 'tickets',
+      filter: `event_id=eq.${id}` 
+    }, (payload) => {
+      // Update the sold count state locally without a refresh
+      setSoldCounts(prev => ({
+        ...prev,
+        [payload.new.tier_name]: (prev[payload.new.tier_name] || 0) + 1
+      }));
+    })
+    .subscribe();
+
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}, [id]);
+
   // --- 4. CONDITIONAL VIEWS ---
   if (fetching) return (
     <div style={styles.loadingOverlay}>
