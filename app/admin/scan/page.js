@@ -42,109 +42,66 @@ export default function AdvancedScanner() {
     if (!isScanning || isLocked) return;
     
     setIsScanning(false);
-    setStatus({ 
-      type: 'loading', 
-      message: 'Verifying...', 
-      color: '#0ea5e9', 
-      details: 'Checking Database...',
-      eventName: '' 
-    });
-
-    // Extract reference from potential URL or raw text
     let ticketRef = decodedText.trim();
+    
+    // LOGIC: If the QR is a URL, grab the last part. 
+    // If your DB stores the WHOLE URL, remove this 'if' block.
     if (ticketRef.includes('/')) {
       const parts = ticketRef.split('/').filter(Boolean);
       ticketRef = parts[parts.length - 1];
     }
 
     try {
-      // MATCHED TO YOUR TABLE SCHEMA:
-      // Uses 'reference' for lookup and joins 'events' via event_id fkey
+      // DEBUG: This helps you see exactly what is being sent to Supabase
+      console.log("Database Lookup for Reference:", ticketRef);
+
       const { data: ticket, error: fetchError } = await supabase
         .from('tickets')
-        .select(`
-          id,
-          guest_name,
-          tier_name,
-          is_scanned,
-          status,
-          updated_at,
-          events (
-            title
-          )
-        `)
-        .ilike('reference', ticketRef)
+        .select(`*, events(title)`)
+        .ilike('reference', ticketRef) // Use ilike for case-insensitivity
         .maybeSingle();
 
-      if (fetchError) throw fetchError;
+      if (fetchError) {
+        alert("DB Error: " + fetchError.message);
+        throw fetchError;
+      }
 
-      // 1. Check if ticket exists
       if (!ticket) {
+        // This means the SELECT returned nothing.
         setStatus({ 
           type: 'error', 
-          message: 'INVALID TICKET', 
+          message: 'NOT FOUND', 
           color: '#ef4444', 
-          details: `Ref: ${ticketRef} not found in system.` 
+          details: `Reference [${ticketRef}] does not exist in the tickets table.` 
         });
         return;
       }
 
-      // 2. Check if payment was successful (status check)
-      if (ticket.status !== 'valid') {
-        setStatus({ 
-          type: 'error', 
-          message: 'PAYMENT PENDING', 
-          color: '#f59e0b', 
-          details: `Ticket status is "${ticket.status}". Entry denied.` 
-        });
-        return;
+      // If we reach here, the ticket WAS found.
+      if (ticket.status !== 'valid' && ticket.status !== 'success') {
+         setStatus({ type: 'error', message: 'INVALID STATUS', color: '#000', details: `Ticket is: ${ticket.status}` });
+         return;
       }
 
-      const eventTitle = ticket.events?.title || 'Unknown Event';
-
-      // 3. Check if already scanned
+      // Check if already used
       if (ticket.is_scanned) {
-        const scanTime = new Date(ticket.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        setStatus({ 
-            type: 'warning', 
-            message: 'ALREADY USED', 
-            color: '#f59e0b', 
-            details: `Scanned at ${scanTime}.`,
-            eventName: eventTitle 
-        });
+        setStatus({ type: 'warning', message: 'ALREADY USED', color: '#f59e0b', details: `Used at ${new Date(ticket.updated_at).toLocaleTimeString()}` });
         return;
       }
 
-      // 4. Update the record (Mark as scanned)
-      const { error: updateError } = await supabase
-        .from('tickets')
-        .update({ 
-          is_scanned: true, 
-          updated_at: new Date().toISOString() 
-        })
-        .eq('id', ticket.id);
-
-      if (updateError) throw updateError;
-
-      // Update Local History
-      setScanHistory(prev => [{
-        name: ticket.guest_name || 'Guest',
-        event: eventTitle,
-        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        tier: ticket.tier_name || 'Regular'
-      }, ...prev].slice(0, 5));
+      // Update to Scanned
+      await supabase.from('tickets').update({ is_scanned: true, updated_at: new Date().toISOString() }).eq('id', ticket.id);
 
       setStatus({ 
         type: 'success', 
         message: 'ENTRY GRANTED', 
         color: '#22c55e', 
         details: `${ticket.guest_name} — ${ticket.tier_name}`,
-        eventName: eventTitle 
+        eventName: ticket.events?.title
       });
 
     } catch (err) {
-      console.error(err);
-      setStatus({ type: 'error', message: 'SCAN ERROR', color: '#000', details: 'Database connection failed.' });
+      setStatus({ type: 'error', message: 'SYSTEM ERROR', color: '#000', details: err.message });
     }
   };
 
