@@ -130,7 +130,18 @@ const uploadToSupabase = async (file) => {
       }
 
       const user = authData.user;
+      // Inside loadDashboardData function...
+const profileData = getSingle(profileRes);
 
+// NEW: Check for onboarding completion
+// If business_name or bank_code is missing, they haven't finished onboarding
+if (profileData && (!profileData.business_name || !profileData.bank_code)) {
+  router.push('/dashboard/organizer/onboarding');
+  return;
+}
+
+const eventsData = getRes(eventsRes);
+// ... rest of the function
       // 2. Parallel Data Fetching
       // Note the nested select for competitions -> contests -> candidates
       const [profileRes, eventsRes, compsRes, ticketsRes] = await Promise.allSettled([
@@ -561,9 +572,13 @@ const handleEditSubmit = async (e) => {
               {paystackConfig.subaccountCode ? 'Paystack Connected' : 'Payouts Paused'}
             </div>
           </div>
-          <button style={settingsIconBtn} onClick={() => setShowSettingsModal(true)}>
-            <Wallet size={16}/> EDIT PAYOUT & BANK SETTINGS
-          </button>
+          {/* Change the onClick from setShowSettingsModal(true) to a router push */}
+<button 
+  style={settingsIconBtn} 
+  onClick={() => router.push('/dashboard/organizer/onboarding')}
+>
+  <Wallet size={16}/> EDIT PAYOUT & BANK SETTINGS
+</button>
         </div>
 
         <div style={quickStatsGrid}>
