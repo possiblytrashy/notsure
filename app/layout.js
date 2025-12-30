@@ -16,18 +16,24 @@ const outfit = Outfit({ subsets: ['latin'] });
 
 export default function RootLayout({ children }) {
   const [user, setUser] = useState(null);
+  const [role, setRole] = useState(null); // Added role state
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const getInitialSession = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      setUser(session?.user ?? null);
+      if (session?.user) {
+        setUser(session.user);
+        // Extract role from user_metadata (set during signup)
+        setRole(session.user.user_metadata?.role || 'user');
+      }
       setLoading(false);
     };
     getInitialSession();
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
+      setRole(session?.user?.user_metadata?.role || 'user');
     });
 
     return () => subscription.unsubscribe();
@@ -36,6 +42,13 @@ export default function RootLayout({ children }) {
   const handleLogout = async () => {
     await supabase.auth.signOut();
     window.location.href = '/';
+  };
+
+  // Logic to determine where the "Dashboard" link goes
+  const getDashboardLink = () => {
+    if (role === 'organizer') return '/dashboard/organizer';
+    if (role === 'admin') return '/admin/dashboard';
+    return '/dashboard/user'; // Default for regular customers
   };
 
   return (
@@ -65,7 +78,6 @@ export default function RootLayout({ children }) {
             border: 1px solid rgba(255, 255, 255, 0.35);
           }
 
-          /* --- NAV STYLES --- */
           .glass-nav {
             position: fixed;
             top: 20px; left: 50%; transform: translateX(-50%);
@@ -105,7 +117,6 @@ export default function RootLayout({ children }) {
           .btn-solid { background: #000; color: #fff; }
           .btn-vote { color: #fff; background: #e73c7e; box-shadow: 0 4px 12px rgba(231, 60, 126, 0.3); }
 
-          /* --- FOOTER STYLES --- */
           .glass-footer {
             margin: 80px auto 30px;
             width: 95%;
@@ -138,7 +149,6 @@ export default function RootLayout({ children }) {
           .status-indicator { display: flex; align-items: center; gap: 10px; font-size: 11px; font-weight: 900; text-transform: uppercase; margin-bottom: 12px; }
           .dot { width: 8px; height: 8px; border-radius: 50%; }
 
-          /* --- MOBILE OPTIMIZATION --- */
           @media (max-width: 850px) {
             .glass-footer { grid-template-columns: 1fr; text-align: center; padding: 40px 24px; }
             .footer-brand p { margin: 10px auto; }
@@ -175,9 +185,12 @@ export default function RootLayout({ children }) {
             
             {!loading && (
               user ? (
-                <a href="/dashboard/organizer" className="btn-nav btn-outline">
+                /* Dynamic Dashboard Link based on Role */
+                <a href={getDashboardLink()} className="btn-nav btn-outline">
                   <LayoutDashboard size={16} />
-                  <span className="hide-mobile-text">DASHBOARD</span>
+                  <span className="hide-mobile-text">
+                    {role === 'organizer' ? 'ORG DASHBOARD' : 'MY TICKETS'}
+                  </span>
                 </a>
               ) : (
                 <a href="/login" className="btn-nav btn-outline">
@@ -213,7 +226,7 @@ export default function RootLayout({ children }) {
             <h4>Platform</h4>
             <a href="/voting" className="footer-link"><Vote size={16} /> Voting Console</a>
             <a href="/events" className="footer-link"><Ticket size={16} /> All Events</a>
-            <a href="/dashboard/organizer/contests/create" className="footer-link">Host a Contest</a>
+            <a href={role === 'organizer' ? "/dashboard/organizer" : "/login"} className="footer-link">Host a Contest</a>
           </div>
 
           <div className="footer-col">
@@ -226,7 +239,7 @@ export default function RootLayout({ children }) {
                       background: user ? '#10b981' : '#f59e0b', 
                       boxShadow: user ? '0 0 12px #10b981' : 'none' 
                     }}></div>
-                    {user ? 'Verified Session' : 'Guest Access'}
+                    {user ? `${role?.toUpperCase()} SESSION` : 'Guest Access'}
                   </div>
                   
                   {user ? (
