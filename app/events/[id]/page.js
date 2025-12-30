@@ -34,6 +34,7 @@ export default function EventPage() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [paymentSuccess, setPaymentSuccess] = useState(null);
   const [fetching, setFetching] = useState(true);
+  const [soldCounts, setSoldCounts] = useState({}); // Track sold tickets per tier
 
   // --- 2. DATA INITIALIZATION ---
   useEffect(() => {
@@ -53,9 +54,24 @@ export default function EventPage() {
           return;
         }
 
+        // FETCH CURRENT SALES: This ensures we know availability on load
+        const { data: ticketData, error: ticketError } = await supabase
+          .from('tickets')
+          .select('tier_name')
+          .eq('event_id', id)
+          .eq('status', 'valid');
+
+        if (!ticketError) {
+          const counts = {};
+          ticketData.forEach(t => {
+            counts[t.tier_name] = (counts[t.tier_name] || 0) + 1;
+          });
+          setSoldCounts(counts);
+        }
+
         setEvent(eventData);
 
-        // Default to the first tier (usually General)
+        // Default to the first tier (usually General) if not sold out
         if (eventData?.ticket_tiers?.length > 0) {
           setSelectedTier(0);
         }
@@ -89,17 +105,30 @@ export default function EventPage() {
   };
 
   const recordPayment = async (response, tier) => {
-    // FIXED: Mapping to your public.tickets schema
+    // FINAL QUANTITY CHECK (Before saving to DB)
+    const { count } = await supabase
+      .from('tickets')
+      .select('*', { count: 'exact', head: true })
+      .eq('event_id', id)
+      .eq('tier_name', tier.name)
+      .eq('status', 'valid');
+
+    if (tier.max_quantity && count >= tier.max_quantity) {
+      alert("SOLD OUT: Unfortunately, the last ticket for this tier was purchased just now. Please contact support if your payment was processed.");
+      setIsProcessing(false);
+      return;
+    }
+
     const ticketData = {
       event_id: id,
       user_id: user ? user.id : null,
-      guest_email: guestEmail.trim(), // Matches SQL
-      guest_name: guestName.trim(),   // Matches SQL
-      tier_name: tier.name,           // Matches SQL
-      amount: parseFloat(tier.price), // Matches SQL
-      reference: response.reference,  // Matches SQL
-      status: 'valid',                // Matches SQL default
-      is_scanned: false,              // Matches SQL
+      guest_email: guestEmail.trim(), 
+      guest_name: guestName.trim(),   
+      tier_name: tier.name,           
+      amount: parseFloat(tier.price), 
+      reference: response.reference,  
+      status: 'valid',                
+      is_scanned: false,              
       updated_at: new Date().toISOString()
     };
 
@@ -141,8 +170,18 @@ export default function EventPage() {
     if (e) e.preventDefault();
     if (selectedTier === null || !event || isProcessing) return;
     
+    const tier = event.ticket_tiers[selectedTier];
+    const currentlySold = soldCounts[tier.name] || 0;
+
+    // PRE-CHECK: Prevent opening Paystack if sold out
+    if (tier.max_quantity && currentlySold >= tier.max_quantity) {
+      alert("This ticket tier is sold out.");
+      return;
+    }
+    
     if (!event.organizer_subaccount) {
       alert("This event is not yet set up for payments. Please contact the organizer.");
+      setIsProcessing(false);
       return;
     }
     
@@ -150,7 +189,6 @@ export default function EventPage() {
 
     try {
       const PaystackPop = await loadPaystackScript();
-      const tier = event.ticket_tiers[selectedTier];
       
       const handler = PaystackPop.setup({
         key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
@@ -310,16 +348,32 @@ export default function EventPage() {
                 <div style={styles.formSection}>
                   <h3 style={styles.formHeading}>2. SELECT TIER</h3>
                   <div style={styles.tiersWrapper}>
-                    {event.ticket_tiers?.map((tier, idx) => (
-                      <div key={idx} onClick={() => setSelectedTier(idx)} style={styles.tierSelectionCard(selectedTier === idx)}>
-                        <div style={styles.tierInfo}><p style={styles.tierName}>{tier.name}</p><p style={styles.tierDesc}>{tier.description}</p></div>
-                        <div style={styles.tierPrice}>GHS {tier.price}</div>
-                      </div>
-                    ))}
+                    {event.ticket_tiers?.map((tier, idx) => {
+                      const soldOut = tier.max_quantity && (soldCounts[tier.name] || 0) >= tier.max_quantity;
+                      return (
+                        <div 
+                          key={idx} 
+                          onClick={() => !soldOut && setSelectedTier(idx)} 
+                          style={styles.tierSelectionCard(selectedTier === idx, soldOut)}
+                        >
+                          <div style={styles.tierInfo}>
+                            <p style={styles.tierName}>
+                              {tier.name} {soldOut && <span style={{color: '#ef4444', fontSize: '10px', marginLeft: '5px'}}>(SOLD OUT)</span>}
+                            </p>
+                            <p style={styles.tierDesc}>{tier.description}</p>
+                          </div>
+                          <div style={styles.tierPrice}>{soldOut ? '---' : `GHS ${tier.price}`}</div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
 
-                <button type="submit" disabled={isProcessing || selectedTier === null} style={styles.finalSubmitBtn(isProcessing || selectedTier === null)}>
+                <button 
+                  type="submit" 
+                  disabled={isProcessing || selectedTier === null || (event.ticket_tiers[selectedTier] && (soldCounts[event.ticket_tiers[selectedTier].name] >= event.ticket_tiers[selectedTier].max_quantity))} 
+                  style={styles.finalSubmitBtn(isProcessing || selectedTier === null)}
+                >
                   {isProcessing ? <Loader2 className="animate-spin" /> : <>GET ACCESS <ChevronRight size={20} /></>}
                 </button>
               </form>
@@ -364,10 +418,12 @@ const styles = {
   inputContainer: { display: 'flex', alignItems: 'center', gap: '12px', background: '#f1f5f9', padding: '16px 20px', borderRadius: '18px', marginBottom: '12px' },
   cleanInput: { background: 'none', border: 'none', outline: 'none', width: '100%', fontSize: '15px', fontWeight: 600 },
   tiersWrapper: { display: 'flex', flexDirection: 'column', gap: '12px' },
-  tierSelectionCard: (active) => ({ 
+  tierSelectionCard: (active, soldOut) => ({ 
     padding: '20px', borderRadius: '22px', border: active ? '2px solid #000' : '2px solid #f1f5f9', 
-    background: active ? '#f8fafc' : '#fff', cursor: 'pointer', display: 'flex', 
-    justifyContent: 'space-between', alignItems: 'center', transition: '0.2s' 
+    background: active ? '#f8fafc' : (soldOut ? '#f1f5f9' : '#fff'), 
+    cursor: soldOut ? 'not-allowed' : 'pointer', display: 'flex', 
+    justifyContent: 'space-between', alignItems: 'center', transition: '0.2s',
+    opacity: soldOut ? 0.6 : 1
   }),
   tierInfo: { display: 'flex', flexDirection: 'column', gap: '4px' },
   tierName: { fontWeight: 800, fontSize: '16px', margin: 0 },
