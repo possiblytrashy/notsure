@@ -89,19 +89,25 @@ export default function EventPage() {
   };
 
   const recordPayment = async (response, tier) => {
+    // FIXED: Mapping to your public.tickets schema
     const ticketData = {
       event_id: id,
-      tier_id: tier.id,
-      tier_name: tier.name,
-      amount: parseFloat(tier.price),
-      reference: response.reference,
-      status: 'paid',
       user_id: user ? user.id : null,
-      customer_email: guestEmail.trim(),
-      customer_name: guestName.trim()
+      guest_email: guestEmail.trim(), // Matches SQL
+      guest_name: guestName.trim(),   // Matches SQL
+      tier_name: tier.name,           // Matches SQL
+      amount: parseFloat(tier.price), // Matches SQL
+      reference: response.reference,  // Matches SQL
+      status: 'valid',                // Matches SQL default
+      is_scanned: false,              // Matches SQL
+      updated_at: new Date().toISOString()
     };
 
     const { error } = await supabase.from('tickets').insert([ticketData]);
+
+    if (error) {
+      console.error("Supabase Insert Error:", error);
+    }
 
     setPaymentSuccess({
       reference: response.reference,
@@ -186,7 +192,6 @@ export default function EventPage() {
   );
 
   if (paymentSuccess) {
-    // SECURITY: Tie the QR to both the unique reference AND the event ID
     const qrPayload = encodeURIComponent(`REF:${paymentSuccess.reference}|EVT:${id}`);
     const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${qrPayload}`;
     
@@ -228,9 +233,7 @@ export default function EventPage() {
   return (
     <div style={styles.pageLayout}>
       <style>{`
-        /* Fix for mobile edge clipping and sideways shifting */
         * { box-sizing: border-box; }
-        
         html, body { 
           overflow-x: hidden !important; 
           width: 100%;
@@ -238,7 +241,6 @@ export default function EventPage() {
           padding: 0;
           position: relative;
         }
-
         @media (max-width: 1024px) {
           .content-grid { grid-template-columns: 1fr !important; gap: 40px !important; }
           .gallery-column { width: 100% !important; }
@@ -246,7 +248,6 @@ export default function EventPage() {
           .sticky-box { position: relative !important; top: 0 !important; }
           .event-title { font-size: 38px !important; }
         }
-
         @media (max-width: 640px) {
           .main-frame { height: 350px !important; border-radius: 24px !important; }
           .specs-grid { grid-template-columns: 1fr !important; }
