@@ -71,6 +71,23 @@ export default function Home() {
         </div>
       </section>
 
+      {/* --- FEATURED SECTION --- */}
+      {!search && featuredEvent && !loading && (
+        <section style={styles.section}>
+          <div style={styles.sectionHeader}>
+            <h2 style={styles.sectionTitle}><Zap size={22} color="#e73c7e" /> Featured Experience</h2>
+          </div>
+          <a href={`/events/${featuredEvent.id}`} style={styles.featuredCard}>
+            <div style={{...styles.cardImg, backgroundImage: `url(${featuredEvent.images?.[0]})`, height: '400px'}} />
+            <div style={styles.featuredOverlay}>
+              <span style={styles.dateTag}>{featuredEvent.date}</span>
+              <h3 style={styles.featuredTitle}>{featuredEvent.title}</h3>
+              <p style={styles.locationTag}><MapPin size={16} /> {featuredEvent.location}</p>
+            </div>
+          </a>
+        </section>
+      )}
+
       {/* --- UPCOMING EVENTS GRID --- */}
       <section style={styles.section}>
         <div style={styles.sectionHeader}>
