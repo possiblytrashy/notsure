@@ -89,6 +89,7 @@ export default function EventPage() {
   };
 
   const recordPayment = async (response, tier) => {
+    // Note: The Webhook will also catch this to send the email via Resend
     const ticketData = {
       event_id: id,
       tier_id: tier.id,
@@ -114,10 +115,28 @@ export default function EventPage() {
     setIsProcessing(false);
   };
 
+  const handleShare = async () => {
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: event?.title || 'Luxury Experience',
+          text: `Join me at ${event?.title}`,
+          url: window.location.href,
+        });
+      } catch (err) {
+        console.log("Share failed", err);
+      }
+    } else {
+      navigator.clipboard.writeText(window.location.href);
+      alert("Link copied to clipboard");
+    }
+  };
+
   const handlePurchase = async (e) => {
     if (e) e.preventDefault();
     if (selectedTier === null || !event || isProcessing) return;
     
+    // Safety check for Onboarding
     if (!event.organizer_subaccount) {
       alert("This event is not yet set up for payments. Please contact the organizer.");
       return;
@@ -134,8 +153,8 @@ export default function EventPage() {
         email: guestEmail.trim(),
         amount: Math.round(parseFloat(tier.price) * 100),
         currency: "GHS",
-        subaccount: event.organizer_subaccount,
-        bearer: "subaccount",
+        subaccount: event.organizer_subaccount, // 5% split handled here
+        bearer: "subaccount",                  // Organizer covers processing fees
         metadata: {
           type: 'TICKET_PURCHASE',
           event_id: id,
@@ -208,27 +227,36 @@ export default function EventPage() {
   return (
     <div style={styles.pageLayout}>
       <style>{`
-        @media (max-width: 992px) {
-          .content-grid { grid-template-columns: 1fr !important; gap: 40px !important; }
-          .main-frame { height: 450px !important; border-radius: 30px !important; }
-          .event-title { font-size: 36px !important; }
-          .sticky-sidebar { position: relative !important; top: 0 !important; }
-          .desktop-nav { margin-bottom: 20px !important; }
-          .ticket-card-ui { padding: 30px 20px !important; }
+        /* Fix for mobile sideways shifting */
+        html, body { 
+          overflow-x: hidden !important; 
+          width: 100vw;
+          position: relative;
         }
-        @media (max-width: 600px) {
+
+        @media (max-width: 1024px) {
+          .content-grid { grid-template-columns: 1fr !important; gap: 40px !important; }
+          .gallery-column { width: 100% !important; }
+          .main-frame { height: 500px !important; border-radius: 30px !important; }
+          .sticky-box { position: relative !important; top: 0 !important; }
+          .event-title { font-size: 38px !important; }
+        }
+
+        @media (max-width: 640px) {
+          .main-frame { height: 350px !important; border-radius: 24px !important; }
           .specs-grid { grid-template-columns: 1fr !important; }
-          .main-frame { height: 350px !important; }
+          .checkout-card { padding: 25px !important; border-radius: 28px !important; }
+          .event-title { font-size: 32px !important; }
         }
       `}</style>
 
-      <div style={styles.navBar} className="desktop-nav">
+      <div style={styles.navBar}>
         <button onClick={() => router.back()} style={styles.backBtn}><ChevronLeft size={20} /> BACK</button>
-        <button style={styles.shareBtn}><Share2 size={18} /></button>
+        <button onClick={handleShare} style={styles.shareBtn}><Share2 size={18} /></button>
       </div>
 
       <div style={styles.contentGrid} className="content-grid">
-        <div style={styles.galleryColumn}>
+        <div style={styles.galleryColumn} className="gallery-column">
           <div style={styles.mainDisplayFrame} className="main-frame">
             <img src={event.images?.[currentImg] || 'https://via.placeholder.com/800'} style={styles.mainImg} alt="Visual" />
             {event.images?.length > 1 && (
@@ -254,7 +282,7 @@ export default function EventPage() {
         </div>
 
         <div style={styles.sidebarColumn}>
-          <div style={styles.stickyContent} className="sticky-sidebar">
+          <div style={styles.stickyContent} className="sticky-box">
             <div style={styles.eventHeader}>
               <span style={styles.categoryBadge}>{event.category || 'Luxury Experience'}</span>
               <h1 style={styles.eventTitle} className="event-title">{event.title}</h1>
@@ -265,7 +293,7 @@ export default function EventPage() {
               <div style={styles.specItem}><MapPin size={20} color="#f43f5e" /><div><p style={styles.specLabel}>LOCATION</p><p style={styles.specValue}>{event.location}</p></div></div>
             </div>
 
-            <div style={styles.checkoutCard} className="ticket-card-ui">
+            <div style={styles.checkoutCard} className="checkout-card">
               <form onSubmit={handlePurchase}>
                 <div style={styles.formSection}>
                   <h3 style={styles.formHeading}>1. GUEST IDENTITY</h3>
@@ -299,7 +327,7 @@ export default function EventPage() {
 }
 
 const styles = {
-  pageLayout: { maxWidth: '1300px', margin: '0 auto', padding: '20px 24px 100px', fontFamily: '"Inter", sans-serif' },
+  pageLayout: { maxWidth: '1300px', margin: '0 auto', padding: '20px 24px 100px', fontFamily: '"Inter", sans-serif', overflowX: 'hidden' },
   navBar: { display: 'flex', justifyContent: 'space-between', marginBottom: '30px' },
   backBtn: { background: '#f8fafc', border: '1px solid #f1f5f9', padding: '10px 20px', borderRadius: '12px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' },
   shareBtn: { width: '40px', height: '40px', borderRadius: '12px', background: '#fff', border: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' },
