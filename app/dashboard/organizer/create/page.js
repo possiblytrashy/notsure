@@ -43,7 +43,7 @@ export default function CreateEvent() {
       id: crypto.randomUUID(),
       name: 'Regular', 
       price: '', 
-      capacity: '', 
+      capacity: '', // This will map to max_quantity in the DB
       description: 'Standard entry to the experience' 
     }
   ]);
@@ -171,6 +171,13 @@ export default function CreateEvent() {
       return;
     }
 
+    // Validation for Tiers (Price and Capacity)
+    const invalidTier = tiers.find(t => !t.name || !t.price || !t.capacity || parseFloat(t.price) < 0 || parseInt(t.capacity) <= 0);
+    if (invalidTier) {
+      setFormError("Please ensure all ticket tiers have a name, price, and a valid quantity (min 1).");
+      return;
+    }
+
     if (!eventData.title.trim() || !eventData.date || eventData.image_urls.length === 0) {
       setFormError("Missing required fields or images.");
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -181,6 +188,7 @@ export default function CreateEvent() {
     const formattedTime = `${eventData.hour}:${eventData.minute} ${eventData.period}`;
 
     try {
+      // Create the main Event
       const { data: event, error: eventError } = await supabase
         .from('events')
         .insert([{
@@ -199,12 +207,13 @@ export default function CreateEvent() {
 
       if (eventError) throw eventError;
 
+      // Create the Tiers (Mapping "capacity" from form to "max_quantity" in DB)
       const tiersPayload = tiers.map(t => ({
         event_id: event.id,
         name: t.name,
         price: parseFloat(t.price),
-        capacity: parseInt(t.capacity),
-        description: t.description
+        max_quantity: parseInt(t.capacity), // Corrected to match Sold Out logic
+        description: t.description || 'Access to the event'
       }));
 
       const { error: tiersError } = await supabase.from('ticket_tiers').insert(tiersPayload);
@@ -218,7 +227,7 @@ export default function CreateEvent() {
     }
   };
 
-  // --- 6. UPDATED RESPONSIVE STYLING ---
+  // --- 6. STYLING (Same as original) ---
   const styles = {
     pageContainer: { padding: '24px 16px 100px', maxWidth: '1280px', margin: '0 auto', minHeight: '100vh', backgroundColor: '#fcfdfe', fontFamily: '"Inter", sans-serif' },
     topHeader: { display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '32px' },
@@ -264,7 +273,6 @@ export default function CreateEvent() {
 
   return (
     <div style={styles.pageContainer}>
-      {/* Desktop Overrides */}
       <style>{`
         @media (min-width: 1024px) {
           .create-form-layout {
@@ -398,7 +406,7 @@ export default function CreateEvent() {
                 </div>
                 <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:'15px'}}>
                    <div style={styles.inputGroup}><label style={styles.label}>Price (GHS)</label><input type="number" style={styles.input} value={tier.price} onChange={(e) => updateTier(tier.id, 'price', e.target.value)} /></div>
-                   <div style={styles.inputGroup}><label style={styles.label}>Qty</label><input type="number" style={styles.input} value={tier.capacity} onChange={(e) => updateTier(tier.id, 'capacity', e.target.value)} /></div>
+                   <div style={styles.inputGroup}><label style={styles.label}>Qty</label><input type="number" style={styles.input} value={tier.capacity} placeholder="Available Tickets" onChange={(e) => updateTier(tier.id, 'capacity', e.target.value)} /></div>
                 </div>
               </div>
             ))}
