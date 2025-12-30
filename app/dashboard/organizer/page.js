@@ -162,8 +162,16 @@ const eventsData = getRes(eventsRes);
       const getRes = (res) => (res.status === 'fulfilled' ? res.value.data : []);
       const getSingle = (res) => (res.status === 'fulfilled' ? res.value.data : null);
 
-      const profileData = getSingle(profileRes);
-      const eventsData = getRes(eventsRes);
+     const profileData = getSingle(profileRes);
+
+// NEW: Check for onboarding completion
+// If business_name or bank_code is missing, they haven't finished onboarding
+if (profileData && (!profileData.business_name || !profileData.bank_code)) {
+  router.push('/dashboard/organizer/onboarding');
+  return;
+}
+
+const eventsData = getRes(eventsRes);
       const rawCompsData = getRes(compsRes); // Now contains nested contests & candidates
       const ticketsData = getRes(ticketsRes);
 
