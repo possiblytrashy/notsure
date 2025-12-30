@@ -130,18 +130,7 @@ const uploadToSupabase = async (file) => {
       }
 
       const user = authData.user;
-      // Inside loadDashboardData function...
-const profileData = getSingle(profileRes);
-
-// NEW: Check for onboarding completion
-// If business_name or bank_code is missing, they haven't finished onboarding
-if (profileData && (!profileData.business_name || !profileData.bank_code)) {
-  router.push('/dashboard/organizer/onboarding');
-  return;
-}
-
-const eventsData = getRes(eventsRes);
-// ... rest of the function
+   
       // 2. Parallel Data Fetching
       // Note the nested select for competitions -> contests -> candidates
       const [profileRes, eventsRes, compsRes, ticketsRes] = await Promise.allSettled([
