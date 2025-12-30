@@ -73,7 +73,7 @@ export default function AdvancedScanner() {
             title
           )
         `)
-        .eq('reference', ticketRef)
+        .ilike('reference', ticketRef)
         .maybeSingle();
 
       if (fetchError) throw fetchError;
