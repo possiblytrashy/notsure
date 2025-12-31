@@ -410,25 +410,7 @@ export default function CreateEvent() {
                 />
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
-                <div>
-                  <label style={styles.label}>CATEGORY</label>
-                  <select style={styles.input} value={eventData.category} onChange={e => setEventData({...eventData, category: e.target.value})}>
-                    <option>Nightlife</option>
-                    <option>Gala</option>
-                    <option>Concert</option>
-                    <option>Beach Experience</option>
-                    <option>Brunch</option>
-                  </select>
-                </div>
-                <div>
-                  <label style={styles.label}>VISIBILITY</label>
-                  <select style={styles.input} value={eventData.visibility} onChange={e => setEventData({...eventData, visibility: e.target.value})}>
-                    <option value="public">Public (Visible to all)</option>
-                    <option value="private">Private (Link only)</option>
-                  </select>
-                </div>
-              </div>
+              
             </div>
 
             {/* --- LOCATION SECTION --- */}
@@ -535,12 +517,6 @@ export default function CreateEvent() {
                 <div style={{ display: 'flex', gap: '12px', marginBottom: '24px' }}>
                   <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'rgba(56, 189, 248, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                     <ShieldCheck size={18} color="#38bdf8" />
-                  </div>
-                  <div>
-                    <h4 style={{ margin: '0 0 4px', fontSize: '14px', fontWeight: '800' }}>Secure Payouts</h4>
-                    <p style={{ margin: 0, fontSize: '11px', color: '#94a3b8', lineHeight: '1.5' }}>
-                      Funds are settled directly to subaccount: <br/><strong style={{color: '#fff'}}>{organizerSubaccount || "LINKING..."}</strong>
-                    </p>
                   </div>
                 </div>
 
