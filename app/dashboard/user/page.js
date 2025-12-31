@@ -5,9 +5,9 @@ import { supabase } from '../../../lib/supabase';
 import { useRouter } from 'next/navigation';
 import { 
   Ticket, Calendar, MapPin, QrCode, LogOut, 
-  Loader2, Clock, CheckCircle2, X, AlertCircle,
-  Navigation, Car, Map as MapIcon, ChevronRight,
-  ExternalLink, Info
+  Loader2, CheckCircle2, X, Navigation, 
+  Car, Map as MapIcon, ChevronRight, ExternalLink,
+  Clock, ShieldCheck
 } from 'lucide-react';
 
 export default function UserDashboard() {
@@ -28,11 +28,7 @@ export default function UserDashboard() {
         }
         setUser(user);
 
-        /**
-         * UPDATED QUERY:
-         * Changed 'location_name' to 'location' based on your error log.
-         * Note: If 'image_urls' also errors, change it to 'images'.
-         */
+        // MATCHING YOUR SCHEMA: lat, lng, image_url, location, time
         const { data: ticketData, error: ticketError } = await supabase
           .from('tickets')
           .select(`
@@ -41,10 +37,11 @@ export default function UserDashboard() {
               id,
               title,
               date,
+              time,
               location,
-              latitude,
-              longitude,
-              image_urls
+              lat,
+              lng,
+              image_url
             )
           `)
           .eq('guest_email', user.email) 
@@ -54,7 +51,7 @@ export default function UserDashboard() {
         setTickets(ticketData || []);
 
       } catch (err) {
-        console.error("Error loading wallet:", err.message);
+        console.error("Vault Access Error:", err.message);
       } finally {
         setLoading(false);
       }
@@ -64,80 +61,92 @@ export default function UserDashboard() {
   }, [router]);
 
   const handleLogout = async () => {
-    await supabase.signOut();
+    await supabase.auth.signOut();
     router.push('/login');
   };
 
   const getRideLink = (type, lat, lng, name) => {
     if (!lat || !lng) return null;
-    const encodedName = encodeURIComponent(name || 'Venue');
     return type === 'uber' 
-      ? `https://uber.com/ul/?action=setPickup&dropoff[latitude]=${lat}&dropoff[longitude]=${lng}&dropoff[nickname]=${encodedName}`
-      : `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
+      ? `https://uber.com/ul/?action=setPickup&dropoff[latitude]=${lat}&dropoff[longitude]=${lng}`
+      : `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
   };
 
-  // --- STYLES ---
-  const styles = {
-    page: { minHeight: '100vh', background: '#fcfdfe', padding: '24px 16px 100px' },
-    header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', maxWidth: '600px', margin: '0 auto 40px' },
-    logo: { fontSize: '28px', fontWeight: 950, margin: 0, letterSpacing: '-1.5px' },
-    walletGrid: { display: 'grid', gridTemplateColumns: '1fr', gap: '24px', maxWidth: '600px', margin: '0 auto' },
-    card: { background: '#fff', borderRadius: '32px', overflow: 'hidden', boxShadow: '0 20px 40px -15px rgba(0,0,0,0.05)', border: '1px solid #f1f5f9', position: 'relative' },
-    cardMedia: (img) => ({ height: '160px', background: img ? `url(${img}) center/cover` : '#0f172a', position: 'relative' }),
-    cardBody: { padding: '24px' },
-    eventTitle: { margin: '8px 0 12px', fontSize: '20px', fontWeight: 900, color: '#0f172a' },
-    metaRow: { display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' },
-    metaItem: { display: 'flex', alignItems: 'center', gap: '8px', color: '#64748b', fontSize: '14px', fontWeight: 600 },
-    badge: (isScanned) => ({ 
-      position: 'absolute', top: '15px', right: '15px', 
-      background: '#fff', color: isScanned ? '#94a3b8' : '#10b981',
-      padding: '6px 14px', borderRadius: '12px', fontSize: '11px', fontWeight: 900,
-      display: 'flex', gap: '6px', alignItems: 'center', boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
-    }),
-    actionButtonGroup: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' },
-    qrBtn: { padding: '16px', background: '#000', color: '#fff', border: 'none', borderRadius: '16px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' },
-    mapBtn: { padding: '16px', background: '#f8fafc', color: '#0f172a', border: '1px solid #e2e8f0', borderRadius: '16px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' },
-    overlay: { position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.9)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, backdropFilter: 'blur(8px)', padding: '20px' },
-    modalCard: { background: '#fff', width: '100%', maxWidth: '400px', borderRadius: '32px', padding: '32px', textAlign: 'center', position: 'relative' },
-    rideOption: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px', borderRadius: '18px', background: '#f8fafc', border: '1px solid #f1f5f9', marginBottom: '10px', textDecoration: 'none' }
-  };
-
-  if (loading) return <div style={{height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center'}}><Loader2 className="animate-spin" /></div>;
+  if (loading) return (
+    <div style={{height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#000', color: '#fff'}}>
+      <Loader2 className="animate-spin" size={30} strokeWidth={1} color="#CDa434" />
+      <p style={{marginTop: '20px', fontSize: '10px', letterSpacing: '4px', fontWeight: 'bold', opacity: 0.6}}>INITIALIZING VAULT</p>
+    </div>
+  );
 
   return (
-    <div style={styles.page}>
-      <div style={styles.header}>
-        <h1 style={styles.logo}>VAULT</h1>
-        <button onClick={handleLogout} style={{background: '#fff', border: '1px solid #f1f5f9', width: '45px', height: '45px', borderRadius: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
+    <div style={{ minHeight: '100vh', background: '#050505', color: '#fff', padding: '20px 20px 100px', fontFamily: 'sans-serif' }}>
+      
+      {/* HEADER */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', maxWidth: '500px', margin: '0 auto 40px', paddingTop: '20px' }}>
+        <div>
+          <h1 style={{ fontSize: '24px', fontWeight: '900', letterSpacing: '-1px', margin: 0 }}>THE VAULT</h1>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', opacity: 0.5 }}>
+            <ShieldCheck size={12} color="#CDa434" />
+            <span style={{ fontSize: '11px', fontWeight: '600' }}>SECURE ACCESS</span>
+          </div>
+        </div>
+        <button onClick={handleLogout} style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: '#fff', width: '44px', height: '44px', borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <LogOut size={18} />
         </button>
       </div>
 
-      <div style={styles.walletGrid}>
-        {tickets.map((ticket) => (
-          <div key={ticket.id} style={styles.card}>
-            <div style={styles.cardMedia(ticket.events?.image_urls?.[0])}>
-              <div style={styles.badge(ticket.is_scanned)}>
-                {ticket.is_scanned ? <CheckCircle2 size={12}/> : <Clock size={12}/>}
-                {ticket.is_scanned ? 'USED' : 'VALID'}
+      {/* TICKETS GRID */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '30px', maxWidth: '500px', margin: '0 auto' }}>
+        {tickets.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '100px 20px', border: '1px dashed rgba(255,255,255,0.1)', borderRadius: '30px' }}>
+            <p style={{ opacity: 0.4, fontSize: '14px' }}>No active passes found in your vault.</p>
+          </div>
+        ) : tickets.map((ticket) => (
+          <div key={ticket.id} style={{ background: 'rgba(20,20,20,1)', borderRadius: '30px', border: '1px solid rgba(255,255,255,0.08)', overflow: 'hidden', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.5)' }}>
+            
+            {/* IMAGE AREA */}
+            <div style={{ height: '200px', background: `linear-gradient(to bottom, transparent, #141414), url(${ticket.events?.image_url}) center/cover`, position: 'relative' }}>
+              <div style={{ position: 'absolute', top: '20px', left: '20px', background: '#CDa434', color: '#000', padding: '5px 12px', borderRadius: '8px', fontSize: '10px', fontWeight: '900' }}>
+                {ticket.tier_name?.toUpperCase() || 'VIP'}
               </div>
+              {ticket.is_scanned && (
+                <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <div style={{ border: '2px solid #fff', padding: '10px 20px', borderRadius: '12px', fontWeight: '900', letterSpacing: '2px' }}>USED</div>
+                </div>
+              )}
             </div>
 
-            <div style={styles.cardBody}>
-              <span style={{fontSize: '10px', fontWeight: 900, color: '#0ea5e9', textTransform: 'uppercase', letterSpacing: '1px'}}>{ticket.tier_name}</span>
-              <h2 style={styles.eventTitle}>{ticket.events?.title}</h2>
+            {/* CONTENT */}
+            <div style={{ padding: '24px' }}>
+              <h2 style={{ fontSize: '22px', fontWeight: '800', margin: '0 0 15px', color: '#fff' }}>{ticket.events?.title}</h2>
               
-              <div style={styles.metaRow}>
-                <div style={styles.metaItem}><Calendar size={14}/> {ticket.events?.date}</div>
-                <div style={styles.metaItem}><MapPin size={14}/> {ticket.events?.location}</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '25px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'rgba(255,255,255,0.5)', fontSize: '13px' }}>
+                  <Calendar size={14} color="#CDa434" /> {ticket.events?.date}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'rgba(255,255,255,0.5)', fontSize: '13px' }}>
+                  <Clock size={14} color="#CDa434" /> {ticket.events?.time || 'Night'}
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'rgba(255,255,255,0.5)', fontSize: '13px', gridColumn: 'span 2' }}>
+                  <MapPin size={14} color="#CDa434" /> <span style={{ textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>{ticket.events?.location}</span>
+                </div>
               </div>
 
-              <div style={styles.actionButtonGroup}>
-                <button style={styles.qrBtn} onClick={() => setSelectedTicket(ticket)} disabled={ticket.is_scanned}>
-                  <QrCode size={18} /> TICKET
+              {/* ACTIONS */}
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button 
+                  onClick={() => setSelectedTicket(ticket)}
+                  disabled={ticket.is_scanned}
+                  style={{ flex: 2, background: '#fff', color: '#000', border: 'none', padding: '16px', borderRadius: '16px', fontWeight: '800', fontSize: '14px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+                >
+                  <QrCode size={18} /> VIEW PASS
                 </button>
-                <button style={styles.mapBtn} onClick={() => setShowLocationModal(ticket)}>
-                  <Navigation size={18} /> TRAVEL
+                <button 
+                  onClick={() => setShowLocationModal(ticket)}
+                  style={{ flex: 1, background: 'rgba(255,255,255,0.05)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)', padding: '16px', borderRadius: '16px', fontWeight: '800', fontSize: '14px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                >
+                  <Navigation size={18} />
                 </button>
               </div>
             </div>
@@ -145,41 +154,47 @@ export default function UserDashboard() {
         ))}
       </div>
 
-      {/* QR MODAL */}
+      {/* QR MODAL (GHOST THEME) */}
       {selectedTicket && (
-        <div style={styles.overlay} onClick={() => setSelectedTicket(null)}>
-          <div style={styles.modalCard} onClick={e => e.stopPropagation()}>
-            <h3 style={{fontWeight: 900, fontSize: '22px', marginBottom: '20px'}}>Entry Pass</h3>
-            <img 
-              src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${selectedTicket.reference}`} 
-              style={{width: '200px', marginBottom: '20px'}} alt="QR" 
-            />
-            <div style={{fontFamily: 'monospace', background: '#f8fafc', padding: '10px', borderRadius: '10px', fontWeight: 'bold'}}>{selectedTicket.reference}</div>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.95)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px', backdropFilter: 'blur(10px)' }} onClick={() => setSelectedTicket(null)}>
+          <div style={{ width: '100%', maxWidth: '350px', textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+            <p style={{ color: '#CDa434', fontWeight: '900', fontSize: '10px', letterSpacing: '3px', marginBottom: '20px' }}>ADMIT ONE</p>
+            <div style={{ background: '#fff', padding: '25px', borderRadius: '40px', display: 'inline-block', marginBottom: '30px', boxShadow: '0 0 50px rgba(205,164,52,0.2)' }}>
+              <img 
+                src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${selectedTicket.reference}&color=000000&bgcolor=ffffff`} 
+                style={{ width: '220px', height: '220px', display: 'block' }} 
+                alt="QR" 
+              />
+            </div>
+            <h3 style={{ fontSize: '20px', fontWeight: '800', marginBottom: '5px' }}>{selectedTicket.guest_name}</h3>
+            <p style={{ opacity: 0.5, fontSize: '13px', fontFamily: 'monospace' }}>{selectedTicket.reference}</p>
+            <button onClick={() => setSelectedTicket(null)} style={{ marginTop: '40px', background: 'none', border: '1px solid rgba(255,255,255,0.2)', color: '#fff', padding: '10px 20px', borderRadius: '30px', cursor: 'pointer', fontSize: '12px' }}>CLOSE</button>
           </div>
         </div>
       )}
 
-      {/* TRAVEL MODAL */}
+      {/* TRANSPORT MODAL */}
       {showLocationModal && (
-        <div style={styles.overlay} onClick={() => setShowLocationModal(null)}>
-          <div style={styles.modalCard} onClick={e => e.stopPropagation()}>
-            <h3 style={{fontWeight: 900, fontSize: '22px', marginBottom: '5px'}}>Travel Options</h3>
-            <p style={{fontSize: '13px', color: '#64748b', marginBottom: '24px'}}>{showLocationModal.events?.location}</p>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 1000, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }} onClick={() => setShowLocationModal(null)}>
+          <div style={{ background: '#111', width: '100%', maxWidth: '500px', borderTopLeftRadius: '40px', borderTopRightRadius: '40px', padding: '40px 30px', border: '1px solid rgba(255,255,255,0.1)' }} onClick={e => e.stopPropagation()}>
+            <div style={{ width: '40px', height: '4px', background: 'rgba(255,255,255,0.2)', borderRadius: '2px', margin: '0 auto 30px' }} />
+            <h3 style={{ fontSize: '22px', fontWeight: '800', marginBottom: '10px' }}>Transport</h3>
+            <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: '14px', marginBottom: '30px' }}>{showLocationModal.events?.location}</p>
 
-            <a href={getRideLink('uber', showLocationModal.events?.latitude, showLocationModal.events?.longitude, showLocationModal.events?.title)} target="_blank" rel="noreferrer" style={styles.rideOption}>
-              <div style={{display: 'flex', alignItems: 'center', gap: '12px'}}>
-                <Car size={20} />
-                <div style={{textAlign: 'left'}}><p style={{margin: 0, fontWeight: 800}}>Uber Ride</p></div>
+            <a href={getRideLink('uber', showLocationModal.events?.lat, showLocationModal.events?.lng)} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px', background: '#fff', borderRadius: '20px', marginBottom: '12px', textDecoration: 'none', color: '#000' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                <Car size={24} />
+                <span style={{ fontWeight: '800' }}>Request Uber</span>
               </div>
-              <ChevronRight size={18} />
+              <ChevronRight size={20} />
             </a>
 
-            <a href={getRideLink('google', showLocationModal.events?.latitude, showLocationModal.events?.longitude)} target="_blank" rel="noreferrer" style={styles.rideOption}>
-              <div style={{display: 'flex', alignItems: 'center', gap: '12px'}}>
-                <MapIcon size={20} />
-                <div style={{textAlign: 'left'}}><p style={{margin: 0, fontWeight: 800}}>Google Maps</p></div>
+            <a href={getRideLink('google', showLocationModal.events?.lat, showLocationModal.events?.lng)} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '20px', background: 'rgba(255,255,255,0.05)', borderRadius: '20px', textDecoration: 'none', color: '#fff', border: '1px solid rgba(255,255,255,0.1)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+                <MapIcon size={24} />
+                <span style={{ fontWeight: '800' }}>Google Maps</span>
               </div>
-              <ChevronRight size={18} />
+              <ExternalLink size={20} />
             </a>
           </div>
         </div>
