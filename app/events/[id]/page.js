@@ -30,10 +30,24 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN;
 
+// --- HELPER: DATE FORMATTER ---
+const formatDate = (dateString) => {
+  if (!dateString) return 'Date TBA';
+  const options = { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' };
+  return new Date(dateString).toLocaleDateString('en-US', options);
+};
+
+// --- HELPER: TIME FORMATTER ---
+const formatTime = (timeString) => {
+    if (!timeString) return 'Time TBA';
+    // If it's already formatted (e.g. 14:00), return it, otherwise try to parse
+    return timeString.substring(0, 5);
+};
+
 export default function EventPage() {
   const { id } = useParams();
   const router = useRouter();
-  
+   
   // --- 1. STATE MANAGEMENT ---
   const [event, setEvent] = useState(null);
   const [user, setUser] = useState(null);
@@ -296,7 +310,7 @@ export default function EventPage() {
               <p style={styles.refText}>REF: {paymentSuccess.reference}</p>
             </div>
 
-            {/* --- MAP INTEGRATION (MOVED HERE) --- */}
+            {/* --- MAP INTEGRATION --- */}
             <div style={{ marginTop: '20px', marginBottom: '20px' }}>
               <div style={{...styles.mapContainer, height: '250px'}}>
                 <Map
@@ -325,7 +339,7 @@ export default function EventPage() {
               </div>
             </div>
 
-            {/* --- RIDESHARE CONCIERGE (MOVED HERE) --- */}
+            {/* --- RIDESHARE CONCIERGE --- */}
             <div style={styles.conciergeBox}>
                <div style={{display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '15px'}}>
                   <Car size={18} color="#000" />
@@ -388,7 +402,6 @@ export default function EventPage() {
           <div style={styles.descriptionSection}>
             <h3 style={styles.sectionLabel}>EXPERIENCE DETAILS</h3>
             <p style={styles.eventDescription}>{event.description}</p>
-            {/* Map removed from here */}
           </div>
         </div>
 
@@ -399,9 +412,32 @@ export default function EventPage() {
               <h1 style={styles.eventTitle}>{event.title}</h1>
             </div>
 
-            <div style={styles.specsGrid}>
-              <div style={styles.specItem}><Calendar size={20} color="#0ea5e9" /><div><p style={styles.specLabel}>DATE</p><p style={styles.specValue}>{event.event_date}</p></div></div>
-              <div style={styles.specItem}><Clock size={20} color="#f43f5e" /><div><p style={styles.specLabel}>TIME</p><p style={styles.specValue}>{event.event_time}</p></div></div>
+            {/* --- UPDATED INFO GRID (Date, Time, Location) --- */}
+            <div style={styles.specsContainer}>
+                <div style={styles.specsGrid}>
+                    <div style={styles.specItem}>
+                        <Calendar size={20} color="#0ea5e9" />
+                        <div>
+                            <p style={styles.specLabel}>DATE</p>
+                            <p style={styles.specValue}>{formatDate(event.event_date)}</p>
+                        </div>
+                    </div>
+                    <div style={styles.specItem}>
+                        <Clock size={20} color="#f43f5e" />
+                        <div>
+                            <p style={styles.specLabel}>TIME</p>
+                            <p style={styles.specValue}>{formatTime(event.event_time)}</p>
+                        </div>
+                    </div>
+                </div>
+                {/* --- LOCATION ROW ADDED HERE --- */}
+                <div style={{...styles.specItem, marginTop: '15px'}}>
+                    <MapPin size={20} color="#10b981" />
+                    <div>
+                        <p style={styles.specLabel}>LOCATION</p>
+                        <p style={styles.specValue}>{event.location || event.location_name || 'Venue TBA'}</p>
+                    </div>
+                </div>
             </div>
 
             <div style={styles.checkoutCard}>
@@ -434,8 +470,6 @@ export default function EventPage() {
                   </div>
                 </div>
 
-                {/* Rideshare Concierge removed from here */}
-
                 <button 
                   type="submit" 
                   disabled={isProcessing || selectedTier === null} 
@@ -454,7 +488,6 @@ export default function EventPage() {
 }
 
 const styles = {
-  // ... Keep all your existing styles exactly as they were ...
   pageLayout: { maxWidth: '1300px', margin: '0 auto', padding: '20px 16px 100px', fontFamily: '"Inter", sans-serif', overflowX: 'hidden' },
   navBar: { display: 'flex', justifyContent: 'space-between', marginBottom: '30px' },
   backBtn: { background: '#f8fafc', border: '1px solid #f1f5f9', padding: '10px 20px', borderRadius: '12px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' },
@@ -476,6 +509,7 @@ const styles = {
   eventHeader: { borderLeft: '5px solid #000', paddingLeft: '20px' },
   categoryBadge: { background: '#000', color: '#fff', padding: '5px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', marginBottom: '15px', display: 'inline-block' },
   eventTitle: { fontSize: '48px', fontWeight: 950, letterSpacing: '-2px', margin: 0, lineHeight: 1 },
+  specsContainer: { display: 'flex', flexDirection: 'column' },
   specsGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' },
   specItem: { display: 'flex', gap: '15px', alignItems: 'center', padding: '15px', background: '#f8fafc', borderRadius: '20px' },
   specLabel: { fontSize: '10px', fontWeight: 800, color: '#94a3b8', margin: 0 },
