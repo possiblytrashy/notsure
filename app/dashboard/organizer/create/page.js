@@ -25,10 +25,15 @@ export default function CreateEvent() {
   const autocompleteRef = useRef(null);
 
   // --- GOOGLE MAPS LOADER ---
-  const { isLoaded } = useJsApiLoader({
-    googleMapsApiKey: GOOGLE_MAPS_API_KEY,
+ // --- GOOGLE MAPS LOADER ---
+  const { isLoaded, loadError } = useJsApiLoader({
+    googleMapsApiKey: GOOGLE_MAPS_API_KEY || "", // Prevents crash if undefined
     libraries: libraries,
   });
+
+  if (loadError) {
+    return <div>Error loading maps. Please check your connection or API configuration.</div>;
+  }
 
   // --- 1. STATE MANAGEMENT ---
   const [loading, setLoading] = useState(false);
