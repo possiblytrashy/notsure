@@ -131,7 +131,38 @@ export default function CreateEvent() {
       if (geocoderContainerRef.current) geocoderContainerRef.current.innerHTML = '';
     };
   }, []);
+const [locationName, setLocationName] = useState('');
+const [coordinates, setCoordinates] = useState({ lat: 5.6037, lng: -0.1870 }); // Default to Accra
+const [searchQuery, setSearchQuery] = useState('');
+const [isSearching, setIsSearching] = useState(false);
 
+// Function to handle clicking on the map
+const handleMapClick = (e) => {
+  const { lng, lat } = e.lngLat;
+  setCoordinates({ lat, lng });
+};
+
+// Function to search for a location manually
+const handleManualSearch = async () => {
+  if (!searchQuery) return;
+  setIsSearching(true);
+  try {
+    const res = await fetch(
+      `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(searchQuery)}.json?access_token=${MAPBOX_TOKEN}&limit=1`
+    );
+    const data = await res.json();
+    if (data.features && data.features.length > 0) {
+      const [lng, lat] = data.features[0].center;
+      const placeName = data.features[0].place_name;
+      setCoordinates({ lat, lng });
+      setLocationName(placeName); // Auto-fills the location name
+    }
+  } catch (err) {
+    console.error("Search error:", err);
+  } finally {
+    setIsSearching(false);
+  }
+};
   // --- 4. MEDIA HANDLING (SUPABASE STORAGE) ---
   const handleDrag = (e) => {
     e.preventDefault();
@@ -413,54 +444,72 @@ export default function CreateEvent() {
               
             </div>
 
-            {/* --- LOCATION SECTION --- */}
-            <div style={styles.mainCard}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px' }}>
-                <div style={styles.iconBox('#f43f5e')}><MapPin size={22} /></div>
-                <h2 style={{ fontSize: '20px', fontWeight: '850', margin: 0 }}>Venue & Logistics</h2>
-              </div>
+           <div style={styles.formSection}>
+  <h3 style={styles.formHeading}>3. VENUE LOCATION</h3>
+  
+  {/* Manual Type Option */}
+  <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
+    <div style={{ ...styles.inputContainer, flex: 1, marginBottom: 0 }}>
+      <MapPin size={18} color="#94a3b8" />
+      <input 
+        style={styles.cleanInput} 
+        placeholder="Type location (e.g. Labadi Beach Hotel)" 
+        value={searchQuery}
+        onChange={(e) => setSearchQuery(e.target.value)}
+        onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleManualSearch())}
+      />
+    </div>
+    <button 
+      type="button"
+      onClick={handleManualSearch} 
+      style={{ ...styles.backBtn, background: '#000', color: '#fff' }}
+    >
+      {isSearching ? <Loader2 className="animate-spin" size={18}/> : "FIND"}
+    </button>
+  </div>
 
-              <div style={{ marginBottom: '24px' }}>
-                <label style={styles.label}>LOCATION SEARCH</label>
-                <div ref={geocoderContainerRef} />
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '12px', padding: '12px', background: '#f8fafc', borderRadius: '12px', border: '1px solid #f1f5f9' }}>
-                  <Navigation size={14} color="#0ea5e9" />
-                  <span style={{ fontSize: '12px', fontWeight: '700', color: '#64748b' }}>
-                    {eventData.location_name || "Enter a venue address above..."}
-                  </span>
-                </div>
-              </div>
+  <p style={{ fontSize: '12px', color: '#64748b', marginBottom: '15px', fontWeight: 600 }}>
+    OR drop a pin precisely on the map below:
+  </p>
 
-              <div style={{ height: '440px', borderRadius: '24px', overflow: 'hidden', border: '2px solid #f1f5f9', position: 'relative' }}>
-                <Map
-                  {...viewState}
-                  onMove={evt => setViewState(evt.viewState)}
-                  mapStyle="mapbox://styles/mapbox/dark-v11"
-                  mapboxAccessToken={MAPBOX_TOKEN}
-                  onDblClick={(e) => setEventData({...eventData, lat: e.lngLat.lat, lng: e.lngLat.lng})}
-                >
-                  <Marker 
-                    longitude={eventData.lng} 
-                    latitude={eventData.lat} 
-                    anchor="bottom" 
-                    draggable 
-                    onDragEnd={e => setEventData({...eventData, lat: e.lngLat.lat, lng: e.lngLat.lng})} 
-                  >
-                    <div style={{ background: '#fff', padding: '5px', borderRadius: '50%', boxShadow: '0 0 20px rgba(0,0,0,0.3)' }}>
-                      <div style={{ background: '#000', width: '12px', height: '12px', borderRadius: '50%' }} />
-                    </div>
-                  </Marker>
-                  <NavigationControl position="top-right" />
-                  <GeolocateControl position="top-right" />
-                  <FullscreenControl position="top-right" />
-                </Map>
-                <div style={{ position: 'absolute', bottom: '20px', left: '20px', background: '#fff', padding: '10px 15px', borderRadius: '12px', boxShadow: '0 4px 15px rgba(0,0,0,0.1)', fontSize: '11px', fontWeight: '800' }}>
-                   DRAG PIN TO EXACT ENTRANCE
-                </div>
-              </div>
-            </div>
-          </div>
+  {/* Map Picker Option */}
+  <div style={{ ...styles.mapContainer, height: '300px' }}>
+    <Map
+      initialViewState={{
+        latitude: coordinates.lat,
+        longitude: coordinates.lng,
+        zoom: 13
+      }}
+      // This forces the map to jump to the new coordinates when searched
+      latitude={coordinates.lat}
+      longitude={coordinates.lng}
+      onMove={evt => setCoordinates({ lat: evt.viewState.latitude, lng: evt.viewState.longitude })}
+      onClick={handleMapClick}
+      style={{ width: '100%', height: '100%' }}
+      mapStyle="mapbox://styles/mapbox/dark-v11"
+      mapboxAccessToken={MAPBOX_TOKEN}
+    >
+      <Marker latitude={coordinates.lat} longitude={coordinates.lng} draggable onDragEnd={handleMapClick}>
+        <div style={styles.mapPulse}>
+          <div style={styles.mapDot} />
+        </div>
+      </Marker>
+      <NavigationControl position="top-right" />
+    </Map>
+  </div>
 
+  {/* Final Confirmation of Address */}
+  <div style={{ marginTop: '15px' }}>
+    <p style={styles.specLabel}>CONFIRMED LOCATION NAME</p>
+    <input 
+      style={{ ...styles.cleanInput, borderBottom: '1px solid #e2e8f0', padding: '10px 0' }}
+      placeholder="e.g. The Penthouse, Building A"
+      value={locationName}
+      onChange={(e) => setLocationName(e.target.value)}
+      required
+    />
+  </div>
+</div>
           <div className="form-sidebar">
             {/* --- TICKETING TICKET TIER --- */}
             <div style={styles.sidebarCard}>
