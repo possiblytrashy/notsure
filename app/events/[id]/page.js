@@ -21,7 +21,7 @@ import {
   Navigation,
   Car,
   ArrowRight,
-  Zap // Added generic icon for Bolt/Speed
+  Zap
 } from 'lucide-react';
 
 // --- MAPBOX IMPORTS ---
@@ -296,13 +296,45 @@ export default function EventPage() {
               <p style={styles.refText}>REF: {paymentSuccess.reference}</p>
             </div>
 
-            {/* Ridesharing on success screen - UPDATED WITH BOLT */}
-            <div style={{ marginBottom: '30px', padding: '20px', background: '#f8fafc', borderRadius: '20px' }}>
-               <p style={{fontSize: '11px', fontWeight: 800, color: '#94a3b8', marginBottom: '15px'}}>TRAVEL SUITE</p>
-               <div style={{display: 'flex', gap: '8px', overflowX: 'auto'}}>
-                  <button onClick={() => handleRide('uber')} style={styles.miniRideBtn}><Car size={16}/> Uber</button>
-                  <button onClick={() => handleRide('bolt')} style={styles.miniRideBtn}><Zap size={16}/> Bolt</button>
-                  <button onClick={() => handleRide('maps')} style={styles.miniRideBtn}><Navigation size={16}/> Maps</button>
+            {/* --- MAP INTEGRATION (MOVED HERE) --- */}
+            <div style={{ marginTop: '20px', marginBottom: '20px' }}>
+              <div style={{...styles.mapContainer, height: '250px'}}>
+                <Map
+                  initialViewState={{
+                    latitude: event.latitude || 5.6037,
+                    longitude: event.longitude || -0.1870,
+                    zoom: 15
+                  }}
+                  style={{ width: '100%', height: '100%' }}
+                  mapStyle="mapbox://styles/mapbox/dark-v11"
+                  mapboxAccessToken={MAPBOX_TOKEN}
+                  interactive={false}
+                >
+                  <Marker latitude={event.latitude} longitude={event.longitude}>
+                    <div style={styles.mapPulse}>
+                      <div style={styles.mapDot} />
+                    </div>
+                  </Marker>
+                </Map>
+                <div style={styles.mapOverlay}>
+                   <p style={{margin: 0, fontWeight: 800, fontSize: '12px'}}>{event.location_name}</p>
+                   <button onClick={() => handleRide('maps')} style={styles.mapActionBtn}>
+                     <Navigation size={12}/>
+                   </button>
+                </div>
+              </div>
+            </div>
+
+            {/* --- RIDESHARE CONCIERGE (MOVED HERE) --- */}
+            <div style={styles.conciergeBox}>
+               <div style={{display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '15px'}}>
+                  <Car size={18} color="#000" />
+                  <span style={{fontSize: '12px', fontWeight: 900}}>TRAVEL SUITE</span>
+               </div>
+               <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px'}}>
+                  <button type="button" onClick={() => handleRide('uber')} style={styles.rideBtn}>Uber</button>
+                  <button type="button" onClick={() => handleRide('bolt')} style={styles.rideBtn}>Bolt</button>
+                  <button type="button" onClick={() => handleRide('yango')} style={styles.rideBtn}>Yango</button>
                </div>
             </div>
 
@@ -336,7 +368,6 @@ export default function EventPage() {
       <div style={styles.contentGrid} className="content-grid">
         <div style={styles.galleryColumn}>
           <div style={styles.mainDisplayFrame} className="main-frame">
-            {/* UPDATED: Changed from image_urls to images */}
             <img src={event.images?.[currentImg] || 'https://via.placeholder.com/800'} style={styles.mainImg} alt="Visual" />
             {event.images?.length > 1 && (
               <div style={styles.galleryNav}>
@@ -347,7 +378,6 @@ export default function EventPage() {
           </div>
           
           <div style={styles.thumbStrip}>
-            {/* UPDATED: Changed from image_urls to images */}
             {event.images?.map((img, i) => (
               <div key={i} onClick={() => setCurrentImg(i)} style={styles.thumbWrap(currentImg === i)}>
                 <img src={img} style={styles.thumbImg} alt="Thumbnail" />
@@ -358,36 +388,7 @@ export default function EventPage() {
           <div style={styles.descriptionSection}>
             <h3 style={styles.sectionLabel}>EXPERIENCE DETAILS</h3>
             <p style={styles.eventDescription}>{event.description}</p>
-            
-            {/* --- MAP INTEGRATION --- */}
-            <div style={{ marginTop: '40px' }}>
-              <h3 style={styles.sectionLabel}>VENUE LOCATION</h3>
-              <div style={styles.mapContainer}>
-                <Map
-                  initialViewState={{
-                    latitude: event.latitude || 5.6037,
-                    longitude: event.longitude || -0.1870,
-                    zoom: 15
-                  }}
-                  style={{ width: '100%', height: '100%' }}
-                  mapStyle="mapbox://styles/mapbox/dark-v11"
-                  mapboxAccessToken={MAPBOX_TOKEN}
-                  interactive={false}
-                >
-                  <Marker latitude={event.latitude} longitude={event.longitude}>
-                    <div style={styles.mapPulse}>
-                      <div style={styles.mapDot} />
-                    </div>
-                  </Marker>
-                </Map>
-                <div style={styles.mapOverlay}>
-                   <p style={{margin: 0, fontWeight: 800, fontSize: '14px'}}>{event.location_name}</p>
-                   <button onClick={() => handleRide('maps')} style={styles.mapActionBtn}>
-                     OPEN IN MAPS <ArrowRight size={14}/>
-                   </button>
-                </div>
-              </div>
-            </div>
+            {/* Map removed from here */}
           </div>
         </div>
 
@@ -433,19 +434,7 @@ export default function EventPage() {
                   </div>
                 </div>
 
-                {/* --- RIDESHARE CONCIERGE (UPDATED) --- */}
-                <div style={styles.conciergeBox}>
-                   <div style={{display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '15px'}}>
-                      <Car size={18} color="#000" />
-                      <span style={{fontSize: '12px', fontWeight: 900}}>GUEST TRAVEL SUITE</span>
-                   </div>
-                   {/* Grid updated to 3 columns for Uber/Bolt/Yango */}
-                   <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px'}}>
-                      <button type="button" onClick={() => handleRide('uber')} style={styles.rideBtn}>Uber</button>
-                      <button type="button" onClick={() => handleRide('bolt')} style={styles.rideBtn}>Bolt</button>
-                      <button type="button" onClick={() => handleRide('yango')} style={styles.rideBtn}>Yango</button>
-                   </div>
-                </div>
+                {/* Rideshare Concierge removed from here */}
 
                 <button 
                   type="submit" 
@@ -529,8 +518,8 @@ const styles = {
   
   // --- NEW INTEGRATED STYLES ---
   mapContainer: { height: '350px', borderRadius: '30px', overflow: 'hidden', position: 'relative', border: '1px solid #f1f5f9' },
-  mapOverlay: { position: 'absolute', bottom: '20px', left: '20px', right: '20px', background: '#fff', padding: '20px', borderRadius: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.1)' },
-  mapActionBtn: { background: '#000', color: '#fff', border: 'none', padding: '10px 15px', borderRadius: '12px', fontSize: '11px', fontWeight: 900, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' },
+  mapOverlay: { position: 'absolute', bottom: '20px', left: '20px', right: '20px', background: '#fff', padding: '10px 15px', borderRadius: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.1)' },
+  mapActionBtn: { background: '#000', color: '#fff', border: 'none', padding: '10px', borderRadius: '12px', fontSize: '11px', fontWeight: 900, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' },
   mapPulse: { width: '40px', height: '40px', borderRadius: '50%', background: 'rgba(0,0,0,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' },
   mapDot: { width: '12px', height: '12px', borderRadius: '50%', background: '#000', border: '2px solid #fff' },
   conciergeBox: { background: '#f8fafc', padding: '25px', borderRadius: '25px', marginBottom: '30px', border: '1px solid #f1f5f9' },
