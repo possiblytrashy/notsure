@@ -16,53 +16,65 @@ export async function POST(req) {
     let splitConfig = null;
 
     // --- CASE A: VOTING LOGIC ---
-    if (type === 'VOTE') {
-      const { candidate_id, vote_count } = body;
+    // --- CASE A: VOTING LOGIC (Refactored for Centralized Organizers) ---
+if (type === 'VOTE') {
+  const { candidate_id, vote_count } = body;
 
-      const { data: candidate, error: cError } = await supabase
-        .from('candidates')
-        .select(`
-          id, 
-          name, 
-          contests (
-            id, 
-            vote_price, 
-            organizer_id, 
-            is_active,
-            competitions (organizer_subaccount)
+  const { data: candidate, error: cError } = await supabase
+    .from('candidates')
+    .select(`
+      id, 
+      name, 
+      contests (
+        id, 
+        vote_price, 
+        is_active,
+        competitions (
+          organizers (
+            paystack_subaccount_code,
+            brand_name
           )
-        `)
-        .eq('id', candidate_id)
-        .single();
+        )
+      )
+    `)
+    .eq('id', candidate_id)
+    .single();
 
-      if (cError || !candidate) throw new Error('Candidate not found.');
-      if (!candidate.contests.is_active) throw new Error('Voting is currently paused.');
+  if (cError || !candidate) throw new Error('Candidate not found.');
+  if (!candidate.contests.is_active) throw new Error('Voting is currently paused.');
 
-      const basePrice = candidate.contests.vote_price * vote_count;
-      const totalInKobo = Math.round(basePrice * 100);
-      const organizerShare = Math.round(totalInKobo * 0.95);
+  const organizerProfile = candidate.contests.competitions.organizers;
+  
+  if (!organizerProfile?.paystack_subaccount_code) {
+    throw new Error('Competition organizer payout details are missing.');
+  }
 
-      finalAmount = basePrice;
-      
-      // Split configuration for Voting (95% to Organizer)
-      splitConfig = {
-        type: "flat",
-        bearer_type: "account",
-        subaccounts: [
-          {
-            subaccount: candidate.contests.competitions.organizer_subaccount,
-            share: organizerShare
-          }
-        ]
-      };
+  const basePrice = candidate.contests.vote_price * vote_count;
+  const totalInKobo = Math.round(basePrice * 100);
+  const organizerShare = Math.round(totalInKobo * 0.95);
 
-      metadata = {
-        ...metadata,
-        candidate_id,
-        vote_count,
-        organizer_id: candidate.contests.organizer_id
-      };
-    } 
+  finalAmount = basePrice;
+  
+  splitConfig = {
+    type: "flat",
+    bearer_type: "account",
+    subaccounts: [
+      {
+        subaccount: organizerProfile.paystack_subaccount_code,
+        share: organizerShare
+      }
+    ]
+  };
+
+  metadata = {
+    ...metadata,
+    candidate_id,
+    vote_count,
+    brand_name: organizerProfile.brand_name,
+    type: 'VOTE'
+  };
+}
+    
 
     // --- CASE B: TICKET PURCHASE LOGIC ---
     // --- CASE B: TICKET PURCHASE LOGIC (Refactored) ---
