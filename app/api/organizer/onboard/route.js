@@ -37,32 +37,29 @@ export async function POST(request) {
       throw new Error(paystackData.message || "Paystack subaccount creation failed");
     }
 
-    // In route.js - Update the database section
 const subaccountCode = paystackData.data.subaccount_code;
 
-// 1. Update Profile 
-// We capture the error as 'dbError' here
-const { error: dbError } = await supabaseAdmin
+// 1. Update the Profile table (for UI/Auth checks)
+const { error: profileErr } = await supabaseAdmin
   .from('profiles')
   .update({ 
-    paystack_subaccount_code: subaccountCode, 
+    paystack_subaccount_code: subaccountCode,
     is_organizer: true 
   })
   .eq('id', userId);
 
-if (dbError) throw dbError; // Now dbError is defined!
+if (profileErr) throw profileErr;
 
-// 2. Update/Insert into Organizers table
-// We capture this as 'orgError' to be safe
-const { error: orgError } = await supabaseAdmin
+// 2. Update the Organizers table (for Payout/Split logic)
+const { error: orgErr } = await supabaseAdmin
   .from('organizers')
   .upsert({ 
     id: userId, 
-    business_name: business_name,
+    business_name: business_name, 
     paystack_subaccount_code: subaccountCode 
   });
 
-if (orgError) throw orgError;
+if (orgErr) throw orgErr;
 
     return NextResponse.json({ 
       success: true, 
