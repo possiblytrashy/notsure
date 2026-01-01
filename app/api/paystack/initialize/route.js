@@ -43,13 +43,15 @@ export async function POST(req) {
       if (!candidate.contests.is_active) throw new Error('Voting is currently paused.');
 
       const organizerProfile = candidate.contests.competitions.organizers;
-      if (!organizerProfile?.paystack_subaccount_code) {
-        throw new Error('Competition organizer payout details are missing.');
+      
+      // Safety Check: Validate Organizer Subaccount
+      if (!organizerProfile?.paystack_subaccount_code || !organizerProfile.paystack_subaccount_code.startsWith('ACCT_')) {
+        throw new Error('Competition organizer payout details are missing or invalid.');
       }
 
       const basePrice = candidate.contests.vote_price * vote_count;
       const totalInKobo = Math.round(basePrice * 100);
-      const organizerShare = Math.round(totalInKobo * 0.95);
+      const organizerShare = Math.round(totalInKobo * 0.95); // 5% platform commission
 
       finalAmount = basePrice;
       
@@ -74,40 +76,36 @@ export async function POST(req) {
     } 
 
     // --- CASE B: TICKET PURCHASE LOGIC ---
-   // --- CASE B: TICKET PURCHASE LOGIC (Refined) ---
-else if (type === 'TICKET_PURCHASE') {
-  const { tier_id } = body;
+    else if (type === 'TICKET_PURCHASE') {
+      const { tier_id } = body;
 
-  const { data: tier, error: tierError } = await supabase
-    .from('ticket_tiers')
-    .select(`
-      id, name, price, max_quantity, event_id, 
-      events (
-        id, 
-        title, 
-        organizer_id, 
-        allows_resellers,
-        organizers!events_organizer_profile_id_fkey ( 
-          business_name,
-          paystack_subaccount_code
-        )
-      )
-    `)
-    .eq('id', tier_id)
-    .single();
+      const { data: tier, error: tierError } = await supabase
+        .from('ticket_tiers')
+        .select(`
+          id, name, price, max_quantity, event_id, 
+          events (
+            id, 
+            title, 
+            organizer_id, 
+            allows_resellers,
+            organizers!events_organizer_profile_id_fkey ( 
+              business_name,
+              paystack_subaccount_code
+            )
+          )
+        `)
+        .eq('id', tier_id)
+        .single();
 
-  if (tierError || !tier) throw new Error('Ticket tier not found.');
+      if (tierError || !tier) throw new Error('Ticket tier not found.');
 
-  // Access the joined data correctly
-  const organizerProfile = tier.events?.organizers;
+      const organizerProfile = tier.events?.organizers;
 
-  if (!organizerProfile?.paystack_subaccount_code) {
-    console.error("DEBUG: Organizer check failed. Profile data:", organizerProfile);
-    throw new Error('This organizer is not set up for payouts yet.');
-  }
-  
-  // ... rest of your logic (Sold out, Resellers, etc.)
-
+      // Safety Check: Validate Organizer Subaccount
+      if (!organizerProfile?.paystack_subaccount_code || !organizerProfile.paystack_subaccount_code.startsWith('ACCT_')) {
+        console.error("DEBUG: Organizer check failed. Profile data:", organizerProfile);
+        throw new Error('This organizer is not set up for payouts yet.');
+      }
 
       // Sold Out Check
       const { count: soldCount, error: countError } = await supabase
@@ -125,7 +123,7 @@ else if (type === 'TICKET_PURCHASE') {
       let resellerId = null;
       let resellerSubaccount = null;
 
-      // Reseller Logic
+      // Reseller Logic: Only execute if a code is provided and the event allows it
       if (reseller_code && tier.events.allows_resellers) {
         const { data: rData } = await supabase
           .from('event_resellers')
@@ -134,20 +132,25 @@ else if (type === 'TICKET_PURCHASE') {
           .eq('event_id', tier.event_id)
           .single();
 
-        if (rData) {
-          priceToCharge = tier.price * 1.10; // 10% Markup
+        // Only apply markup and reseller subaccount if the reseller is fully onboarded
+        if (rData?.resellers?.paystack_subaccount_code?.startsWith('ACCT_')) {
+          priceToCharge = tier.price * 1.10; // 10% Luxury Markup
           resellerId = rData.reseller_id;
           resellerSubaccount = rData.resellers.paystack_subaccount_code;
+        } else {
+          console.warn("Reseller code provided but reseller subaccount is missing or invalid.");
         }
       }
 
       const totalInKobo = Math.round(priceToCharge * 100);
       const baseInKobo = Math.round(tier.price * 100);
+      
+      // Organizer gets 95% of the BASE price
       const organizerShare = Math.round(baseInKobo * 0.95);
-      const resellerShare = totalInKobo - baseInKobo;
 
       finalAmount = priceToCharge;
 
+      // Initialize split with the organizer
       splitConfig = {
         type: "flat",
         bearer_type: "account",
@@ -159,7 +162,9 @@ else if (type === 'TICKET_PURCHASE') {
         ]
       };
 
+      // Add reseller to split ONLY if a valid subaccount was found
       if (resellerSubaccount) {
+        const resellerShare = totalInKobo - baseInKobo;
         splitConfig.subaccounts.push({
           subaccount: resellerSubaccount,
           share: resellerShare
@@ -180,22 +185,32 @@ else if (type === 'TICKET_PURCHASE') {
     // --- 3. PAYSTACK INITIALIZATION ---
     if (finalAmount <= 0) throw new Error('Invalid transaction amount.');
 
+    const paystackPayload = {
+      email: email || "customer@luxury.com",
+      amount: Math.round(finalAmount * 100),
+      metadata,
+    };
+
+    // Only include the split property if we actually have subaccounts
+    if (splitConfig && splitConfig.subaccounts.length > 0) {
+      paystackPayload.split = splitConfig;
+    }
+
     const response = await fetch('https://api.paystack.co/transaction/initialize', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        email: email || "customer@luxury.com",
-        amount: Math.round(finalAmount * 100),
-        split: splitConfig,
-        metadata
-      }),
+      body: JSON.stringify(paystackPayload),
     });
 
     const data = await response.json();
-    if (!data.status) throw new Error(data.message);
+    
+    if (!data.status) {
+      console.error("Paystack API Error Details:", data);
+      throw new Error(data.message || "Paystack initialization failed");
+    }
 
     return NextResponse.json({ 
       access_code: data.data.access_code,
