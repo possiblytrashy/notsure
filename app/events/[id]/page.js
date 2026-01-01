@@ -69,11 +69,19 @@ export default function EventPage() {
     async function init() {
       try {
         // Fetch event with ticket tiers
-        const { data: eventData, error } = await supabase
-          .from('events')
-          .select(`*, ticket_tiers (*)`)
-          .eq('id', id)
-          .single();
+        // --- Updated Query with Organizer Join ---
+const { data: eventData, error } = await supabase
+  .from('events')
+  .select(`
+    *, 
+    ticket_tiers (*),
+    organizers:organizer_profile_id (
+      business_name,
+      paystack_subaccount_code
+    )
+  `)
+  .eq('id', id)
+  .single();
 
         if (error) throw error;
         
@@ -181,7 +189,7 @@ export default function EventPage() {
 
     const urls = {
       google: `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`,
-      apple: `maps://?q=${label}&ll=${lat},${lng}`,
+  apple: `maps://?q=${label}&ll=${lat},${lng}`,
       uber: `uber://?action=setPickup&dropoff[latitude]=${lat}&dropoff[longitude]=${lng}&dropoff[nickname]=${label}`,
       bolt: `bolt://ride?action=setDest&destination_lat=${lat}&destination_lng=${lng}&destination_name=${label}`,
       yango: `yango://?finish_lat=${lat}&finish_lon=${lng}`
@@ -258,15 +266,20 @@ export default function EventPage() {
     const tier = event.ticket_tiers[selectedTier];
     const currentlySold = soldCounts[tier.name] || 0;
 
+    // --- Updated Validation ---
+// Look inside the organizers object we just joined
+const subaccount = event.organizers?.paystack_subaccount_code;
+
+if (!subaccount) { 
+  alert("Organizer payout not configured.");
+  return;
+}
+
     if (tier.max_quantity && currentlySold >= tier.max_quantity) {
       alert("This ticket tier is sold out.");
       return;
     }
-    
-    if (!event.paystack_subaccount) { 
-      alert("Organizer payout not configured.");
-      return;
-    }
+
     
     setIsProcessing(true);
 
