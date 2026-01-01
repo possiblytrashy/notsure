@@ -49,7 +49,7 @@ export default function EventPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const refCode = searchParams.get('ref'); 
-   
+    
   // --- 1. STATE MANAGEMENT ---
   const [event, setEvent] = useState(null);
   const [user, setUser] = useState(null);
@@ -165,7 +165,7 @@ export default function EventPage() {
   const getDisplayPrice = (originalPrice) => {
     if (!originalPrice) return 0;
     if (isResellerMode) {
-      // Logic for reseller markup if applicable
+      // Show the marked-up price to the user if they came through a referral
       return (Number(originalPrice) * 1.10).toFixed(2);
     }
     return originalPrice;
@@ -223,13 +223,15 @@ export default function EventPage() {
       return;
     }
 
+    const finalAmountPaid = isResellerMode ? parseFloat(tier.price) * 1.10 : parseFloat(tier.price);
+
     const ticketData = {
       event_id: id,
       user_id: user ? user.id : null,
       guest_email: guestEmail.trim(), 
       guest_name: guestName.trim(),   
       tier_name: tier.name,           
-      amount: parseFloat(tier.price), 
+      amount: finalAmountPaid, 
       reference: response.reference,  
       status: 'valid',                
       is_scanned: false,              
@@ -241,7 +243,7 @@ export default function EventPage() {
     setPaymentSuccess({
       reference: response.reference,
       tier: tier.name,
-      price: tier.price,
+      price: finalAmountPaid,
       customer: guestName || "Guest",
       dbError: !!error
     });
@@ -269,27 +271,37 @@ export default function EventPage() {
     setIsProcessing(true);
 
     try {
+      // 1. Initialize via secure API route to get access_code
+      const response = await fetch('/api/paystack/initialize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'TICKET_PURCHASE',
+          tier_id: tier.id,
+          email: guestEmail.trim(),
+          guest_name: guestName.trim(),
+          reseller_code: refCode || null
+        }),
+      });
+
+      const initData = await response.json();
+
+      if (!response.ok) {
+        throw new Error(initData.error || 'Initialization failed');
+      }
+
+      // 2. Open Paystack with the secure access_code
       const PaystackPop = await loadPaystackScript();
       const handler = PaystackPop.setup({
         key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
-        email: guestEmail.trim(),
-        amount: Math.round(parseFloat(tier.price) * 100),
-        currency: "GHS",
-        subaccount: event.paystack_subaccount,
-        bearer: "subaccount", // Your 5% commission is handled via subaccount fee structure
-        metadata: {
-          type: 'TICKET_PURCHASE',
-          event_id: id,
-          tier_id: tier.id,
-          customer_name: guestName,
-          reseller_code: refCode || null
-        },
+        access_code: initData.access_code,
         callback: (res) => recordPayment(res, tier),
         onClose: () => setIsProcessing(false)
       });
       handler.openIframe();
     } catch (err) {
       console.error("Payment initiation failed:", err);
+      alert(err.message || "Could not start payment.");
       setIsProcessing(false);
     }
   };
@@ -496,6 +508,7 @@ export default function EventPage() {
                   <div style={styles.tiersWrapper}>
                     {event.ticket_tiers?.map((tier, idx) => {
                       const soldOut = tier.max_quantity && (soldCounts[tier.name] || 0) >= tier.max_quantity;
+                      const displayPrice = getDisplayPrice(tier.price);
                       return (
                         <div 
                           key={idx} 
@@ -506,7 +519,7 @@ export default function EventPage() {
                             <p style={styles.tierName}>{tier.name} {soldOut && <span style={{color: '#ef4444'}}>(SOLD OUT)</span>}</p>
                             <p style={styles.tierDesc}>{tier.description}</p>
                           </div>
-                          <div style={styles.tierPrice}>GHS {tier.price}</div>
+                          <div style={styles.tierPrice}>GHS {displayPrice}</div>
                         </div>
                       );
                     })}
