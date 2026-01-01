@@ -235,6 +235,7 @@ const { data: eventData, error } = await supabase
 
     const ticketData = {
       event_id: id,
+      tier_id: tier.id,
       user_id: user ? user.id : null,
       guest_email: guestEmail.trim(), 
       guest_name: guestName.trim(),   
