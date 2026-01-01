@@ -74,33 +74,40 @@ export async function POST(req) {
     } 
 
     // --- CASE B: TICKET PURCHASE LOGIC ---
-    else if (type === 'TICKET_PURCHASE') {
-      const { tier_id } = body;
+   // --- CASE B: TICKET PURCHASE LOGIC (Refined) ---
+else if (type === 'TICKET_PURCHASE') {
+  const { tier_id } = body;
 
-      const { data: tier, error: tierError } = await supabase
-        .from('ticket_tiers')
-        .select(`
-          id, name, price, max_quantity, event_id, 
-          events (
-            id, 
-            title, 
-            organizer_id, 
-            allows_resellers,
-            organizers (
-              business_name,
-              paystack_subaccount_code
-            )
-          )
-        `)
-        .eq('id', tier_id)
-        .single();
+  const { data: tier, error: tierError } = await supabase
+    .from('ticket_tiers')
+    .select(`
+      id, name, price, max_quantity, event_id, 
+      events (
+        id, 
+        title, 
+        organizer_id, 
+        allows_resellers,
+        organizers!events_organizer_profile_id_fkey ( 
+          business_name,
+          paystack_subaccount_code
+        )
+      )
+    `)
+    .eq('id', tier_id)
+    .single();
 
-      if (tierError || !tier) throw new Error('Ticket tier not found.');
+  if (tierError || !tier) throw new Error('Ticket tier not found.');
 
-      const organizerProfile = tier.events.organizers;
-      if (!organizerProfile?.paystack_subaccount_code) {
-        throw new Error('This organizer is not set up for payouts yet.');
-      }
+  // Access the joined data correctly
+  const organizerProfile = tier.events?.organizers;
+
+  if (!organizerProfile?.paystack_subaccount_code) {
+    console.error("DEBUG: Organizer check failed. Profile data:", organizerProfile);
+    throw new Error('This organizer is not set up for payouts yet.');
+  }
+  
+  // ... rest of your logic (Sold out, Resellers, etc.)
+
 
       // Sold Out Check
       const { count: soldCount, error: countError } = await supabase
