@@ -37,17 +37,23 @@ export async function POST(request) {
       throw new Error(paystackData.message || "Paystack subaccount creation failed");
     }
 
-    const subaccountCode = paystackData.data.subaccount_code;
+    // In route.js - Update the database section
+const subaccountCode = paystackData.data.subaccount_code;
 
-    // 2. Update the profile using the Admin client to bypass RLS for this system action
-    const { error: dbError } = await supabaseAdmin
-      .from('profiles')
-      .update({ 
-        paystack_subaccount_code: subaccountCode,
-        is_organizer: true 
-      })
-      .eq('id', userId);
+// 1. Update Profile (Existing)
+await supabaseAdmin
+  .from('profiles')
+  .update({ paystack_subaccount_code: subaccountCode, is_organizer: true })
+  .eq('id', userId);
 
+// 2. Update/Insert into Organizers table (The missing link)
+await supabaseAdmin
+  .from('organizers')
+  .upsert({ 
+    id: userId, // Assuming organizer ID matches user ID
+    business_name: business_name,
+    paystack_subaccount_code: subaccountCode 
+  });
     if (dbError) throw dbError;
 
     return NextResponse.json({ 
