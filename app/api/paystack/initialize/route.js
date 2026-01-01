@@ -29,7 +29,7 @@ export async function POST(req) {
             vote_price, 
             organizer_id, 
             is_active,
-            competitions (paystack_subaccount)
+            competitions (organizer_subaccount)
           )
         `)
         .eq('id', candidate_id)
@@ -50,7 +50,7 @@ export async function POST(req) {
         bearer_type: "account",
         subaccounts: [
           {
-            subaccount: candidate.contests.competitions.paystack_subaccount,
+            subaccount: candidate.contests.competitions.organizer_subaccount,
             share: organizerShare
           }
         ]
@@ -72,7 +72,7 @@ export async function POST(req) {
         .from('ticket_tiers')
         .select(`
           id, name, price, max_quantity, event_id, 
-          events (id, title, organizer_id, paystack_subaccount, allows_resellers)
+          events (id, title, organizer_id, organizer_subaccount, allows_resellers)
         `)
         .eq('id', tier_id)
         .single();
