@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '../../../lib/supabase';
 import { 
   ChevronLeft, 
@@ -40,13 +40,15 @@ const formatDate = (dateString) => {
 // --- HELPER: TIME FORMATTER ---
 const formatTime = (timeString) => {
     if (!timeString) return 'Time TBA';
-    // If it's already formatted (e.g. 14:00), return it, otherwise try to parse
+    // Returns HH:MM from ISO or time string
     return timeString.substring(0, 5);
 };
 
 export default function EventPage() {
   const { id } = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const refCode = searchParams.get('ref'); 
    
   // --- 1. STATE MANAGEMENT ---
   const [event, setEvent] = useState(null);
@@ -59,11 +61,14 @@ export default function EventPage() {
   const [paymentSuccess, setPaymentSuccess] = useState(null);
   const [fetching, setFetching] = useState(true);
   const [soldCounts, setSoldCounts] = useState({});
+  const [reseller, setReseller] = useState(null);
+  const [isResellerMode, setIsResellerMode] = useState(false);
 
   // --- 2. DATA INITIALIZATION ---
   useEffect(() => {
     async function init() {
       try {
+        // Fetch event with ticket tiers
         const { data: eventData, error } = await supabase
           .from('events')
           .select(`*, ticket_tiers (*)`)
@@ -77,6 +82,7 @@ export default function EventPage() {
           return;
         }
 
+        // Fetch real-time sold counts to prevent overselling on UI
         const { data: ticketData, error: ticketError } = await supabase
           .from('tickets')
           .select('tier_name')
@@ -97,6 +103,7 @@ export default function EventPage() {
           setSelectedTier(0);
         }
 
+        // Pre-fill user data if logged in
         const { data: { user: currentUser } } = await supabase.auth.getUser();
         if (currentUser) {
           setUser(currentUser);
@@ -113,6 +120,57 @@ export default function EventPage() {
     if (id) init();
   }, [id]);
 
+  // --- RESELLER VALIDATION ---
+  useEffect(() => {
+    const validateReseller = async () => {
+      if (!refCode || !id) return;
+      
+      const { data, error } = await supabase
+        .from('event_resellers')
+        .select('*, resellers(id, paystack_subaccount_code)') 
+        .eq('unique_code', refCode)
+        .eq('event_id', id)
+        .single();
+
+      if (data && !error) {
+        setReseller(data);
+        setIsResellerMode(true);
+        // Track the referral click via RPC
+        await supabase.rpc('increment_reseller_clicks', { link_id: data.id });
+      }
+    };
+    validateReseller();
+  }, [refCode, id]);
+
+  // --- REAL-TIME TICKET UPDATES ---
+  useEffect(() => {
+    const channel = supabase
+      .channel('realtime_tickets')
+      .on('postgres_changes', { 
+        event: 'INSERT', 
+        schema: 'public', 
+        table: 'tickets',
+        filter: `event_id=eq.${id}` 
+      }, (payload) => {
+        setSoldCounts(prev => ({
+          ...prev,
+          [payload.new.tier_name]: (prev[payload.new.tier_name] || 0) + 1
+        }));
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [id]);
+
+  const getDisplayPrice = (originalPrice) => {
+    if (!originalPrice) return 0;
+    if (isResellerMode) {
+      // Logic for reseller markup if applicable
+      return (Number(originalPrice) * 1.10).toFixed(2);
+    }
+    return originalPrice;
+  };
+  
   // --- 3. RIDESHARING & MAP LOGIC ---
   const handleRide = (type) => {
     if (!event.latitude || !event.longitude) return;
@@ -122,7 +180,7 @@ export default function EventPage() {
     const label = encodeURIComponent(event.location_name || event.title);
 
     const urls = {
-      google: `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`,
+      google: `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`,
       apple: `maps://?q=${label}&ll=${lat},${lng}`,
       uber: `uber://?action=setPickup&dropoff[latitude]=${lat}&dropoff[longitude]=${lng}&dropoff[nickname]=${label}`,
       bolt: `bolt://ride?action=setDest&destination_lat=${lat}&destination_lng=${lng}&destination_name=${label}`,
@@ -151,6 +209,7 @@ export default function EventPage() {
   };
 
   const recordPayment = async (response, tier) => {
+    // Final check for capacity before inserting
     const { count } = await supabase
       .from('tickets')
       .select('*', { count: 'exact', head: true })
@@ -217,55 +276,39 @@ export default function EventPage() {
         amount: Math.round(parseFloat(tier.price) * 100),
         currency: "GHS",
         subaccount: event.paystack_subaccount,
-        bearer: "subaccount",
+        bearer: "subaccount", // Your 5% commission is handled via subaccount fee structure
         metadata: {
           type: 'TICKET_PURCHASE',
           event_id: id,
           tier_id: tier.id,
-          customer_name: guestName
+          customer_name: guestName,
+          reseller_code: refCode || null
         },
         callback: (res) => recordPayment(res, tier),
         onClose: () => setIsProcessing(false)
       });
       handler.openIframe();
     } catch (err) {
+      console.error("Payment initiation failed:", err);
       setIsProcessing(false);
     }
   };
 
   const handleShare = async () => {
+    const shareUrl = window.location.href;
     if (navigator.share) {
       try {
         await navigator.share({
           title: event?.title || 'Luxury Experience',
           text: `Join me at ${event?.title}`,
-          url: window.location.href,
+          url: shareUrl,
         });
       } catch (err) { console.log(err); }
     } else {
-      navigator.clipboard.writeText(window.location.href);
-      alert("Link copied");
+      navigator.clipboard.writeText(shareUrl);
+      alert("Link copied to clipboard");
     }
   };
-
-  useEffect(() => {
-    const channel = supabase
-      .channel('realtime_tickets')
-      .on('postgres_changes', { 
-        event: 'INSERT', 
-        schema: 'public', 
-        table: 'tickets',
-        filter: `event_id=eq.${id}` 
-      }, (payload) => {
-        setSoldCounts(prev => ({
-          ...prev,
-          [payload.new.tier_name]: (prev[payload.new.tier_name] || 0) + 1
-        }));
-      })
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
-  }, [id]);
 
   if (fetching) return (
     <div style={styles.loadingOverlay}>
@@ -282,6 +325,7 @@ export default function EventPage() {
     </div>
   );
 
+  // --- SUCCESS STATE (TICKET VIEW) ---
   if (paymentSuccess) {
     const qrPayload = encodeURIComponent(`REF:${paymentSuccess.reference}|EVT:${id}`);
     const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${qrPayload}`;
@@ -310,7 +354,7 @@ export default function EventPage() {
               <p style={styles.refText}>REF: {paymentSuccess.reference}</p>
             </div>
 
-            {/* --- MAP INTEGRATION --- */}
+            {/* --- SUCCESS MAP INTEGRATION --- */}
             <div style={{ marginTop: '20px', marginBottom: '20px' }}>
               <div style={{...styles.mapContainer, height: '250px'}}>
                 <Map
@@ -362,6 +406,7 @@ export default function EventPage() {
     );
   }
 
+  // --- MAIN EVENT VIEW ---
   return (
     <div style={styles.pageLayout}>
       <style>{`
@@ -412,7 +457,6 @@ export default function EventPage() {
               <h1 style={styles.eventTitle}>{event.title}</h1>
             </div>
 
-            {/* --- UPDATED INFO GRID (Date, Time, Location) --- */}
             <div style={styles.specsContainer}>
                 <div style={styles.specsGrid}>
                     <div style={styles.specItem}>
@@ -430,7 +474,6 @@ export default function EventPage() {
                         </div>
                     </div>
                 </div>
-                {/* --- LOCATION ROW ADDED HERE --- */}
                 <div style={{...styles.specItem, marginTop: '15px'}}>
                     <MapPin size={20} color="#10b981" />
                     <div>
@@ -452,7 +495,7 @@ export default function EventPage() {
                   <h3 style={styles.formHeading}>2. SELECT TIER</h3>
                   <div style={styles.tiersWrapper}>
                     {event.ticket_tiers?.map((tier, idx) => {
-                      const soldOut = tier.max_capacity && (soldCounts[tier.name] || 0) >= tier.max_capacity;
+                      const soldOut = tier.max_quantity && (soldCounts[tier.name] || 0) >= tier.max_quantity;
                       return (
                         <div 
                           key={idx} 
@@ -550,7 +593,6 @@ const styles = {
   btnPrimary: { flex: 1, background: '#000', color: '#fff', border: 'none', padding: '18px', borderRadius: '18px', fontWeight: 800, cursor: 'pointer' },
   btnSecondary: { flex: 1, background: '#f1f5f9', color: '#000', border: 'none', padding: '18px', borderRadius: '18px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' },
   
-  // --- NEW INTEGRATED STYLES ---
   mapContainer: { height: '350px', borderRadius: '30px', overflow: 'hidden', position: 'relative', border: '1px solid #f1f5f9' },
   mapOverlay: { position: 'absolute', bottom: '20px', left: '20px', right: '20px', background: '#fff', padding: '10px 15px', borderRadius: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.1)' },
   mapActionBtn: { background: '#000', color: '#fff', border: 'none', padding: '10px', borderRadius: '12px', fontSize: '11px', fontWeight: 900, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' },
