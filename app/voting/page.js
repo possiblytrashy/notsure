@@ -65,34 +65,57 @@ export default function VotingPortal() {
     }
   };
 
-  const handleVote = (candidate, qty) => {
-    // FINAL SAFETY CHECK: Prevent voting if paused
+const handleVote = async (candidate, qty) => {
+    // 1. Initial Safety Check
     if (!activeContest || !activeContest.is_active) {
       setToast({ type: 'ERROR', message: 'Voting is currently paused for this category.' });
       return;
     }
 
-    if (!window.PaystackPop) return;
-    
-    const handler = window.PaystackPop.setup({
-      key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
-      email: "voter@ousted.com",
-      amount: Math.round(qty * activeContest.vote_price * 100),
-      currency: "GHS",
-      metadata: { 
-        candidate_id: candidate.id, 
-        vote_count: qty, 
-        type: 'VOTE',
-        organizer_id: activeContest.organizer_id 
-      },
-      callback: (res) => {
-        triggerConfetti();
-        setToast({ name: candidate.name, count: qty, type: 'SUCCESS' });
-        fetchLatestData();
-        setTimeout(() => setToast(null), 5000);
+    if (!window.PaystackPop) {
+      setToast({ type: 'ERROR', message: 'Payment provider not loaded. Please refresh.' });
+      return;
+    }
+
+    try {
+      // 2. Initialize payment on the BACKEND
+      const response = await fetch('/api/paystack/initialize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'VOTE',
+          candidate_id: candidate.id,
+          vote_count: qty,
+          email: "voter@ousted.com" // You can later replace this with a real user email input
+        }),
+      });
+
+      const initData = await response.json();
+
+      if (!response.ok) {
+        throw new Error(initData.error || 'Failed to initialize payment');
       }
-    });
-    handler.openIframe();
+
+      // 3. Open Paystack Popup using the secure access_code
+      const handler = window.PaystackPop.setup({
+        key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
+        access_code: initData.access_code, // Use access_code instead of amount/email/metadata
+        callback: (res) => {
+          triggerConfetti();
+          setToast({ name: candidate.name, count: qty, type: 'SUCCESS' });
+          fetchLatestData(); // Refresh the leaderboard to show new votes
+          setTimeout(() => setToast(null), 5000);
+        },
+        onClose: () => {
+          console.log("Window closed");
+        }
+      });
+      
+      handler.openIframe();
+
+    } catch (err) {
+      setToast({ type: 'ERROR', message: err.message });
+    }
   };
 
   const handleShare = (candidate) => {
