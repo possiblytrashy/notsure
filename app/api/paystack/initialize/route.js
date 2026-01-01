@@ -16,98 +16,93 @@ export async function POST(req) {
     let splitConfig = null;
 
     // --- CASE A: VOTING LOGIC ---
-    // --- CASE A: VOTING LOGIC (Refactored for Centralized Organizers) ---
-if (type === 'VOTE') {
-  const { candidate_id, vote_count } = body;
+    if (type === 'VOTE') {
+      const { candidate_id, vote_count } = body;
 
-  const { data: candidate, error: cError } = await supabase
-    .from('candidates')
-    .select(`
-      id, 
-      name, 
-      contests (
-        id, 
-        vote_price, 
-        is_active,
-        competitions (
-          organizers (
-            paystack_subaccount_code,
-            brand_name
+      const { data: candidate, error: cError } = await supabase
+        .from('candidates')
+        .select(`
+          id, 
+          name, 
+          contests (
+            id, 
+            vote_price, 
+            is_active,
+            competitions (
+              organizers (
+                paystack_subaccount_code,
+                business_name
+              )
+            )
           )
-        )
-      )
-    `)
-    .eq('id', candidate_id)
-    .single();
+        `)
+        .eq('id', candidate_id)
+        .single();
 
-  if (cError || !candidate) throw new Error('Candidate not found.');
-  if (!candidate.contests.is_active) throw new Error('Voting is currently paused.');
+      if (cError || !candidate) throw new Error('Candidate not found.');
+      if (!candidate.contests.is_active) throw new Error('Voting is currently paused.');
 
-  const organizerProfile = candidate.contests.competitions.organizers;
-  
-  if (!organizerProfile?.paystack_subaccount_code) {
-    throw new Error('Competition organizer payout details are missing.');
-  }
-
-  const basePrice = candidate.contests.vote_price * vote_count;
-  const totalInKobo = Math.round(basePrice * 100);
-  const organizerShare = Math.round(totalInKobo * 0.95);
-
-  finalAmount = basePrice;
-  
-  splitConfig = {
-    type: "flat",
-    bearer_type: "account",
-    subaccounts: [
-      {
-        subaccount: organizerProfile.paystack_subaccount_code,
-        share: organizerShare
+      const organizerProfile = candidate.contests.competitions.organizers;
+      if (!organizerProfile?.paystack_subaccount_code) {
+        throw new Error('Competition organizer payout details are missing.');
       }
-    ]
-  };
 
-  metadata = {
-    ...metadata,
-    candidate_id,
-    vote_count,
-    brand_name: organizerProfile.brand_name,
-    type: 'VOTE'
-  };
-}
-    
+      const basePrice = candidate.contests.vote_price * vote_count;
+      const totalInKobo = Math.round(basePrice * 100);
+      const organizerShare = Math.round(totalInKobo * 0.95);
+
+      finalAmount = basePrice;
+      
+      splitConfig = {
+        type: "flat",
+        bearer_type: "account",
+        subaccounts: [
+          {
+            subaccount: organizerProfile.paystack_subaccount_code,
+            share: organizerShare
+          }
+        ]
+      };
+
+      metadata = {
+        ...metadata,
+        candidate_id,
+        vote_count,
+        brand_name: organizerProfile.business_name,
+        type: 'VOTE'
+      };
+    } 
 
     // --- CASE B: TICKET PURCHASE LOGIC ---
-    // --- CASE B: TICKET PURCHASE LOGIC (Refactored) ---
-else if (type === 'TICKET_PURCHASE') {
-  const { tier_id } = body;
+    else if (type === 'TICKET_PURCHASE') {
+      const { tier_id } = body;
 
-  const { data: tier, error: tierError } = await supabase
-    .from('ticket_tiers')
-    .select(`
-      id, name, price, max_quantity, event_id, 
-      events (
-        id, 
-        title, 
-        organizer_id, 
-        allows_resellers,
-        organizers (
-          brand_name,
-          paystack_subaccount_code
-        )
-      )
-    `)
-    .eq('id', tier_id)
-    .single();
+      const { data: tier, error: tierError } = await supabase
+        .from('ticket_tiers')
+        .select(`
+          id, name, price, max_quantity, event_id, 
+          events (
+            id, 
+            title, 
+            organizer_id, 
+            allows_resellers,
+            organizers (
+              business_name,
+              paystack_subaccount_code
+            )
+          )
+        `)
+        .eq('id', tier_id)
+        .single();
 
-  if (tierError || !tier) throw new Error('Ticket tier not found.');
+      if (tierError || !tier) throw new Error('Ticket tier not found.');
 
-  // Check if the organizer profile exists
-  const organizerProfile = tier.events.organizers;
-  if (!organizerProfile?.paystack_subaccount_code) {
-    throw new Error('This organizer is not set up for payouts yet.');
-  }
+      const organizerProfile = tier.events.organizers;
+      if (!organizerProfile?.paystack_subaccount_code) {
+        throw new Error('This organizer is not set up for payouts yet.');
+      }
 
-  // Sold Out Check
+      // Sold Out Check
       const { count: soldCount, error: countError } = await supabase
         .from('tickets')
         .select('*', { count: 'exact', head: true })
@@ -139,39 +134,45 @@ else if (type === 'TICKET_PURCHASE') {
         }
       }
 
-   
-      }// ... (Sold out and Reseller logic remains the same) ...
+      const totalInKobo = Math.round(priceToCharge * 100);
+      const baseInKobo = Math.round(tier.price * 100);
+      const organizerShare = Math.round(baseInKobo * 0.95);
+      const resellerShare = totalInKobo - baseInKobo;
 
-  const totalInKobo = Math.round(priceToCharge * 100);
-  const baseInKobo = Math.round(tier.price * 100);
-  const organizerShare = Math.round(baseInKobo * 0.95);
+      finalAmount = priceToCharge;
 
-  finalAmount = priceToCharge;
+      splitConfig = {
+        type: "flat",
+        bearer_type: "account",
+        subaccounts: [
+          {
+            subaccount: organizerProfile.paystack_subaccount_code,
+            share: organizerShare
+          }
+        ]
+      };
 
-  splitConfig = {
-    type: "flat",
-    bearer_type: "account",
-    subaccounts: [
-      {
-        // PULLING FROM THE JOINED ORGANIZER TABLE
-        subaccount: organizerProfile.paystack_subaccount_code,
-        share: organizerShare
+      if (resellerSubaccount) {
+        splitConfig.subaccounts.push({
+          subaccount: resellerSubaccount,
+          share: resellerShare
+        });
       }
-    ]
-  };
 
-  metadata = {
-    ...metadata,
-    event_id: tier.event_id,
-    tier_id,
-    guest_name,
-    brand_name: organizerProfile.brand_name, // Added for your luxury email
-    organizer_id: tier.events.organizer_id
-  };
-}
-   
+      metadata = {
+        ...metadata,
+        event_id: tier.event_id,
+        tier_id,
+        guest_name,
+        brand_name: organizerProfile.business_name,
+        reseller_id: resellerId,
+        organizer_id: tier.events.organizer_id
+      };
+    }
 
     // --- 3. PAYSTACK INITIALIZATION ---
+    if (finalAmount <= 0) throw new Error('Invalid transaction amount.');
+
     const response = await fetch('https://api.paystack.co/transaction/initialize', {
       method: 'POST',
       headers: {
@@ -179,7 +180,7 @@ else if (type === 'TICKET_PURCHASE') {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        email: email || "voter@ousted.com",
+        email: email || "customer@luxury.com",
         amount: Math.round(finalAmount * 100),
         split: splitConfig,
         metadata
