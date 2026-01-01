@@ -40,21 +40,29 @@ export async function POST(request) {
     // In route.js - Update the database section
 const subaccountCode = paystackData.data.subaccount_code;
 
-// 1. Update Profile (Existing)
-await supabaseAdmin
+// 1. Update Profile 
+// We capture the error as 'dbError' here
+const { error: dbError } = await supabaseAdmin
   .from('profiles')
-  .update({ paystack_subaccount_code: subaccountCode, is_organizer: true })
+  .update({ 
+    paystack_subaccount_code: subaccountCode, 
+    is_organizer: true 
+  })
   .eq('id', userId);
 
-// 2. Update/Insert into Organizers table (The missing link)
-await supabaseAdmin
+if (dbError) throw dbError; // Now dbError is defined!
+
+// 2. Update/Insert into Organizers table
+// We capture this as 'orgError' to be safe
+const { error: orgError } = await supabaseAdmin
   .from('organizers')
   .upsert({ 
-    id: userId, // Assuming organizer ID matches user ID
+    id: userId, 
     business_name: business_name,
     paystack_subaccount_code: subaccountCode 
   });
-    if (dbError) throw dbError;
+
+if (orgError) throw orgError;
 
     return NextResponse.json({ 
       success: true, 
