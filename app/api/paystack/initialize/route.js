@@ -76,36 +76,44 @@ export async function POST(req) {
     } 
 
     // --- CASE B: TICKET PURCHASE LOGIC ---
-    else if (type === 'TICKET_PURCHASE') {
-      const { tier_id } = body;
+    // --- CASE B: TICKET PURCHASE LOGIC ---
+else if (type === 'TICKET_PURCHASE') {
+  const { tier_id } = body;
 
-      const { data: tier, error: tierError } = await supabase
-        .from('ticket_tiers')
-        .select(`
-          id, name, price, max_quantity, event_id, 
-          events (
-            id, 
-            title, 
-            organizer_id, 
-            allows_resellers,
-            organizers!events_organizer_profile_id_fkey ( 
-              business_name,
-              paystack_subaccount_code
-            )
-          )
-        `)
-        .eq('id', tier_id)
-        .single();
+  const { data: tier, error: tierError } = await supabase
+    .from('ticket_tiers')
+    .select(`
+      id, name, price, max_quantity, event_id, 
+      events (
+        id, 
+        title, 
+        organizer_profile_id, 
+        allows_resellers,
+        organizers!events_organizer_profile_id_fkey ( 
+          business_name,
+          paystack_subaccount_code
+        )
+      )
+    `)
+    .eq('id', tier_id)
+    .single();
 
-      if (tierError || !tier) throw new Error('Ticket tier not found.');
+  if (tierError || !tier) throw new Error('Ticket tier not found.');
 
-      const organizerProfile = tier.events?.organizers.!events_organizer_profile_id_fkey.paystack_subaccount_code;
+  // CORRECT ACCESS: Use bracket notation for the aliased foreign key
+  const organizerData = tier.events?.['organizers!events_organizer_profile_id_fkey'];
 
-      // Safety Check: Validate Organizer Subaccount
-      if (!organizerProfile?.paystack_subaccount_code || !organizerProfile.paystack_subaccount_code.startsWith('ACCT_')) {
-        console.error("DEBUG: Organizer check failed. Profile data:", organizerProfile);
-        throw new Error('This organizer is not set up for payouts yet.');
-      }
+  // This check now has real data to look at
+  if (!organizerData?.paystack_subaccount_code) {
+    console.error("PAYOUT_ERROR: Subaccount missing for organizer:", tier.events?.organizer_profile_id);
+    throw new Error('Organizer payout not configured.');
+  }
+
+  const subaccountCode = organizerData.paystack_subaccount_code;
+
+  // ... rest of your logic (Sold count, Resellers, etc.)
+  
+  
 
       // Sold Out Check
       const { count: soldCount, error: countError } = await supabase
@@ -151,16 +159,16 @@ export async function POST(req) {
       finalAmount = priceToCharge;
 
       // Initialize split with the organizer
-      splitConfig = {
-        type: "flat",
-        bearer_type: "account",
-        subaccounts: [
-          {
-            subaccount: organizerProfile.paystack_subaccount_code,
-            share: organizerShare
-          }
-        ]
-      };
+       splitConfig = {
+    type: "flat",
+    bearer_type: "account",
+    subaccounts: [
+      {
+        subaccount: subaccountCode,
+        share: Math.round(tier.price * 100 * 0.95) // 5% commission
+      }
+    ]
+  };
 
       // Add reseller to split ONLY if a valid subaccount was found
       if (resellerSubaccount) {
