@@ -229,7 +229,7 @@ export default function CreateEvent() {
         event_id: event.id,
         name: t.name,
         price: parseFloat(t.price) || 0,
-        max_capacity: parseInt(t.capacity) || 0,
+        max_quantity: parseInt(t.capacity) || 0,
         description: t.description
       }));
 
