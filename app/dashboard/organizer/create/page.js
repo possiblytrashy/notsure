@@ -138,7 +138,7 @@ export default function CreateEvent() {
     if (!files || files.length === 0) return;
     setUploading(true);
     setFormError(null);
-    const uploadedUrls = [...eventData.image_urls];
+    const uploadedUrls = [...eventData.images];
 
     try {
       for (const file of Array.from(files)) {
@@ -159,7 +159,7 @@ export default function CreateEvent() {
 
         uploadedUrls.push(publicUrl);
       }
-      setEventData(prev => ({ ...prev, image_urls: uploadedUrls }));
+      setEventData(prev => ({ ...prev, images: uploadedUrls }));
     } catch (err) {
       setFormError(err.message);
     } finally {
@@ -168,8 +168,8 @@ export default function CreateEvent() {
   };
 
   const removeImage = (index) => {
-    const filtered = eventData.image_urls.filter((_, i) => i !== index);
-    setEventData({ ...eventData, image_urls: filtered });
+    const filtered = eventData.images.filter((_, i) => i !== index);
+    setEventData({ ...eventData, images: filtered });
   };
 
   // --- 5. TIER MANAGEMENT ---
@@ -201,7 +201,7 @@ export default function CreateEvent() {
     try {
       if (!eventData.title) throw new Error("Please provide an experience title.");
       if (!eventData.location_name) throw new Error("A venue name or address is required.");
-      if (eventData.image_urls.length === 0) throw new Error("Upload at least one promotional image.");
+      if (eventData.images.length === 0) throw new Error("Upload at least one promotional image.");
 
       // Step 1: Create Main Event Record
       const { data: event, error: eventError } = await supabase
@@ -215,7 +215,7 @@ export default function CreateEvent() {
           location_name: eventData.location_name,
           latitude: eventData.lat,
           longitude: eventData.lng,
-          image_urls: eventData.image_urls,
+          images: eventData.images,
           paystack_subaccount: organizerSubaccount,
           category: eventData.category,
           is_published: eventData.is_published,
@@ -452,7 +452,7 @@ export default function CreateEvent() {
                     </div>
                     <p style={{ fontWeight: '900', fontSize: '14px', color: '#0f172a' }}>OPTIMIZING ASSETS</p>
                   </div>
-                ) : eventData.image_urls.length === 0 ? (
+                ) : eventData.images.length === 0 ? (
                   <div style={{ textAlign: 'center' }}>
                     <div style={{ background: '#fff', width: '64px', height: '64px', borderRadius: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', boxShadow: '0 8px 20px rgba(0,0,0,0.04)' }}>
                       <Upload size={24} color="#64748b" />
@@ -462,7 +462,7 @@ export default function CreateEvent() {
                   </div>
                 ) : (
                   <div style={{ width: '100%', padding: '24px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '20px' }}>
-                    {eventData.image_urls.map((url, i) => (
+                    {eventData.images.map((url, i) => (
                       <div key={url} style={{ height: '160px', borderRadius: '20px', position: 'relative', overflow: 'hidden', border: '1px solid #f1f5f9', boxShadow: '0 10px 20px rgba(0,0,0,0.05)' }}>
                         <img src={url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="Poster" />
                         <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'linear-gradient(to bottom, rgba(0,0,0,0.3), transparent 40%)' }} />
