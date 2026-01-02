@@ -489,14 +489,14 @@ if (!subaccount) {
                         <Calendar size={20} color="#0ea5e9" />
                         <div>
                             <p style={styles.specLabel}>DATE</p>
-                            <p style={styles.specValue}>{formatDate(event.event_date)}</p>
+                            <p style={styles.specValue}>{formatDate(events.date)}</p>
                         </div>
                     </div>
                     <div style={styles.specItem}>
                         <Clock size={20} color="#f43f5e" />
                         <div>
                             <p style={styles.specLabel}>TIME</p>
-                            <p style={styles.specValue}>{formatTime(event.event_time)}</p>
+                            <p style={styles.specValue}>{formatTime(events.time)}</p>
                         </div>
                     </div>
                 </div>
