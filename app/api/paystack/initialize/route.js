@@ -99,7 +99,7 @@ export async function POST(req) {
 
       if (tierError || !tier) throw new Error('Ticket tier not found.');
 
-      const organizerProfile = ticket_tiers.events?.organizers;
+      const organizerProfile = tier.events?.organizers;
 
       // Safety Check: Validate Organizer Subaccount
       if (!organizerProfile?.paystack_subaccount_code || !organizerProfile.paystack_subaccount_code.startsWith('ACCT_')) {
