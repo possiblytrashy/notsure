@@ -212,7 +212,7 @@ export default function CreateEvent() {
           title: eventData.title,
           description: eventData.description,
           date: eventData.date,
-          event_time: `${eventData.hour}:${eventData.minute} ${eventData.period}`,
+          time: `${eventData.hour}:${eventData.minute} ${eventData.period}`,
           location_name: eventData.location_name,
           latitude: eventData.lat,
           longitude: eventData.lng,
