@@ -57,7 +57,7 @@ export default function CreateEvent() {
     hour: '08',
     minute: '00',
     period: 'PM',
-    location_name: '', 
+    location: '', 
     lat: 5.6037, // Default Accra
     lng: -0.1870,
     category: 'Entertainment',
