@@ -51,7 +51,7 @@ export default function EventPage() {
   const refCode = searchParams.get('ref'); 
     
   // --- 1. STATE MANAGEMENT ---
-  const [event, setEvent] = useState(null);
+  const [events, setEvent] = useState(null);
   const [user, setUser] = useState(null);
   const [guestName, setGuestName] = useState('');
   const [guestEmail, setGuestEmail] = useState('');
@@ -155,7 +155,7 @@ const { data: eventData, error } = await supabase
     const channel = supabase
       .channel('realtime_tickets')
       .on('postgres_changes', { 
-        event: 'INSERT', 
+        events: 'INSERT', 
         schema: 'public', 
         table: 'tickets',
         filter: `event_id=eq.${id}` 
@@ -181,11 +181,11 @@ const { data: eventData, error } = await supabase
   
   // --- 3. RIDESHARING & MAP LOGIC ---
   const handleRide = (type) => {
-    if (!event.latitude || !event.longitude) return;
+    if (!events.lat || !events.lng) return;
     
-    const lat = event.latitude;
-    const lng = event.longitude;
-    const label = encodeURIComponent(event.location_name || event.title);
+    const lat = events.lat;
+    const lng = events.lng;
+    const label = encodeURIComponent(events.location || events.title);
 
     const urls = {
       google: `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`,
@@ -264,12 +264,12 @@ const { data: eventData, error } = await supabase
     if (e) e.preventDefault();
     if (selectedTier === null || !event || isProcessing) return;
     
-    const tier = event.ticket_tiers[selectedTier];
+    const tier = events.ticket_tiers[selectedTier];
     const currentlySold = soldCounts[tier.name] || 0;
 
     // --- Updated Validation ---
 // Look inside the organizers object we just joined
-const subaccount = event.organizers?.paystack_subaccount_code;
+const subaccount = events.organizers_subaccount;
 
 if (!subaccount) { 
   alert("Organizer payout not configured.");
@@ -325,8 +325,8 @@ if (!subaccount) {
     if (navigator.share) {
       try {
         await navigator.share({
-          title: event?.title || 'Luxury Experience',
-          text: `Join me at ${event?.title}`,
+          title: events?.title || 'Luxury Experience',
+          text: `Join me at ${events?.title}`,
           url: shareUrl,
         });
       } catch (err) { console.log(err); }
@@ -362,7 +362,7 @@ if (!subaccount) {
           <div style={{ textAlign: 'center' }}>
             <div style={styles.successIconWrap}><CheckCircle2 size={40} color="#22c55e" /></div>
             <h2 style={styles.ticketTitle}>ACCESS GRANTED</h2>
-            <p style={styles.ticketSubTitle}>{event.title}</p>
+            <p style={styles.ticketSubTitle}>{events.title}</p>
             
             <div style={styles.ticketDataRibbon}>
               <div style={styles.ribbonItem}>
@@ -385,8 +385,8 @@ if (!subaccount) {
               <div style={{...styles.mapContainer, height: '250px'}}>
                 <Map
                   initialViewState={{
-                    latitude: event.latitude || 5.6037,
-                    longitude: event.longitude || -0.1870,
+                    latitude: events.lat || 5.6037,
+                    longitude: events.lng || -0.1870,
                     zoom: 15
                   }}
                   style={{ width: '100%', height: '100%' }}
@@ -394,14 +394,14 @@ if (!subaccount) {
                   mapboxAccessToken={MAPBOX_TOKEN}
                   interactive={false}
                 >
-                  <Marker latitude={event.latitude} longitude={event.longitude}>
+                  <Marker latitude={events.lat} longitude={events.lng}>
                     <div style={styles.mapPulse}>
                       <div style={styles.mapDot} />
                     </div>
                   </Marker>
                 </Map>
                 <div style={styles.mapOverlay}>
-                   <p style={{margin: 0, fontWeight: 800, fontSize: '12px'}}>{event.location_name}</p>
+                   <p style={{margin: 0, fontWeight: 800, fontSize: '12px'}}>{events.location}</p>
                    <button onClick={() => handleRide('maps')} style={styles.mapActionBtn}>
                      <Navigation size={12}/>
                    </button>
@@ -453,17 +453,17 @@ if (!subaccount) {
       <div style={styles.contentGrid} className="content-grid">
         <div style={styles.galleryColumn}>
           <div style={styles.mainDisplayFrame} className="main-frame">
-            <img src={event.images?.[currentImg] || 'https://via.placeholder.com/800'} style={styles.mainImg} alt="Visual" />
-            {event.images?.length > 1 && (
+            <img src={events.images?.[currentImg] || 'https://via.placeholder.com/800'} style={styles.mainImg} alt="Visual" />
+            {events.images?.length > 1 && (
               <div style={styles.galleryNav}>
-                <button style={styles.navArrow} onClick={() => setCurrentImg(prev => (prev === 0 ? event.images.length - 1 : prev - 1))}><ChevronLeft /></button>
-                <button style={styles.navArrow} onClick={() => setCurrentImg(prev => (prev === event.images.length - 1 ? 0 : prev + 1))}><ChevronRight /></button>
+                <button style={styles.navArrow} onClick={() => setCurrentImg(prev => (prev === 0 ? events.images.length - 1 : prev - 1))}><ChevronLeft /></button>
+                <button style={styles.navArrow} onClick={() => setCurrentImg(prev => (prev === events.images.length - 1 ? 0 : prev + 1))}><ChevronRight /></button>
               </div>
             )}
           </div>
           
           <div style={styles.thumbStrip}>
-            {event.images?.map((img, i) => (
+            {events.images?.map((img, i) => (
               <div key={i} onClick={() => setCurrentImg(i)} style={styles.thumbWrap(currentImg === i)}>
                 <img src={img} style={styles.thumbImg} alt="Thumbnail" />
               </div>
@@ -472,15 +472,15 @@ if (!subaccount) {
 
           <div style={styles.descriptionSection}>
             <h3 style={styles.sectionLabel}>EXPERIENCE DETAILS</h3>
-            <p style={styles.eventDescription}>{event.description}</p>
+            <p style={styles.eventDescription}>{events.description}</p>
           </div>
         </div>
 
         <div style={styles.sidebarColumn}>
           <div style={styles.stickyContent} className="sticky-box">
             <div style={styles.eventHeader}>
-              <span style={styles.categoryBadge}>{event.category || 'Luxury Experience'}</span>
-              <h1 style={styles.eventTitle}>{event.title}</h1>
+              <span style={styles.categoryBadge}>{events.category || 'Luxury Experience'}</span>
+              <h1 style={styles.eventTitle}>{events.title}</h1>
             </div>
 
             <div style={styles.specsContainer}>
@@ -504,7 +504,7 @@ if (!subaccount) {
                     <MapPin size={20} color="#10b981" />
                     <div>
                         <p style={styles.specLabel}>LOCATION</p>
-                        <p style={styles.specValue}>{event.location || event.location_name || 'Venue TBA'}</p>
+                        <p style={styles.specValue}>{events.location || event.location_name || 'Venue TBA'}</p>
                     </div>
                 </div>
             </div>
@@ -520,7 +520,7 @@ if (!subaccount) {
                 <div style={styles.formSection}>
                   <h3 style={styles.formHeading}>2. SELECT TIER</h3>
                   <div style={styles.tiersWrapper}>
-                    {event.ticket_tiers?.map((tier, idx) => {
+                    {events.ticket_tiers?.map((tier, idx) => {
                       const soldOut = tier.max_quantity && (soldCounts[tier.name] || 0) >= tier.max_quantity;
                       const displayPrice = getDisplayPrice(tier.price);
                       return (
