@@ -211,7 +211,7 @@ export default function CreateEvent() {
           organizer_id: user.id,
           title: eventData.title,
           description: eventData.description,
-          event_date: eventData.date,
+          date: eventData.date,
           event_time: `${eventData.hour}:${eventData.minute} ${eventData.period}`,
           location_name: eventData.location_name,
           latitude: eventData.lat,
