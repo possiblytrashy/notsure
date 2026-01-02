@@ -120,7 +120,7 @@ export default function CreateEvent() {
         const [lng, lat] = data.features[0].center;
         setEventData(prev => ({
           ...prev,
-          location_name: data.features[0].place_name,
+          location: data.features[0].place_name,
           lat,
           lng
         }));
@@ -200,7 +200,7 @@ export default function CreateEvent() {
 
     try {
       if (!eventData.title) throw new Error("Please provide an experience title.");
-      if (!eventData.location_name) throw new Error("A venue name or address is required.");
+      if (!eventData.location) throw new Error("A venue name or address is required.");
       if (eventData.images.length === 0) throw new Error("Upload at least one promotional image.");
 
       // Step 1: Create Main Event Record
@@ -212,14 +212,13 @@ export default function CreateEvent() {
           description: eventData.description,
           date: eventData.date,
           time: `${eventData.hour}:${eventData.minute} ${eventData.period}`,
-          location_name: eventData.location_name,
+          location: eventData.location,
           lat: eventData.lat,
           lng: eventData.lng,
           images: eventData.images,
-          paystack_subaccount: organizerSubaccount,
+          organizer_subaccount: organizerSubaccount,
           category: eventData.category,
-          is_published: eventData.is_published,
-          visibility: eventData.visibility
+          is_published: eventData.is_published
         }])
         .select().single();
 
@@ -504,8 +503,8 @@ export default function CreateEvent() {
                   <input 
                     style={{ background: 'none', border: 'none', outline: 'none', flex: 1, fontWeight: '700', fontSize: '16px', color: '#0f172a' }} 
                     placeholder="Enter venue name manually..."
-                    value={eventData.location_name}
-                    onChange={(e) => setEventData({...eventData, location_name: e.target.value})}
+                    value={eventData.location}
+                    onChange={(e) => setEventData({...eventData, location: e.target.value})}
                   />
                   <button 
                     type="button" 
