@@ -62,8 +62,7 @@ export default function CreateEvent() {
     lng: -0.1870,
     category: 'Entertainment',
     image_urls: [], 
-    is_published: true,
-    visibility: 'public'
+    is_published: true
   });
 
   // Tiers State
