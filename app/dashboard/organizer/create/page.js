@@ -61,9 +61,8 @@ export default function CreateEvent() {
     lat: 5.6037, // Default Accra
     lng: -0.1870,
     category: 'Entertainment',
-    image_urls: [], 
-    is_published: true,
-    visibility: 'public'
+    images: [], 
+    is_published: true
   });
 
   // Tiers State
