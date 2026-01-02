@@ -61,7 +61,7 @@ export default function CreateEvent() {
     lat: 5.6037, // Default Accra
     lng: -0.1870,
     category: 'Entertainment',
-    image_urls: [], 
+    images: [], 
     is_published: true
   });
 
