@@ -269,7 +269,7 @@ const { data: eventData, error } = await supabase
 
     // --- Updated Validation ---
 // Look inside the organizers object we just joined
-const subaccount = events.organizers_subaccount;
+const subaccount = events.organizer_subaccount;
 
 if (!subaccount) { 
   alert("Organizer payout not configured.");
