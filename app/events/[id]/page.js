@@ -526,7 +526,8 @@ const { data: eventData, error } = await supabase
                   <h3 style={styles.formHeading}>1. GUEST IDENTITY</h3>
                   <div style={styles.inputContainer}><User size={18} color="#94a3b8" /><input style={styles.cleanInput} placeholder="Full Name" value={guestName} onChange={(e) => setGuestName(e.target.value)} required /></div>
                   <div style={styles.inputContainer}><Mail size={18} color="#94a3b8" /><input type="email" style={styles.cleanInput} placeholder="Email" value={guestEmail}  onChange={(e) => setGuestEmail(e.target.value)}  required /></div>
-                <div style={styles.formSection}>
+              </div>
+              <div style={styles.formSection}>
                   <h3 style={styles.formHeading}>2. SELECT TIER</h3>
                   <div style={styles.tiersWrapper}>
                     {events.ticket_tiers?.map((tier, idx) => {
