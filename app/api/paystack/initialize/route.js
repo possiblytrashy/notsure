@@ -75,7 +75,7 @@ export async function POST(req) {
       };
     } 
 
-// --- CASE B: TICKET PURCHASE LOGIC (Direct from Events Table) ---
+    // --- CASE B: TICKET PURCHASE LOGIC (Direct from Events Table) ---
     else if (type === 'TICKET_PURCHASE') {
       const { tier_id } = body;
 
@@ -99,20 +99,17 @@ export async function POST(req) {
 
       if (tierError || !tier) throw new Error('Ticket tier not found.');
 
-      // FETCH DIRECTLY FROM EVENTS TABLE
+      // 1. FETCH DIRECTLY FROM EVENTS TABLE & ALIAS
       const subaccountCode = tier.events?.organizer_subaccount;
       const businessName = tier.events?.organizers?.business_name || "Event Organizer";
 
+      // 2. VALIDATION
       if (!subaccountCode || !subaccountCode.startsWith('ACCT_')) {
         console.error("DEBUG: Subaccount missing in events table for event:", tier.events?.id);
         throw new Error('Organizer payout not configured on this event.');
       }
 
-  // ... rest of your logic (Sold count, Resellers, etc.)
-  
-  
-
-      // Sold Out Check
+      // 3. AVAILABILITY CHECK
       const { count: soldCount, error: countError } = await supabase
         .from('tickets')
         .select('*', { count: 'exact', head: true })
@@ -124,11 +121,11 @@ export async function POST(req) {
         return NextResponse.json({ error: 'This tier is now SOLD OUT.' }, { status: 400 });
       }
 
+      // 4. PRICING & RESELLER LOGIC
       let priceToCharge = tier.price;
       let resellerId = null;
       let resellerSubaccount = null;
 
-      // Reseller Logic: Only execute if a code is provided and the event allows it
       if (reseller_code && tier.events.allows_resellers) {
         const { data: rData } = await supabase
           .from('event_resellers')
@@ -137,37 +134,34 @@ export async function POST(req) {
           .eq('event_id', tier.event_id)
           .single();
 
-        // Only apply markup and reseller subaccount if the reseller is fully onboarded
+        // Only apply markup if reseller is valid
         if (rData?.resellers?.paystack_subaccount_code?.startsWith('ACCT_')) {
-          priceToCharge = tier.price * 1.10; // 10% Luxury Markup
+          priceToCharge = tier.price * 1.10; // 10% Markup
           resellerId = rData.reseller_id;
           resellerSubaccount = rData.resellers.paystack_subaccount_code;
         } else {
-          console.warn("Reseller code provided but reseller subaccount is missing or invalid.");
+          console.warn("Reseller code provided but subaccount is invalid.");
         }
       }
 
       const totalInKobo = Math.round(priceToCharge * 100);
       const baseInKobo = Math.round(tier.price * 100);
-      
-      // Organizer gets 95% of the BASE price
       const organizerShare = Math.round(baseInKobo * 0.95);
 
       finalAmount = priceToCharge;
 
-      // Initialize split with the organizer
-       splitConfig = {
-    type: "flat",
-    bearer_type: "account",
-    subaccounts: [
-      {
-        subaccount: subaccountCode,
-        share: Math.round(tier.price * 100 * 0.95) // 5% commission
-      }
-    ]
-  };
+      // 5. BUILD SPLIT CONFIG (Using Verified Variables)
+      splitConfig = {
+        type: "flat",
+        bearer_type: "account",
+        subaccounts: [
+          {
+            subaccount: subaccountCode, // Using the direct fetch variable
+            share: organizerShare
+          }
+        ]
+      };
 
-      // Add reseller to split ONLY if a valid subaccount was found
       if (resellerSubaccount) {
         const resellerShare = totalInKobo - baseInKobo;
         splitConfig.subaccounts.push({
@@ -181,7 +175,7 @@ export async function POST(req) {
         event_id: tier.event_id,
         tier_id,
         guest_name,
-        brand_name: organizerProfile.business_name,
+        brand_name: businessName, // Using the direct fetch variable
         reseller_id: resellerId,
         organizer_id: tier.events.organizer_id
       };
@@ -196,7 +190,6 @@ export async function POST(req) {
       metadata,
     };
 
-    // Only include the split property if we actually have subaccounts
     if (splitConfig && splitConfig.subaccounts.length > 0) {
       paystackPayload.split = splitConfig;
     }
