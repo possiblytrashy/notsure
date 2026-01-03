@@ -75,41 +75,38 @@ export async function POST(req) {
       };
     } 
 
-    // --- CASE B: TICKET PURCHASE LOGIC ---
-    // --- CASE B: TICKET PURCHASE LOGIC ---
-else if (type === 'TICKET_PURCHASE') {
-  const { tier_id } = body;
+// --- CASE B: TICKET PURCHASE LOGIC (Direct from Events Table) ---
+    else if (type === 'TICKET_PURCHASE') {
+      const { tier_id } = body;
 
-  const { data: tier, error: tierError } = await supabase
-    .from('ticket_tiers')
-    .select(`
-      id, name, price, max_quantity, event_id, 
-      events (
-        id, 
-        title, 
-        organizer_profile_id, 
-        allows_resellers,
-        organizers!events_organizer_profile_id_fkey ( 
-          business_name,
-          paystack_subaccount_code
-        )
-      )
-    `)
-    .eq('id', tier_id)
-    .single();
+      const { data: tier, error: tierError } = await supabase
+        .from('ticket_tiers')
+        .select(`
+          id, name, price, max_quantity, event_id, 
+          events (
+            id, 
+            title, 
+            organizer_id, 
+            allows_resellers,
+            organizer_subaccount,
+            organizers!events_organizer_profile_id_fkey ( 
+              business_name
+            )
+          )
+        `)
+        .eq('id', tier_id)
+        .single();
 
-  if (tierError || !tier) throw new Error('Ticket tier not found.');
+      if (tierError || !tier) throw new Error('Ticket tier not found.');
 
-  // CORRECT ACCESS: Use bracket notation for the aliased foreign key
-  const organizerData = tier.events?.['organizers!events_organizer_profile_id_fkey'];
+      // FETCH DIRECTLY FROM EVENTS TABLE
+      const subaccountCode = tier.events?.organizer_subaccount;
+      const businessName = tier.events?.organizers?.business_name || "Event Organizer";
 
-  // This check now has real data to look at
-  if (!organizerData?.paystack_subaccount_code) {
-    console.error("PAYOUT_ERROR: Subaccount missing for organizer:", tier.events?.organizer_profile_id);
-    throw new Error('Organizer payout not configured.');
-  }
-
-  const subaccountCode = organizerData.paystack_subaccount_code;
+      if (!subaccountCode || !subaccountCode.startsWith('ACCT_')) {
+        console.error("DEBUG: Subaccount missing in events table for event:", tier.events?.id);
+        throw new Error('Organizer payout not configured on this event.');
+      }
 
   // ... rest of your logic (Sold count, Resellers, etc.)
   
