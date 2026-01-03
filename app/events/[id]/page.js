@@ -260,32 +260,35 @@ const { data: eventData, error } = await supabase
     setIsProcessing(false);
   };
 
-  const handlePurchase = async (e) => {
+ const handlePurchase = async (e) => {
     if (e) e.preventDefault();
-    if (selectedTier === null || !event || isProcessing) return;
+    
+    // Fix 1: Use 'events' (plural) to match your useState
+    if (selectedTier === null || !events || isProcessing) return;
     
     const tier = events.ticket_tiers[selectedTier];
     const currentlySold = soldCounts[tier.name] || 0;
 
-    // --- Updated Validation ---
-// Look inside the organizers object we just joined
-const subaccount = events.organizer_subaccount;
+    // Fix 2: Access the subaccount from the correct location based on your query
+    // Since you used .select(`*, ticket_tiers (*), organizers:organizer_profile_id (...)`)
+    // The subaccount is inside events.organizer_subaccount (direct column) 
+    // or events.organizers.paystack_subaccount_code (joined)
+    const subaccount = events.organizer_subaccount || events.organizers?.paystack_subaccount_code;
 
-if (!subaccount) { 
-  alert("Organizer payout not configured.");
-  return;
-}
+    if (!subaccount) { 
+      alert("Organizer payout not configured for this event.");
+      return;
+    }
 
     if (tier.max_quantity && currentlySold >= tier.max_quantity) {
       alert("This ticket tier is sold out.");
       return;
     }
 
-    
     setIsProcessing(true);
 
     try {
-      // 1. Initialize via secure API route to get access_code
+      // 1. Initialize via secure API route
       const response = await fetch('/api/paystack/initialize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -294,7 +297,7 @@ if (!subaccount) {
           tier_id: tier.id,
           email: guestEmail.trim(),
           guest_name: guestName.trim(),
-          reseller_code: refCode || null
+          reseller_code: refCode || null // Passes the 'ref' from your URL searchParams
         }),
       });
 
@@ -308,13 +311,14 @@ if (!subaccount) {
       const PaystackPop = await loadPaystackScript();
       const handler = PaystackPop.setup({
         key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
-        access_code: initData.access_code,
+        access_code: initData.access_code, // Received from your Fixed API
         callback: (res) => recordPayment(res, tier),
         onClose: () => setIsProcessing(false)
       });
       handler.openIframe();
     } catch (err) {
       console.error("Payment initiation failed:", err);
+      // This will now show the actual error message from your server (e.g., "tier not found")
       alert(err.message || "Could not start payment.");
       setIsProcessing(false);
     }
