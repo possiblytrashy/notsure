@@ -263,9 +263,11 @@ const { data: eventData, error } = await supabase
  const handlePurchase = async (e) => {
     if (e) e.preventDefault();
    // 1. Check if fields are filled
-if (!guestEmail || !guestEmail.includes('@')) {
-    alert("Please enter a valid email address to receive your ticket.");
-    setIsProcessing(false);
+const trimmedEmail = guestEmail.trim();
+  const trimmedName = guestName.trim();
+
+  if (!trimmedEmail || !trimmedEmail.includes('@')) {
+    alert("Please enter a valid email address.");
     return;
   }
 
