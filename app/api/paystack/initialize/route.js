@@ -79,6 +79,19 @@ export async function POST(req) {
     else if (type === 'TICKET_PURCHASE') {
       const { tier_id } = body;
 
+      // Replace your payload block with this:
+const cleanEmail = email?.trim();
+
+if (!cleanEmail || !cleanEmail.includes('@')) {
+  throw new Error('A valid guest email is required to process payment.');
+}
+
+const paystackPayload = {
+  email: cleanEmail,
+  amount: Math.round(finalAmount * 100),
+  metadata,
+};
+
       const { data: tier, error: tierError } = await supabase
         .from('ticket_tiers')
         .select(`
