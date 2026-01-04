@@ -80,17 +80,17 @@ export async function POST(req) {
       const { tier_id } = body;
 
       // Replace your payload block with this:
-const cleanEmail = email?.trim();
-
-if (!cleanEmail || !cleanEmail.includes('@')) {
-  throw new Error('A valid guest email is required to process payment.');
+// --- Inside Case B: TICKET_PURCHASE ---
+if (!email || !email.includes('@')) {
+  return NextResponse.json({ error: 'A valid email is required.' }, { status: 400 });
 }
 
 const paystackPayload = {
-  email: cleanEmail,
+  email: email.trim(), // Ensure no leading/trailing spaces
   amount: Math.round(finalAmount * 100),
   metadata,
 };
+
 
       const { data: tier, error: tierError } = await supabase
         .from('ticket_tiers')
