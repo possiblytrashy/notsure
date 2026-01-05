@@ -312,7 +312,15 @@ const trimmedEmail = guestEmail.trim();
       });
 
       const initData = await response.json();
+// --- ADD THIS DEBUG BLOCK ---
+console.log("DEBUG: Paystack Init Data:", initData);
+console.log("DEBUG: Using Public Key:", process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY);
 
+if (!initData.access_code) {
+    alert(`Server Error: ${initData.error || "No access code returned"}`);
+    setIsProcessing(false);
+    return;
+}
       if (!response.ok) {
         throw new Error(initData.error || 'Initialization failed');
       }
