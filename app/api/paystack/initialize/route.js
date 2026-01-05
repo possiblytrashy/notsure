@@ -11,6 +11,17 @@ export async function POST(req) {
     const body = await req.json();
     const { type, email, guest_name, reseller_code } = body;
 
+    // --- 1. GLOBAL VALIDATION (Fixes 400 Error) ---
+    // Clean the email immediately. If it's empty or invalid, stop here.
+    const cleanEmail = email ? email.trim() : "";
+    
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      return NextResponse.json(
+        { error: 'A valid email address is required to process this transaction.' }, 
+        { status: 400 }
+      );
+    }
+
     let finalAmount = 0;
     let metadata = { type };
     let splitConfig = null;
@@ -75,22 +86,9 @@ export async function POST(req) {
       };
     } 
 
-    // --- CASE B: TICKET PURCHASE LOGIC (Direct from Events Table) ---
+    // --- CASE B: TICKET PURCHASE LOGIC ---
     else if (type === 'TICKET_PURCHASE') {
       const { tier_id } = body;
-
-      // Replace your payload block with this:
-// --- Inside Case B: TICKET_PURCHASE ---
-if (!email || !email.includes('@')) {
-  return NextResponse.json({ error: 'A valid email is required.' }, { status: 400 });
-}
-
-const paystackPayload = {
-  email: email.trim(), // Ensure no leading/trailing spaces
-  amount: Math.round(finalAmount * 100),
-  metadata,
-};
-
 
       const { data: tier, error: tierError } = await supabase
         .from('ticket_tiers')
@@ -163,13 +161,13 @@ const paystackPayload = {
 
       finalAmount = priceToCharge;
 
-      // 5. BUILD SPLIT CONFIG (Using Verified Variables)
+      // 5. BUILD SPLIT CONFIG
       splitConfig = {
         type: "flat",
         bearer_type: "account",
         subaccounts: [
           {
-            subaccount: subaccountCode, // Using the direct fetch variable
+            subaccount: subaccountCode,
             share: organizerShare
           }
         ]
@@ -188,7 +186,7 @@ const paystackPayload = {
         event_id: tier.event_id,
         tier_id,
         guest_name,
-        brand_name: businessName, // Using the direct fetch variable
+        brand_name: businessName,
         reseller_id: resellerId,
         organizer_id: tier.events.organizer_id
       };
@@ -198,7 +196,7 @@ const paystackPayload = {
     if (finalAmount <= 0) throw new Error('Invalid transaction amount.');
 
     const paystackPayload = {
-      email: email || "customer@luxury.com",
+      email: cleanEmail, // <--- NOW USING THE VALIDATED EMAIL
       amount: Math.round(finalAmount * 100),
       metadata,
     };
