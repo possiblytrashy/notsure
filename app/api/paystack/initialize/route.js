@@ -162,16 +162,16 @@ export async function POST(req) {
       finalAmount = priceToCharge;
 
       // 5. BUILD SPLIT CONFIG
-      splitConfig = {
-        type: "flat",
-        bearer_type: "account",
-        subaccounts: [
-          {
-            subaccount: subaccountCode,
-            share: organizerShare
-          }
-        ]
-      };
+    //  splitConfig = {
+    //    type: "flat",
+    //    bearer_type: "account",
+    //    subaccounts: [
+    //      {
+    //        subaccount: subaccountCode,
+     //       share: organizerShare
+     //     }
+    //    ]
+    //  };
 
       if (resellerSubaccount) {
         const resellerShare = totalInKobo - baseInKobo;
