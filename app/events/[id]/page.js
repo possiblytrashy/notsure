@@ -64,50 +64,41 @@ export default function EventPage() {
   useEffect(() => {
     async function init() {
       try {
-        // Fetch event data
-        // NOTE: ticket_tiers is a JSONB column, so we just select *
         const { data: eventData, error } = await supabase
-          .from('events')
-          .select(`
-            *,
-            organizers:organizer_profile_id (
-              business_name,
-              paystack_subaccount_code
-            )
-          `)
-          .eq('id', id)
-          .single();
+        .from('events')
+        .select(`
+          *,
+          organizers:organizer_profile_id (
+            business_name,
+            paystack_subaccount_code
+          ),
+          ticket_tiers (*) 
+        `)
+        .eq('id', id)
+        .single();
 
-        if (error) throw error;
-        
-        if (eventData.is_deleted) {
-          setEvent('DELETED');
-          setFetching(false);
-          return;
-        }
+      if (error) throw error;
+      if (eventData.is_deleted) { setEvent('DELETED'); return; }
 
-        // Fetch real-time sold counts
-        const { data: ticketData, error: ticketError } = await supabase
-          .from('tickets')
-          .select('tier_name')
-          .eq('event_id', id)
-          .eq('status', 'valid');
+      // 2. Fetch real-time sold counts from tickets table
+      const { data: ticketData } = await supabase
+        .from('tickets')
+        .select('tier_id')
+        .eq('event_id', id)
+        .eq('status', 'valid');
 
-        if (!ticketError) {
-          const counts = {};
-          ticketData.forEach(t => {
-            counts[t.tier_name] = (counts[t.tier_name] || 0) + 1;
-          });
-          setSoldCounts(counts);
-        }
+      const counts = {};
+      ticketData?.forEach(t => {
+        counts[t.tier_id] = (counts[t.tier_id] || 0) + 1;
+      });
+      
+      setSoldCounts(counts);
+      setEvent(eventData);
 
-        setEvent(eventData);
-
-        // Check if ticket_tiers (JSONB) has entries
-        if (eventData.ticket_tiers && Array.isArray(eventData.ticket_tiers) && eventData.ticket_tiers.length > 0) {
-          setSelectedTier(0);
-        }
-
+      // Auto-select first tier if available
+      if (eventData.ticket_tiers?.length > 0) {
+        setSelectedTier(eventData.ticket_tiers[0].id); // Store ID, not index
+      }
         // Pre-fill user data if logged in
         const { data: { user: currentUser } } = await supabase.auth.getUser();
         if (currentUser) {
@@ -173,7 +164,10 @@ export default function EventPage() {
     }
     return originalPrice;
   };
-   
+   } catch (err) { console.error(err); }
+  }
+  init();
+}, [id]);
   // --- 3. RIDESHARING & MAP LOGIC ---
   const handleRide = (type) => {
     if (!event.lat || !event.lng) return;
@@ -274,7 +268,7 @@ export default function EventPage() {
       return;
     }
 
-    if (selectedTier === null || !event || isProcessing) return;
+    if (!selectedTier || !activeTier || isProcessing) return;
     
     const tier = event.ticket_tiers[selectedTier];
     const currentlySold = soldCounts[tier.name] || 0;
@@ -302,8 +296,7 @@ export default function EventPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           event_id: id,
-          tier_id: tier.id, // Using ID from JSON object
-          tier_index: selectedTier, // Fallback if ID is missing
+          tier_id: selectedTier, // This is the UUID from public.ticket_tiers
           email: guestEmail.trim(),
           guest_name: guestName.trim(),
           reseller_code: refCode || null
@@ -336,9 +329,9 @@ export default function EventPage() {
       console.error("Payment initiation failed:", err);
       alert(err.message || "Could not start payment.");
       setIsProcessing(false);
-    }
-  };
-
+    
+} catch (err) { /* handle error */ }
+};
   const handleShare = async () => {
     const shareUrl = window.location.href;
     if (navigator.share) {
@@ -538,23 +531,24 @@ export default function EventPage() {
               <div style={styles.formSection}>
                   <h3 style={styles.formHeading}>2. SELECT TIER</h3>
                   <div style={styles.tiersWrapper}>
-                    {event.ticket_tiers?.map((tier, idx) => {
-                      const soldOut = tier.max_quantity && (soldCounts[tier.name] || 0) >= tier.max_quantity;
-                      const displayPrice = getDisplayPrice(tier.price);
-                      return (
-                        <div 
-                          key={idx} 
-                          onClick={() => !soldOut && setSelectedTier(idx)} 
-                          style={styles.tierSelectionCard(selectedTier === idx, soldOut)}
-                        >
-                          <div style={styles.tierInfo}>
-                            <p style={styles.tierName}>{tier.name} {soldOut && <span style={{color: '#ef4444'}}>(SOLD OUT)</span>}</p>
-                            <p style={styles.tierDesc}>{tier.description}</p>
-                          </div>
-                          <div style={styles.tierPrice}>GHS {displayPrice}</div>
-                        </div>
-                      );
-                    })}
+                   {event.ticket_tiers?.map((tier) => {
+  const soldOut = tier.max_quantity > 0 && (soldCounts[tier.id] || 0) >= tier.max_quantity;
+  const displayPrice = getDisplayPrice(tier.price);
+  
+  return (
+    <div 
+      key={tier.id} 
+      onClick={() => !soldOut && setSelectedTier(tier.id)} 
+      style={styles.tierSelectionCard(selectedTier === tier.id, soldOut)}
+    >
+      <div style={styles.tierInfo}>
+        <p style={styles.tierName}>{tier.name} {soldOut && <span style={{color: '#ef4444'}}>(SOLD OUT)</span>}</p>
+        <p style={styles.tierDesc}>{tier.description}</p>
+      </div>
+      <div style={styles.tierPrice}>GHS {displayPrice}</div>
+    </div>
+  );
+})}
                   </div>
                 </div>
 
