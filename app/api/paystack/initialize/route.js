@@ -160,7 +160,7 @@ export async function POST(req) {
       const organizerShare = Math.round(baseInKobo * 0.95);
 
       finalAmount = priceToCharge;
-
+console.log("FINAL AMOUNT SENT TO PAYSTACK:", finalAmount);
       // 5. BUILD SPLIT CONFIG
     //  splitConfig = {
     //    type: "flat",
