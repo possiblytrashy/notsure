@@ -61,6 +61,10 @@ export default function EventPage() {
   const [isResellerMode, setIsResellerMode] = useState(false);
 
   // --- 2. DATA INITIALIZATION ---
+  const activeTier = useMemo(() => {
+  return event?.ticket_tiers?.find(t => t.id === selectedTier);
+}, [event, selectedTier]);
+  
   useEffect(() => {
     async function init() {
       try {
@@ -87,18 +91,20 @@ export default function EventPage() {
         .eq('event_id', id)
         .eq('status', 'valid');
 
-      const counts = {};
-      ticketData?.forEach(t => {
-        counts[t.tier_id] = (counts[t.tier_id] || 0) + 1;
-      });
-      
-      setSoldCounts(counts);
-      setEvent(eventData);
+      // Replace the logic inside your init() function:
+const counts = {};
+ticketData?.forEach(t => {
+  // Use tier_id (the UUID) as the key instead of the name
+  counts[t.tier_id] = (counts[t.tier_id] || 0) + 1;
+});
 
-      // Auto-select first tier if available
-      if (eventData.ticket_tiers?.length > 0) {
-        setSelectedTier(eventData.ticket_tiers[0].id); // Store ID, not index
-      }
+setSoldCounts(counts);
+setEvent(eventData);
+
+if (eventData.ticket_tiers?.length > 0) {
+  // Set the UUID as the selected tier, not the index 0
+  setSelectedTier(eventData.ticket_tiers[0].id);
+}
         // Pre-fill user data if logged in
         const { data: { user: currentUser } } = await supabase.auth.getUser();
         if (currentUser) {
@@ -164,10 +170,7 @@ export default function EventPage() {
     }
     return originalPrice;
   };
-   } catch (err) { console.error(err); }
-  };
-  init();
-}, [id]);
+   
   // --- 3. RIDESHARING & MAP LOGIC ---
   const handleRide = (type) => {
     if (!event.lat || !event.lng) return;
@@ -271,7 +274,7 @@ export default function EventPage() {
     if (!selectedTier || !activeTier || isProcessing) return;
     
     const tier = event.ticket_tiers[selectedTier];
-    const currentlySold = soldCounts[tier.name] || 0;
+   const currentlySold = soldCounts[selectedTier] || 0; // Use the UUID key
 
     // Check organizer payout
     const subaccount = event.organizer_subaccount || event.organizers?.paystack_subaccount_code;
@@ -294,13 +297,13 @@ export default function EventPage() {
       const response = await fetch('/api/paystack/initialize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          event_id: id,
-          tier_id: selectedTier, // This is the UUID from public.ticket_tiers
-          email: guestEmail.trim(),
-          guest_name: guestName.trim(),
-          reseller_code: refCode || null
-        }),
+       body: JSON.stringify({
+  event_id: id,
+  tier_id: selectedTier, // This is already the UUID
+  email: guestEmail.trim(),
+  guest_name: guestName.trim(),
+  reseller_code: refCode || null
+}),
       });
 
       const initData = await response.json();
@@ -321,7 +324,7 @@ export default function EventPage() {
       const handler = PaystackPop.setup({
         key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
         access_code: initData.access_code,
-        callback: (res) => recordPayment(res, tier),
+        callback: (res) => recordPayment(res, activeTier), // Pass the full activeTier object
         onClose: () => setIsProcessing(false)
       });
       handler.openIframe();
@@ -329,9 +332,7 @@ export default function EventPage() {
       console.error("Payment initiation failed:", err);
       alert(err.message || "Could not start payment.");
       setIsProcessing(false);
-    
-} catch (err) { /* handle error */ }
-};
+
   const handleShare = async () => {
     const shareUrl = window.location.href;
     if (navigator.share) {
