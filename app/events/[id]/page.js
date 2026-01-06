@@ -532,7 +532,8 @@ if (eventData.ticket_tiers?.length > 0) {
               <div style={styles.formSection}>
                   <h3 style={styles.formHeading}>2. SELECT TIER</h3>
                   <div style={styles.tiersWrapper}>
-                   {event.ticket_tiers?.map((tier) => {
+                  {event.ticket_tiers?.map((tier) => {
+  // Match soldCounts by tier.id (UUID)
   const soldOut = tier.max_quantity > 0 && (soldCounts[tier.id] || 0) >= tier.max_quantity;
   const displayPrice = getDisplayPrice(tier.price);
   
