@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-// Initialize Admin Client (Bypasses RLS for Guest Payments)
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -9,83 +8,66 @@ const supabaseAdmin = createClient(
 
 export async function POST(req) {
   try {
-    const { event_id, tier_id, tier_index, email, guest_name, reseller_code } = await req.json();
+    const { event_id, tier_id, email, guest_name, reseller_code } = await req.json();
 
-    if (!event_id || !email) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
-    }
-
-    // 1. Fetch Event & Organizer Details
-    // We select ticket_tiers (JSONB) and organizer info
-    const { data: event, error: eventError } = await supabaseAdmin
-      .from('events')
+    // 1. Fetch the Specific Tier from the new table
+    const { data: tier, error: tierError } = await supabaseAdmin
+      .from('ticket_tiers')
       .select(`
         *,
-        organizers:organizer_profile_id (
-          paystack_subaccount_code
+        events (
+          title,
+          organizer_subaccount,
+          organizers:organizer_profile_id (paystack_subaccount_code)
         )
       `)
-      .eq('id', event_id)
+      .eq('id', tier_id)
+      .eq('event_id', event_id) // Security: ensure tier belongs to event
       .single();
 
-    if (eventError || !event) {
-      return NextResponse.json({ error: 'Event not found' }, { status: 404 });
+    if (tierError || !tier) {
+      return NextResponse.json({ error: 'Ticket tier not found' }, { status: 404 });
     }
 
-    // 2. Find the selected tier in the JSONB array
-    let tier = null;
-    if (event.ticket_tiers && Array.isArray(event.ticket_tiers)) {
-      // Try finding by ID first
-      tier = event.ticket_tiers.find(t => t.id === tier_id);
-      
-      // Fallback: Use index if provided and valid
-      if (!tier && typeof tier_index === 'number' && event.ticket_tiers[tier_index]) {
-        tier = event.ticket_tiers[tier_index];
-      }
+    // 2. Validate Capacity (Server-side check)
+    const { count: soldCount } = await supabaseAdmin
+      .from('tickets')
+      .select('*', { count: 'exact', head: true })
+      .eq('tier_id', tier_id)
+      .eq('status', 'valid');
+
+    if (tier.max_quantity > 0 && soldCount >= tier.max_quantity) {
+      return NextResponse.json({ error: 'This tier is sold out' }, { status: 400 });
     }
 
-    if (!tier) {
-      return NextResponse.json({ error: 'Invalid ticket tier selected' }, { status: 400 });
-    }
-
-    // 3. Determine Price (Handle Reseller Markup)
-    let amount = parseFloat(tier.price);
+    // 3. Calculate Pricing (95/5 Split logic)
+    let basePrice = parseFloat(tier.price);
+    if (reseller_code) basePrice = basePrice * 1.10; // 10% Luxury markup for resellers
     
-    // If reseller code exists, we verify it (Optional: You can add DB check here)
-    // For now, we apply the 10% markup if code is present
-    if (reseller_code) {
-      amount = amount * 1.10; 
-    }
+    const amountInKobo = Math.round(basePrice * 100);
 
-    // Paystack expects amount in kobo (multiply by 100)
-    const amountInKobo = Math.round(amount * 100);
-
-    // 4. Determine Subaccount for Split
-    // Prioritize direct column, fallback to joined organizer profile
-    const subaccount = event.organizer_subaccount || event.organizers?.paystack_subaccount_code;
+    // 4. Resolve Subaccount
+    const subaccount = tier.events.organizer_subaccount || 
+                      tier.events.organizers?.paystack_subaccount_code;
 
     if (!subaccount) {
       return NextResponse.json({ error: 'Organizer payout not configured' }, { status: 400 });
     }
 
-    // 5. Initialize Paystack Transaction
+    // 5. Paystack Payload
     const paystackPayload = {
       email,
       amount: amountInKobo,
       metadata: {
-        custom_fields: [
-          { display_name: "Guest Name", variable_name: "guest_name", value: guest_name },
-          { display_name: "Event", variable_name: "event_title", value: event.title },
-          { display_name: "Tier", variable_name: "tier_name", value: tier.name },
-          { display_name: "Reseller Ref", variable_name: "reseller_ref", value: reseller_code || "NONE" }
-        ],
-        event_id: event.id,
-        tier_id: tier.id || `tier_idx_${tier_index}`, // Save ID or fallback to index marker
-        tier_name: tier.name
+        event_id,
+        tier_id: tier.id,
+        tier_name: tier.name,
+        guest_name,
+        reseller_code: reseller_code || "DIRECT"
       },
       subaccount,
-      transaction_charge: Math.round(amountInKobo * 0.05), // 5% Platform Fee
-      bearer: "subaccount" // Organizer pays the fee from their share
+      transaction_charge: Math.round(amountInKobo * 0.05), // Your 5% commission
+      bearer: "subaccount" 
     };
 
     const paystackRes = await fetch('https://api.paystack.co/transaction/initialize', {
@@ -99,14 +81,12 @@ export async function POST(req) {
 
     const paystackData = await paystackRes.json();
 
-    if (!paystackData.status) {
-      throw new Error(paystackData.message || 'Paystack initialization failed');
-    }
-
-    return NextResponse.json({ access_code: paystackData.data.access_code });
+    return NextResponse.json({ 
+      access_code: paystackData.data.access_code,
+      reference: paystackData.data.reference 
+    });
 
   } catch (err) {
-    console.error('Paystack API Error:', err);
-    return NextResponse.json({ error: err.message || 'Internal Server Error' }, { status: 500 });
+    return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
