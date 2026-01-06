@@ -11,19 +11,17 @@ export async function POST(req) {
     const body = await req.json();
     const { type, email, guest_name, reseller_code } = body;
 
-    // --- 1. GLOBAL VALIDATION (Fixes 400 Error) ---
-    // Clean the email immediately. If it's empty or invalid, stop here.
+    // --- 1. GLOBAL VALIDATION ---
     const cleanEmail = email ? email.trim() : "";
-    
     if (!cleanEmail || !cleanEmail.includes('@')) {
       return NextResponse.json(
-        { error: 'A valid email address is required to process this transaction.' }, 
+        { error: 'A valid email address is required.' },
         { status: 400 }
       );
     }
 
     let finalAmount = 0;
-    let metadata = { type };
+    let metadata = { ...body }; // Start with body data
     let splitConfig = null;
 
     // --- CASE A: VOTING LOGIC ---
@@ -33,17 +31,11 @@ export async function POST(req) {
       const { data: candidate, error: cError } = await supabase
         .from('candidates')
         .select(`
-          id, 
-          name, 
+          id, name, 
           contests (
-            id, 
-            vote_price, 
-            is_active,
+            id, vote_price, is_active,
             competitions (
-              organizers (
-                paystack_subaccount_code,
-                business_name
-              )
+              organizers (paystack_subaccount_code, business_name)
             )
           )
         `)
@@ -54,73 +46,54 @@ export async function POST(req) {
       if (!candidate.contests.is_active) throw new Error('Voting is currently paused.');
 
       const organizerProfile = candidate.contests.competitions.organizers;
-      
-      // Safety Check: Validate Organizer Subaccount
-      if (!organizerProfile?.paystack_subaccount_code || !organizerProfile.paystack_subaccount_code.startsWith('ACCT_')) {
-        throw new Error('Competition organizer payout details are missing or invalid.');
-      }
+      if (!organizerProfile?.paystack_subaccount_code) throw new Error('Organizer payout not configured.');
 
-      const basePrice = candidate.contests.vote_price * vote_count;
-      const totalInKobo = Math.round(basePrice * 100);
-      const organizerShare = Math.round(totalInKobo * 0.95); // 5% platform commission
+      finalAmount = candidate.contests.vote_price * vote_count;
+      const organizerShare = Math.round((finalAmount * 100) * 0.95);
 
-      finalAmount = basePrice;
-      
       splitConfig = {
         type: "flat",
         bearer_type: "account",
-        subaccounts: [
-          {
-            subaccount: organizerProfile.paystack_subaccount_code,
-            share: organizerShare
-          }
-        ]
+        subaccounts: [{ subaccount: organizerProfile.paystack_subaccount_code, share: organizerShare }]
       };
 
-      metadata = {
-        ...metadata,
-        candidate_id,
-        vote_count,
-        brand_name: organizerProfile.business_name,
-        type: 'VOTE'
-      };
-    } 
+      metadata = { ...metadata, brand_name: organizerProfile.business_name };
+    }
 
     // --- CASE B: TICKET PURCHASE LOGIC ---
     else if (type === 'TICKET_PURCHASE') {
       const { tier_id } = body;
 
-     // Inside your Case B (Ticket Purchase)
-const paystackPayload = {
-  email: cleanEmail,
-  amount: Math.round(finalAmount * 100), // Ensure this is at least 100 for NGN or 50 for GHS
-  currency: "GHS", // FORCE the currency to match your dashboard (use "GHS" if in Ghana)
-  metadata: {
-    ...metadata,
-    custom_fields: [
-      {
-        display_name: "Guest Name",
-        variable_name: "guest_name",
-        value: guest_name
-      }
-    ]
-  }
-};
-     
-      
-      // 3. AVAILABILITY CHECK
-      const { count: soldCount, error: countError } = await supabase
+      // 1. Fetch Tier and Event details FIRST
+      const { data: tier, error: tierError } = await supabase
+        .from('ticket_tiers')
+        .select(`
+          id, name, price, max_quantity, event_id, 
+          events (
+            id, title, organizer_id, allows_resellers, organizer_subaccount,
+            organizers!events_organizer_profile_id_fkey (business_name)
+          )
+        `)
+        .eq('id', tier_id)
+        .single();
+
+      if (tierError || !tier) throw new Error('Ticket tier not found.');
+
+      const subaccountCode = tier.events?.organizer_subaccount;
+      const businessName = tier.events?.organizers?.business_name || "Event Organizer";
+
+      // 2. Check Availability
+      const { count: soldCount } = await supabase
         .from('tickets')
         .select('*', { count: 'exact', head: true })
         .eq('tier_id', tier_id)
         .eq('status', 'valid');
 
-      if (countError) throw new Error('Error verifying availability.');
       if (tier.max_quantity && soldCount >= tier.max_quantity) {
         return NextResponse.json({ error: 'This tier is now SOLD OUT.' }, { status: 400 });
       }
 
-      // 4. PRICING & RESELLER LOGIC
+      // 3. Pricing & Reseller Logic
       let priceToCharge = tier.price;
       let resellerId = null;
       let resellerSubaccount = null;
@@ -128,70 +101,60 @@ const paystackPayload = {
       if (reseller_code && tier.events.allows_resellers) {
         const { data: rData } = await supabase
           .from('event_resellers')
-          .select('reseller_id, resellers(id, paystack_subaccount_code)')
+          .select('reseller_id, resellers(paystack_subaccount_code)')
           .eq('unique_code', reseller_code)
           .eq('event_id', tier.event_id)
           .single();
 
-        // Only apply markup if reseller is valid
-        if (rData?.resellers?.paystack_subaccount_code?.startsWith('ACCT_')) {
+        if (rData?.resellers?.paystack_subaccount_code) {
           priceToCharge = tier.price * 1.10; // 10% Markup
           resellerId = rData.reseller_id;
           resellerSubaccount = rData.resellers.paystack_subaccount_code;
-        } else {
-          console.warn("Reseller code provided but subaccount is invalid.");
         }
       }
 
-      const totalInKobo = Math.round(priceToCharge * 100);
+      finalAmount = priceToCharge;
       const baseInKobo = Math.round(tier.price * 100);
+      const totalInKobo = Math.round(priceToCharge * 100);
       const organizerShare = Math.round(baseInKobo * 0.95);
 
-      finalAmount = priceToCharge;
-console.log("FINAL AMOUNT SENT TO PAYSTACK:", finalAmount);
-      // 5. BUILD SPLIT CONFIG
-    //  splitConfig = {
-    //    type: "flat",
-    //    bearer_type: "account",
-    //    subaccounts: [
-    //      {
-    //        subaccount: subaccountCode,
-     //       share: organizerShare
-     //     }
-    //    ]
-    //  };
+      // 4. Build Split
+      if (subaccountCode) {
+        splitConfig = {
+          type: "flat",
+          bearer_type: "account",
+          subaccounts: [{ subaccount: subaccountCode, share: organizerShare }]
+        };
 
-   //   if (resellerSubaccount) {
-    //    const resellerShare = totalInKobo - baseInKobo;
-    //    splitConfig.subaccounts.push({
-    //      subaccount: resellerSubaccount,
-    //      share: resellerShare
-    //    });
-   //   }
+        if (resellerSubaccount) {
+          splitConfig.subaccounts.push({
+            subaccount: resellerSubaccount,
+            share: totalInKobo - baseInKobo
+          });
+        }
+      }
 
-  //    metadata = {
-    //    ...metadata,
-    //    event_id: tier.event_id,
-    //    tier_id,
-    //    guest_name,
-    //    brand_name: businessName,
-    //    reseller_id: resellerId,
-    //    organizer_id: tier.events.organizer_id
-   //   };
-   }
+      metadata = {
+        ...metadata,
+        event_id: tier.event_id,
+        tier_id,
+        guest_name,
+        brand_name: businessName,
+        reseller_id: resellerId
+      };
+    }
 
     // --- 3. PAYSTACK INITIALIZATION ---
     if (finalAmount <= 0) throw new Error('Invalid transaction amount.');
 
     const paystackPayload = {
-      email: cleanEmail, // <--- NOW USING THE VALIDATED EMAIL
+      email: cleanEmail,
       amount: Math.round(finalAmount * 100),
+      currency: "GHS", // Set to your local currency
       metadata,
+      // Uncomment the line below once you confirm subaccounts are valid
+      // split: splitConfig 
     };
-
-    if (splitConfig && splitConfig.subaccounts.length > 0) {
-      paystackPayload.split = splitConfig;
-    }
 
     const response = await fetch('https://api.paystack.co/transaction/initialize', {
       method: 'POST',
@@ -203,11 +166,7 @@ console.log("FINAL AMOUNT SENT TO PAYSTACK:", finalAmount);
     });
 
     const data = await response.json();
-    
-    if (!data.status) {
-      console.error("Paystack API Error Details:", data);
-      throw new Error(data.message || "Paystack initialization failed");
-    }
+    if (!data.status) throw new Error(data.message || "Paystack failed");
 
     return NextResponse.json({ 
       access_code: data.data.access_code,
