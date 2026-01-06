@@ -165,7 +165,7 @@ export default function EventPage() {
     return originalPrice;
   };
    } catch (err) { console.error(err); }
-  }
+  };
   init();
 }, [id]);
   // --- 3. RIDESHARING & MAP LOGIC ---
