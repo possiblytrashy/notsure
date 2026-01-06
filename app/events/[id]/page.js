@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { supabase } from '../../../lib/supabase';
+import { supabase } from '../../../lib/supabase'; // Adjust path if needed
 import { 
   ChevronLeft, 
   ChevronRight, 
@@ -15,17 +15,14 @@ import {
   CheckCircle2, 
   Download, 
   Clock, 
-  Globe,
   Share2,
   AlertCircle,
   Navigation,
-  Car,
-  ArrowRight,
-  Zap
+  Car
 } from 'lucide-react';
 
 // --- MAPBOX IMPORTS ---
-import Map, { Marker, NavigationControl } from 'react-map-gl';
+import Map, { Marker } from 'react-map-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN;
@@ -40,7 +37,6 @@ const formatDate = (dateString) => {
 // --- HELPER: TIME FORMATTER ---
 const formatTime = (timeString) => {
     if (!timeString) return 'Time TBA';
-    // Returns HH:MM from ISO or time string
     return timeString.substring(0, 5);
 };
 
@@ -51,8 +47,7 @@ export default function EventPage() {
   const refCode = searchParams.get('ref'); 
     
   // --- 1. STATE MANAGEMENT ---
-  // FIXED: Renamed 'events' to 'event' to match the usage in the rest of the component
-  const [events, setEvent] = useState(null);
+  const [event, setEvent] = useState(null);
   const [user, setUser] = useState(null);
   const [guestName, setGuestName] = useState('');
   const [guestEmail, setGuestEmail] = useState('');
@@ -69,13 +64,12 @@ export default function EventPage() {
   useEffect(() => {
     async function init() {
       try {
-        // Fetch event with ticket tiers
-        // --- Updated Query with Organizer Join ---
+        // Fetch event data
+        // NOTE: ticket_tiers is a JSONB column, so we just select *
         const { data: eventData, error } = await supabase
           .from('events')
           .select(`
-            *, 
-            ticket_tiers (*),
+            *,
             organizers:organizer_profile_id (
               business_name,
               paystack_subaccount_code
@@ -92,7 +86,7 @@ export default function EventPage() {
           return;
         }
 
-        // Fetch real-time sold counts to prevent overselling on UI
+        // Fetch real-time sold counts
         const { data: ticketData, error: ticketError } = await supabase
           .from('tickets')
           .select('tier_name')
@@ -109,7 +103,8 @@ export default function EventPage() {
 
         setEvent(eventData);
 
-        if (eventData?.ticket_tiers?.length > 0) {
+        // Check if ticket_tiers (JSONB) has entries
+        if (eventData.ticket_tiers && Array.isArray(eventData.ticket_tiers) && eventData.ticket_tiers.length > 0) {
           setSelectedTier(0);
         }
 
@@ -145,7 +140,6 @@ export default function EventPage() {
       if (data && !error) {
         setReseller(data);
         setIsResellerMode(true);
-        // Track the referral click via RPC
         await supabase.rpc('increment_reseller_clicks', { link_id: data.id });
       }
     };
@@ -175,7 +169,6 @@ export default function EventPage() {
   const getDisplayPrice = (originalPrice) => {
     if (!originalPrice) return 0;
     if (isResellerMode) {
-      // Show the marked-up price to the user if they came through a referral
       return (Number(originalPrice) * 1.10).toFixed(2);
     }
     return originalPrice;
@@ -219,7 +212,7 @@ export default function EventPage() {
   };
 
   const recordPayment = async (response, tier) => {
-    // Final check for capacity before inserting
+    // Double check capacity
     const { count } = await supabase
       .from('tickets')
       .select('*', { count: 'exact', head: true })
@@ -235,9 +228,12 @@ export default function EventPage() {
 
     const finalAmountPaid = isResellerMode ? parseFloat(tier.price) * 1.10 : parseFloat(tier.price);
 
+    // Ensure we have a valid Tier ID. If the JSON didn't have one, we use a fallback or the index.
+    const tierIdToSave = tier.id || `tier_${selectedTier}`;
+
     const ticketData = {
       event_id: id,
-      tier_id: tier.id,
+      tier_id: tierIdToSave,
       user_id: user ? user.id : null,
       guest_email: guestEmail.trim(), 
       guest_name: guestName.trim(),   
@@ -265,7 +261,6 @@ export default function EventPage() {
   const handlePurchase = async (e) => {
     if (e) e.preventDefault();
     
-    // 1. Check if fields are filled
     const trimmedEmail = guestEmail.trim();
     const trimmedName = guestName.trim();
 
@@ -284,12 +279,11 @@ export default function EventPage() {
     const tier = event.ticket_tiers[selectedTier];
     const currentlySold = soldCounts[tier.name] || 0;
 
-    // Check for organizer payout configuration
-    // Use optional chaining (?.) for organizers in case RLS hides it for guests
+    // Check organizer payout
     const subaccount = event.organizer_subaccount || event.organizers?.paystack_subaccount_code;
 
     if (!subaccount) { 
-      console.error("DEBUG: Organizer Subaccount missing. Event data:", event);
+      console.error("DEBUG: Organizer Subaccount missing. Event:", event);
       alert("Organizer payout not configured for this event. Please contact support.");
       return;
     }
@@ -302,13 +296,14 @@ export default function EventPage() {
     setIsProcessing(true);
 
     try {
-      // 1. Initialize via secure API route
+      // Initialize Transaction
       const response = await fetch('/api/paystack/initialize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          type: 'TICKET_PURCHASE',
-          tier_id: tier.id,
+          event_id: id,
+          tier_id: tier.id, // Using ID from JSON object
+          tier_index: selectedTier, // Fallback if ID is missing
           email: guestEmail.trim(),
           guest_name: guestName.trim(),
           reseller_code: refCode || null
@@ -316,7 +311,6 @@ export default function EventPage() {
       });
 
       const initData = await response.json();
-      
       console.log("DEBUG: Paystack Init Data:", initData);
 
       if (!initData.access_code) {
@@ -329,7 +323,7 @@ export default function EventPage() {
         throw new Error(initData.error || 'Initialization failed');
       }
 
-      // 2. Open Paystack with the secure access_code
+      // Open Paystack
       const PaystackPop = await loadPaystackScript();
       const handler = PaystackPop.setup({
         key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
@@ -529,7 +523,7 @@ export default function EventPage() {
                     <MapPin size={20} color="#10b981" />
                     <div>
                         <p style={styles.specLabel}>LOCATION</p>
-                        <p style={styles.specValue}>{event.location || event.location_name || 'Venue TBA'}</p>
+                        <p style={styles.specValue}>{event.location || 'Venue TBA'}</p>
                     </div>
                 </div>
             </div>
