@@ -190,7 +190,7 @@ console.log("FINAL AMOUNT SENT TO PAYSTACK:", finalAmount);
     //    reseller_id: resellerId,
     //    organizer_id: tier.events.organizer_id
    //   };
-  //  }
+   }
 
     // --- 3. PAYSTACK INITIALIZATION ---
     if (finalAmount <= 0) throw new Error('Invalid transaction amount.');
