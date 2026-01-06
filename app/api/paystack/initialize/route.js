@@ -107,16 +107,7 @@ const paystackPayload = {
   }
 };
      
-      // 1. FETCH DIRECTLY FROM EVENTS TABLE & ALIAS
-      const subaccountCode = tier.events?.organizer_subaccount;
-      const businessName = tier.events?.organizers?.business_name || "Event Organizer";
-
-      // 2. VALIDATION
-      if (!subaccountCode || !subaccountCode.startsWith('ACCT_')) {
-        console.error("DEBUG: Subaccount missing in events table for event:", tier.events?.id);
-        throw new Error('Organizer payout not configured on this event.');
-      }
-
+      
       // 3. AVAILABILITY CHECK
       const { count: soldCount, error: countError } = await supabase
         .from('tickets')
