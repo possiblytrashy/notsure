@@ -51,6 +51,7 @@ export default function EventPage() {
   const refCode = searchParams.get('ref'); 
     
   // --- 1. STATE MANAGEMENT ---
+  // FIXED: Renamed 'events' to 'event' to match the usage in the rest of the component
   const [events, setEvent] = useState(null);
   const [user, setUser] = useState(null);
   const [guestName, setGuestName] = useState('');
@@ -70,23 +71,24 @@ export default function EventPage() {
       try {
         // Fetch event with ticket tiers
         // --- Updated Query with Organizer Join ---
-const { data: eventData, error } = await supabase
-  .from('events')
-  .select(`
-    *, 
-    ticket_tiers (*),
-    organizers:organizer_profile_id (
-      business_name,
-      paystack_subaccount_code
-    )
-  `)
-  .eq('id', id)
-  .single();
+        const { data: eventData, error } = await supabase
+          .from('events')
+          .select(`
+            *, 
+            ticket_tiers (*),
+            organizers:organizer_profile_id (
+              business_name,
+              paystack_subaccount_code
+            )
+          `)
+          .eq('id', id)
+          .single();
 
         if (error) throw error;
         
         if (eventData.is_deleted) {
           setEvent('DELETED');
+          setFetching(false);
           return;
         }
 
@@ -178,18 +180,18 @@ const { data: eventData, error } = await supabase
     }
     return originalPrice;
   };
-  
+   
   // --- 3. RIDESHARING & MAP LOGIC ---
   const handleRide = (type) => {
-    if (!events.lat || !events.lng) return;
+    if (!event.lat || !event.lng) return;
     
-    const lat = events.lat;
-    const lng = events.lng;
-    const label = encodeURIComponent(events.location || events.title);
+    const lat = event.lat;
+    const lng = event.lng;
+    const label = encodeURIComponent(event.location || event.title);
 
     const urls = {
       google: `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`,
-  apple: `maps://?q=${label}&ll=${lat},${lng}`,
+      apple: `maps://?q=${label}&ll=${lat},${lng}`,
       uber: `uber://?action=setPickup&dropoff[latitude]=${lat}&dropoff[longitude]=${lng}&dropoff[nickname]=${label}`,
       bolt: `bolt://ride?action=setDest&destination_lat=${lat}&destination_lng=${lng}&destination_name=${label}`,
       yango: `yango://?finish_lat=${lat}&finish_lon=${lng}`
@@ -239,11 +241,11 @@ const { data: eventData, error } = await supabase
       user_id: user ? user.id : null,
       guest_email: guestEmail.trim(), 
       guest_name: guestName.trim(),   
-      tier_name: tier.name,           
+      tier_name: tier.name,            
       amount: finalAmountPaid, 
       reference: response.reference,  
       status: 'valid',                
-      is_scanned: false,              
+      is_scanned: false,               
       updated_at: new Date().toISOString()
     };
 
@@ -260,33 +262,35 @@ const { data: eventData, error } = await supabase
     setIsProcessing(false);
   };
 
- const handlePurchase = async (e) => {
+  const handlePurchase = async (e) => {
     if (e) e.preventDefault();
-   // 1. Check if fields are filled
-const trimmedEmail = guestEmail.trim();
-  const trimmedName = guestName.trim();
-
-  if (!trimmedEmail || !trimmedEmail.includes('@')) {
-    alert("Please enter a valid email address.");
-    return;
-  }
-
-  if (selectedTier === null || !events || isProcessing) return;
     
-    // Fix 1: Use 'events' (plural) to match your useState
-    if (selectedTier === null || !events || isProcessing) return;
+    // 1. Check if fields are filled
+    const trimmedEmail = guestEmail.trim();
+    const trimmedName = guestName.trim();
+
+    if (!trimmedEmail || !trimmedEmail.includes('@')) {
+      alert("Please enter a valid email address.");
+      return;
+    }
+
+    if (!trimmedName) {
+      alert("Please enter your name.");
+      return;
+    }
+
+    if (selectedTier === null || !event || isProcessing) return;
     
-    const tier = events.ticket_tiers[selectedTier];
+    const tier = event.ticket_tiers[selectedTier];
     const currentlySold = soldCounts[tier.name] || 0;
 
-    // Fix 2: Access the subaccount from the correct location based on your query
-    // Since you used .select(`*, ticket_tiers (*), organizers:organizer_profile_id (...)`)
-    // The subaccount is inside events.organizer_subaccount (direct column) 
-    // or events.organizers.paystack_subaccount_code (joined)
-    const subaccount = events.organizer_subaccount || events.organizers?.paystack_subaccount_code;
+    // Check for organizer payout configuration
+    // Use optional chaining (?.) for organizers in case RLS hides it for guests
+    const subaccount = event.organizer_subaccount || event.organizers?.paystack_subaccount_code;
 
     if (!subaccount) { 
-      alert("Organizer payout not configured for this event.");
+      console.error("DEBUG: Organizer Subaccount missing. Event data:", event);
+      alert("Organizer payout not configured for this event. Please contact support.");
       return;
     }
 
@@ -307,20 +311,20 @@ const trimmedEmail = guestEmail.trim();
           tier_id: tier.id,
           email: guestEmail.trim(),
           guest_name: guestName.trim(),
-          reseller_code: refCode || null // Passes the 'ref' from your URL searchParams
+          reseller_code: refCode || null
         }),
       });
 
       const initData = await response.json();
-// --- ADD THIS DEBUG BLOCK ---
-console.log("DEBUG: Paystack Init Data:", initData);
-console.log("DEBUG: Using Public Key:", process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY);
+      
+      console.log("DEBUG: Paystack Init Data:", initData);
 
-if (!initData.access_code) {
-    alert(`Server Error: ${initData.error || "No access code returned"}`);
-    setIsProcessing(false);
-    return;
-}
+      if (!initData.access_code) {
+        alert(`Server Error: ${initData.error || "No access code returned"}`);
+        setIsProcessing(false);
+        return;
+      }
+      
       if (!response.ok) {
         throw new Error(initData.error || 'Initialization failed');
       }
@@ -329,14 +333,13 @@ if (!initData.access_code) {
       const PaystackPop = await loadPaystackScript();
       const handler = PaystackPop.setup({
         key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
-        access_code: initData.access_code, // Received from your Fixed API
+        access_code: initData.access_code,
         callback: (res) => recordPayment(res, tier),
         onClose: () => setIsProcessing(false)
       });
       handler.openIframe();
     } catch (err) {
       console.error("Payment initiation failed:", err);
-      // This will now show the actual error message from your server (e.g., "tier not found")
       alert(err.message || "Could not start payment.");
       setIsProcessing(false);
     }
@@ -347,8 +350,8 @@ if (!initData.access_code) {
     if (navigator.share) {
       try {
         await navigator.share({
-          title: events?.title || 'Luxury Experience',
-          text: `Join me at ${events?.title}`,
+          title: event?.title || 'Luxury Experience',
+          text: `Join me at ${event?.title}`,
           url: shareUrl,
         });
       } catch (err) { console.log(err); }
@@ -384,7 +387,7 @@ if (!initData.access_code) {
           <div style={{ textAlign: 'center' }}>
             <div style={styles.successIconWrap}><CheckCircle2 size={40} color="#22c55e" /></div>
             <h2 style={styles.ticketTitle}>ACCESS GRANTED</h2>
-            <p style={styles.ticketSubTitle}>{events.title}</p>
+            <p style={styles.ticketSubTitle}>{event.title}</p>
             
             <div style={styles.ticketDataRibbon}>
               <div style={styles.ribbonItem}>
@@ -407,8 +410,8 @@ if (!initData.access_code) {
               <div style={{...styles.mapContainer, height: '250px'}}>
                 <Map
                   initialViewState={{
-                    latitude: events.lat || 5.6037,
-                    longitude: events.lng || -0.1870,
+                    latitude: event.lat || 5.6037,
+                    longitude: event.lng || -0.1870,
                     zoom: 15
                   }}
                   style={{ width: '100%', height: '100%' }}
@@ -416,17 +419,17 @@ if (!initData.access_code) {
                   mapboxAccessToken={MAPBOX_TOKEN}
                   interactive={false}
                 >
-                  <Marker latitude={events.lat} longitude={events.lng}>
+                  <Marker latitude={event.lat || 5.6037} longitude={event.lng || -0.1870}>
                     <div style={styles.mapPulse}>
                       <div style={styles.mapDot} />
                     </div>
                   </Marker>
                 </Map>
                 <div style={styles.mapOverlay}>
-                   <p style={{margin: 0, fontWeight: 800, fontSize: '12px'}}>{events.location}</p>
-                   <button onClick={() => handleRide('maps')} style={styles.mapActionBtn}>
-                     <Navigation size={12}/>
-                   </button>
+                    <p style={{margin: 0, fontWeight: 800, fontSize: '12px'}}>{event.location}</p>
+                    <button onClick={() => handleRide('maps')} style={styles.mapActionBtn}>
+                      <Navigation size={12}/>
+                    </button>
                 </div>
               </div>
             </div>
@@ -475,17 +478,17 @@ if (!initData.access_code) {
       <div style={styles.contentGrid} className="content-grid">
         <div style={styles.galleryColumn}>
           <div style={styles.mainDisplayFrame} className="main-frame">
-            <img src={events.images?.[currentImg] || 'https://via.placeholder.com/800'} style={styles.mainImg} alt="Visual" />
-            {events.images?.length > 1 && (
+            <img src={event.images?.[currentImg] || 'https://via.placeholder.com/800'} style={styles.mainImg} alt="Visual" />
+            {event.images?.length > 1 && (
               <div style={styles.galleryNav}>
-                <button style={styles.navArrow} onClick={() => setCurrentImg(prev => (prev === 0 ? events.images.length - 1 : prev - 1))}><ChevronLeft /></button>
-                <button style={styles.navArrow} onClick={() => setCurrentImg(prev => (prev === events.images.length - 1 ? 0 : prev + 1))}><ChevronRight /></button>
+                <button style={styles.navArrow} onClick={() => setCurrentImg(prev => (prev === 0 ? event.images.length - 1 : prev - 1))}><ChevronLeft /></button>
+                <button style={styles.navArrow} onClick={() => setCurrentImg(prev => (prev === event.images.length - 1 ? 0 : prev + 1))}><ChevronRight /></button>
               </div>
             )}
           </div>
           
           <div style={styles.thumbStrip}>
-            {events.images?.map((img, i) => (
+            {event.images?.map((img, i) => (
               <div key={i} onClick={() => setCurrentImg(i)} style={styles.thumbWrap(currentImg === i)}>
                 <img src={img} style={styles.thumbImg} alt="Thumbnail" />
               </div>
@@ -494,15 +497,15 @@ if (!initData.access_code) {
 
           <div style={styles.descriptionSection}>
             <h3 style={styles.sectionLabel}>EXPERIENCE DETAILS</h3>
-            <p style={styles.eventDescription}>{events.description}</p>
+            <p style={styles.eventDescription}>{event.description}</p>
           </div>
         </div>
 
         <div style={styles.sidebarColumn}>
           <div style={styles.stickyContent} className="sticky-box">
             <div style={styles.eventHeader}>
-              <span style={styles.categoryBadge}>{events.category || 'Luxury Experience'}</span>
-              <h1 style={styles.eventTitle}>{events.title}</h1>
+              <span style={styles.categoryBadge}>{event.category || 'Luxury Experience'}</span>
+              <h1 style={styles.eventTitle}>{event.title}</h1>
             </div>
 
             <div style={styles.specsContainer}>
@@ -511,14 +514,14 @@ if (!initData.access_code) {
                         <Calendar size={20} color="#0ea5e9" />
                         <div>
                             <p style={styles.specLabel}>DATE</p>
-                            <p style={styles.specValue}>{formatDate(events.date)}</p>
+                            <p style={styles.specValue}>{formatDate(event.date)}</p>
                         </div>
                     </div>
                     <div style={styles.specItem}>
                         <Clock size={20} color="#f43f5e" />
                         <div>
                             <p style={styles.specLabel}>TIME</p>
-                            <p style={styles.specValue}>{formatTime(events.time)}</p>
+                            <p style={styles.specValue}>{formatTime(event.time)}</p>
                         </div>
                     </div>
                 </div>
@@ -526,7 +529,7 @@ if (!initData.access_code) {
                     <MapPin size={20} color="#10b981" />
                     <div>
                         <p style={styles.specLabel}>LOCATION</p>
-                        <p style={styles.specValue}>{events.location || event.location_name || 'Venue TBA'}</p>
+                        <p style={styles.specValue}>{event.location || event.location_name || 'Venue TBA'}</p>
                     </div>
                 </div>
             </div>
@@ -541,7 +544,7 @@ if (!initData.access_code) {
               <div style={styles.formSection}>
                   <h3 style={styles.formHeading}>2. SELECT TIER</h3>
                   <div style={styles.tiersWrapper}>
-                    {events.ticket_tiers?.map((tier, idx) => {
+                    {event.ticket_tiers?.map((tier, idx) => {
                       const soldOut = tier.max_quantity && (soldCounts[tier.name] || 0) >= tier.max_quantity;
                       const displayPrice = getDisplayPrice(tier.price);
                       return (
@@ -640,7 +643,7 @@ const styles = {
   ticketActions: { display: 'flex', gap: '15px' },
   btnPrimary: { flex: 1, background: '#000', color: '#fff', border: 'none', padding: '18px', borderRadius: '18px', fontWeight: 800, cursor: 'pointer' },
   btnSecondary: { flex: 1, background: '#f1f5f9', color: '#000', border: 'none', padding: '18px', borderRadius: '18px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' },
-  
+   
   mapContainer: { height: '350px', borderRadius: '30px', overflow: 'hidden', position: 'relative', border: '1px solid #f1f5f9' },
   mapOverlay: { position: 'absolute', bottom: '20px', left: '20px', right: '20px', background: '#fff', padding: '10px 15px', borderRadius: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.1)' },
   mapActionBtn: { background: '#000', color: '#fff', border: 'none', padding: '10px', borderRadius: '12px', fontSize: '11px', fontWeight: 900, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' },
