@@ -90,24 +90,22 @@ export async function POST(req) {
     else if (type === 'TICKET_PURCHASE') {
       const { tier_id } = body;
 
-      const { data: tier, error: tierError } = await supabase
-        .from('ticket_tiers')
-        .select(`
-          id, name, price, max_quantity, event_id, 
-          events (
-            id, 
-            title, 
-            organizer_id, 
-            allows_resellers,
-            organizer_subaccount,
-            organizers!events_organizer_profile_id_fkey ( 
-              business_name
-            )
-          )
-        `)
-        .eq('id', tier_id)
-        .single();
-
+     // Inside your Case B (Ticket Purchase)
+const paystackPayload = {
+  email: cleanEmail,
+  amount: Math.round(finalAmount * 100), // Ensure this is at least 100 for NGN or 50 for GHS
+  currency: "GHS", // FORCE the currency to match your dashboard (use "GHS" if in Ghana)
+  metadata: {
+    ...metadata,
+    custom_fields: [
+      {
+        display_name: "Guest Name",
+        variable_name: "guest_name",
+        value: guest_name
+      }
+    ]
+  }
+};
       if (tierError || !tier) throw new Error('Ticket tier not found.');
 
       // 1. FETCH DIRECTLY FROM EVENTS TABLE & ALIAS
