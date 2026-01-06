@@ -173,24 +173,24 @@ export async function POST(req) {
     //    ]
     //  };
 
-      if (resellerSubaccount) {
-        const resellerShare = totalInKobo - baseInKobo;
-        splitConfig.subaccounts.push({
-          subaccount: resellerSubaccount,
-          share: resellerShare
-        });
-      }
+   //   if (resellerSubaccount) {
+    //    const resellerShare = totalInKobo - baseInKobo;
+    //    splitConfig.subaccounts.push({
+    //      subaccount: resellerSubaccount,
+    //      share: resellerShare
+    //    });
+   //   }
 
-      metadata = {
-        ...metadata,
-        event_id: tier.event_id,
-        tier_id,
-        guest_name,
-        brand_name: businessName,
-        reseller_id: resellerId,
-        organizer_id: tier.events.organizer_id
-      };
-    }
+  //    metadata = {
+    //    ...metadata,
+    //    event_id: tier.event_id,
+    //    tier_id,
+    //    guest_name,
+    //    brand_name: businessName,
+    //    reseller_id: resellerId,
+    //    organizer_id: tier.events.organizer_id
+   //   };
+  //  }
 
     // --- 3. PAYSTACK INITIALIZATION ---
     if (finalAmount <= 0) throw new Error('Invalid transaction amount.');
