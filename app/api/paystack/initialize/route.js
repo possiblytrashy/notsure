@@ -106,8 +106,7 @@ const paystackPayload = {
     ]
   }
 };
-      if (tierError || !tier) throw new Error('Ticket tier not found.');
-
+     
       // 1. FETCH DIRECTLY FROM EVENTS TABLE & ALIAS
       const subaccountCode = tier.events?.organizer_subaccount;
       const businessName = tier.events?.organizers?.business_name || "Event Organizer";
