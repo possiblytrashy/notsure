@@ -152,10 +152,10 @@ if (eventData.ticket_tiers?.length > 0) {
         schema: 'public', 
         table: 'tickets',
         filter: `event_id=eq.${id}` 
-      }, (payload) => {
+}, (payload) => {
         setSoldCounts(prev => ({
           ...prev,
-          [payload.new.tier_name]: (prev[payload.new.tier_name] || 0) + 1
+          [payload.new.tier_id]: (prev[payload.new.tier_id] || 0) + 1
         }));
       })
       .subscribe();
@@ -273,8 +273,11 @@ if (eventData.ticket_tiers?.length > 0) {
 
     if (!selectedTier || !activeTier || isProcessing) return;
     
-    const tier = event.ticket_tiers[selectedTier];
    const currentlySold = soldCounts[selectedTier] || 0; // Use the UUID key
+    if (activeTier.max_quantity && currentlySold >= activeTier.max_quantity) {
+      alert("This ticket tier is sold out.");
+      return;
+    }
 
     // Check organizer payout
     const subaccount = event.organizer_subaccount || event.organizers?.paystack_subaccount_code;
