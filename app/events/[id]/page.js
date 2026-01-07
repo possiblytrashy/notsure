@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { supabase } from '../../../lib/supabase'; // Adjust path if needed
 import { 
@@ -62,12 +62,13 @@ export default function EventPage() {
 
   // --- 2. DATA INITIALIZATION ---
   const activeTier = useMemo(() => {
-  return event?.ticket_tiers?.find(t => t.id === selectedTier);
-}, [event, selectedTier]);
+    return event?.ticket_tiers?.find(t => t.id === selectedTier);
+  }, [event, selectedTier]);
   
   useEffect(() => {
     async function init() {
       try {
+        // 1. Fetch Event Data
         const { data: eventData, error } = await supabase
         .from('events')
         .select(`
@@ -91,20 +92,21 @@ export default function EventPage() {
         .eq('event_id', id)
         .eq('status', 'valid');
 
-      // Replace the logic inside your init() function:
-const counts = {};
-ticketData?.forEach(t => {
-  // Use tier_id (the UUID) as the key instead of the name
-  counts[t.tier_id] = (counts[t.tier_id] || 0) + 1;
-});
+      // Logic to calculate counts
+      const counts = {};
+      ticketData?.forEach(t => {
+        // Use tier_id (the UUID) as the key
+        counts[t.tier_id] = (counts[t.tier_id] || 0) + 1;
+      });
 
-setSoldCounts(counts);
-setEvent(eventData);
+      setSoldCounts(counts);
+      setEvent(eventData);
 
-if (eventData.ticket_tiers?.length > 0) {
-  // Set the UUID as the selected tier, not the index 0
-  setSelectedTier(eventData.ticket_tiers[0].id);
-}
+      if (eventData.ticket_tiers?.length > 0) {
+        // Set the UUID as the selected tier
+        setSelectedTier(eventData.ticket_tiers[0].id);
+      }
+        
         // Pre-fill user data if logged in
         const { data: { user: currentUser } } = await supabase.auth.getUser();
         if (currentUser) {
@@ -152,7 +154,7 @@ if (eventData.ticket_tiers?.length > 0) {
         schema: 'public', 
         table: 'tickets',
         filter: `event_id=eq.${id}` 
-}, (payload) => {
+    }, (payload) => {
         setSoldCounts(prev => ({
           ...prev,
           [payload.new.tier_id]: (prev[payload.new.tier_id] || 0) + 1
@@ -170,7 +172,7 @@ if (eventData.ticket_tiers?.length > 0) {
     }
     return originalPrice;
   };
-   
+    
   // --- 3. RIDESHARING & MAP LOGIC ---
   const handleRide = (type) => {
     if (!event.lat || !event.lng) return;
@@ -234,11 +236,11 @@ if (eventData.ticket_tiers?.length > 0) {
       user_id: user ? user.id : null,
       guest_email: guestEmail.trim(), 
       guest_name: guestName.trim(),   
-      tier_name: tier.name,            
+      tier_name: tier.name,           
       amount: finalAmountPaid, 
       reference: response.reference,  
       status: 'valid',                
-      is_scanned: false,               
+      is_scanned: false,                
       updated_at: new Date().toISOString()
     };
 
@@ -273,7 +275,8 @@ if (eventData.ticket_tiers?.length > 0) {
 
     if (!selectedTier || !activeTier || isProcessing) return;
     
-   const currentlySold = soldCounts[selectedTier] || 0; // Use the UUID key
+    const currentlySold = soldCounts[selectedTier] || 0; // Use the UUID key
+    
     if (activeTier.max_quantity && currentlySold >= activeTier.max_quantity) {
       alert("This ticket tier is sold out.");
       return;
@@ -288,11 +291,6 @@ if (eventData.ticket_tiers?.length > 0) {
       return;
     }
 
-    if (tier.max_quantity && currentlySold >= tier.max_quantity) {
-      alert("This ticket tier is sold out.");
-      return;
-    }
-
     setIsProcessing(true);
 
     try {
@@ -300,13 +298,13 @@ if (eventData.ticket_tiers?.length > 0) {
       const response = await fetch('/api/paystack/initialize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-       body: JSON.stringify({
-  event_id: id,
-  tier_id: selectedTier, // This is already the UUID
-  email: guestEmail.trim(),
-  guest_name: guestName.trim(),
-  reseller_code: refCode || null
-}),
+        body: JSON.stringify({
+          event_id: id,
+          tier_id: selectedTier, // This is already the UUID
+          email: guestEmail.trim(),
+          guest_name: guestName.trim(),
+          reseller_code: refCode || null
+        }),
       });
 
       const initData = await response.json();
@@ -335,6 +333,8 @@ if (eventData.ticket_tiers?.length > 0) {
       console.error("Payment initiation failed:", err);
       alert(err.message || "Could not start payment.");
       setIsProcessing(false);
+    }
+  };
 
   const handleShare = async () => {
     const shareUrl = window.location.href;
@@ -536,24 +536,24 @@ if (eventData.ticket_tiers?.length > 0) {
                   <h3 style={styles.formHeading}>2. SELECT TIER</h3>
                   <div style={styles.tiersWrapper}>
                   {event.ticket_tiers?.map((tier) => {
-  // Match soldCounts by tier.id (UUID)
-  const soldOut = tier.max_quantity > 0 && (soldCounts[tier.id] || 0) >= tier.max_quantity;
-  const displayPrice = getDisplayPrice(tier.price);
-  
-  return (
-    <div 
-      key={tier.id} 
-      onClick={() => !soldOut && setSelectedTier(tier.id)} 
-      style={styles.tierSelectionCard(selectedTier === tier.id, soldOut)}
-    >
-      <div style={styles.tierInfo}>
-        <p style={styles.tierName}>{tier.name} {soldOut && <span style={{color: '#ef4444'}}>(SOLD OUT)</span>}</p>
-        <p style={styles.tierDesc}>{tier.description}</p>
-      </div>
-      <div style={styles.tierPrice}>GHS {displayPrice}</div>
-    </div>
-  );
-})}
+                    // Match soldCounts by tier.id (UUID)
+                    const soldOut = tier.max_quantity > 0 && (soldCounts[tier.id] || 0) >= tier.max_quantity;
+                    const displayPrice = getDisplayPrice(tier.price);
+                    
+                    return (
+                        <div 
+                        key={tier.id} 
+                        onClick={() => !soldOut && setSelectedTier(tier.id)} 
+                        style={styles.tierSelectionCard(selectedTier === tier.id, soldOut)}
+                        >
+                        <div style={styles.tierInfo}>
+                            <p style={styles.tierName}>{tier.name} {soldOut && <span style={{color: '#ef4444'}}>(SOLD OUT)</span>}</p>
+                            <p style={styles.tierDesc}>{tier.description}</p>
+                        </div>
+                        <div style={styles.tierPrice}>GHS {displayPrice}</div>
+                        </div>
+                    );
+                    })}
                   </div>
                 </div>
 
@@ -636,7 +636,7 @@ const styles = {
   ticketActions: { display: 'flex', gap: '15px' },
   btnPrimary: { flex: 1, background: '#000', color: '#fff', border: 'none', padding: '18px', borderRadius: '18px', fontWeight: 800, cursor: 'pointer' },
   btnSecondary: { flex: 1, background: '#f1f5f9', color: '#000', border: 'none', padding: '18px', borderRadius: '18px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' },
-   
+    
   mapContainer: { height: '350px', borderRadius: '30px', overflow: 'hidden', position: 'relative', border: '1px solid #f1f5f9' },
   mapOverlay: { position: 'absolute', bottom: '20px', left: '20px', right: '20px', background: '#fff', padding: '10px 15px', borderRadius: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.1)' },
   mapActionBtn: { background: '#000', color: '#fff', border: 'none', padding: '10px', borderRadius: '12px', fontSize: '11px', fontWeight: 900, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' },
