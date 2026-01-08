@@ -140,7 +140,7 @@ const handleVerifyAndJoin = async (e) => {
         user_id: user.id,
         bank_name: payoutForm.bank_name,
         account_number: payoutForm.account_number,
-        paystack_recipient_code: data.recipient_code,
+        paystack_subaccount_code: data.recipient_code,
         is_active: true
       }]);
 
