@@ -15,12 +15,10 @@ const corsHeaders = {
 };
 
 serve(async (req) => {
-  // 1. MUST HANDLE OPTIONS FOR CORS (Fixes your preflight error)
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
   }
 
-  // 2. SECURE SIGNATURE VERIFICATION (Refined for Deno Crypto)
   const signature = req.headers.get("x-paystack-signature");
   if (!signature) {
     return new Response("Missing Signature", { status: 401, headers: corsHeaders });
@@ -35,10 +33,9 @@ serve(async (req) => {
     keyData,
     { name: "HMAC", hash: "SHA-512" },
     false,
-    ["verify"] // Correct usage for checking Paystack's signature
+    ["verify"]
   );
 
-  // Convert Paystack's Hex signature to a Uint8Array for verification
   const hexToUint8Array = (hex: string) => 
     new Uint8Array(hex.match(/.{1,2}/g)!.map((byte) => parseInt(byte, 16)));
   
@@ -50,7 +47,6 @@ serve(async (req) => {
   );
 
   if (!isValid) {
-    console.error("Signature mismatch");
     return new Response("Unauthorized", { status: 401, headers: corsHeaders });
   }
 
@@ -58,12 +54,11 @@ serve(async (req) => {
   const { event, data } = body;
 
   try {
-    // --- SCENARIO A: PAYMENT SUCCESS ---
     if (event === "charge.success") {
-      const { reference, metadata, amount, customer, subaccount } = data;
+      const { reference, metadata, amount, customer } = data;
       const { event_id, tier_id, guest_name, vote_candidate_id, reseller_code } = metadata;
 
-      // 1. TICKET UPSERT (Multi-tier support)
+      // 1. TICKET UPSERT
       const { data: ticket, error: ticketErr } = await supabase
         .from("tickets")
         .upsert({
@@ -72,7 +67,7 @@ serve(async (req) => {
           guest_name: guest_name || "Valued Guest",
           guest_email: customer.email,
           tier_id,
-          amount: amount / 100, // Paystack is in kobo
+          amount: amount / 100,
           status: "valid",
           reseller_code: reseller_code || null,
         }, { onConflict: 'reference' })
@@ -81,7 +76,7 @@ serve(async (req) => {
 
       if (ticketErr) throw ticketErr;
 
-      // 2. RESELLER COMMISSION LOGIC (10%)
+      // 2. RESELLER COMMISSION (10%)
       if (reseller_code) {
         const commissionAmount = (amount / 100) * 0.10;
         await supabase.rpc('process_reseller_commission', { 
@@ -100,18 +95,18 @@ serve(async (req) => {
         await supabase.rpc('increment_vote_count', { candidate_row_id: vote_candidate_id });
       }
 
-      // 4. LUXURY EMAIL (RESEND)
+      // 4. EMAIL LOGIC
       const qrPayload = encodeURIComponent(`REF:${reference}|EVT:${event_id}`);
       const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${qrPayload}`;
 
-      const emailResponse = await fetch("https://api.resend.com/emails", {
+      await fetch("https://api.resend.com/emails", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${RESEND_API_KEY}`,
         },
         body: JSON.stringify({
-          from: "The Concierge <access@ousted.app>", // Update to your verified domain
+          from: "The Concierge <access@ousted.app>",
           to: [customer.email],
           subject: `Access Confirmed: ${ticket.events.title}`,
           html: `
@@ -130,24 +125,12 @@ serve(async (req) => {
           `,
         }),
       });
-
-      if (!emailResponse.ok) {
-        console.error("Resend Error:", await emailResponse.text());
-      }
     }
 
-    // --- SCENARIO B: PAYOUT STATUS ---
-    const payoutStatuses = {
-      'transfer.success': 'completed',
-      'transfer.failed': 'failed',
-      'transfer.reversed': 'reversed'
-    };
-
+    // Payout logic
+    const payoutStatuses = { 'transfer.success': 'completed', 'transfer.failed': 'failed', 'transfer.reversed': 'reversed' };
     if (payoutStatuses[event]) {
-      await supabase
-        .from("payouts")
-        .update({ status: payoutStatuses[event] })
-        .eq("paystack_transfer_code", data.transfer_code);
+      await supabase.from("payouts").update({ status: payoutStatuses[event] }).eq("paystack_transfer_code", data.transfer_code);
     }
 
     return new Response(JSON.stringify({ received: true }), { 
@@ -156,7 +139,6 @@ serve(async (req) => {
     });
 
   } catch (err) {
-    console.error("Critical Error:", err.message);
     return new Response(JSON.stringify({ error: err.message }), { 
       status: 500, 
       headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
