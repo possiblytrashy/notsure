@@ -325,7 +325,9 @@ export default function EventPage() {
       const handler = PaystackPop.setup({
         key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
         access_code: initData.access_code,
-        email: guestEmail.trim(), // <--- ADD THIS LINE HERE
+        email: guestEmail.trim(), // <--- ADD THIS LINE
+        amount: Math.ceil(activeTier.price * 100), // <--- ADD THIS (Price in Kobo)
+        currency: 'GHS', // Optional but good for clarity
         callback: (res) => recordPayment(res, activeTier), // Pass the full activeTier object
         onClose: () => setIsProcessing(false)
       });
