@@ -114,30 +114,26 @@ export default function UserDashboard() {
   /**
    * PAYSTACK OPTIMIZED: Verify Account & Create Transfer Recipient
    */
-  const handleVerifyAndJoin = async (e) => {
-    e.preventDefault();
-    if (!payoutForm.bank_code || !payoutForm.account_number) {
-        alert("Please select a bank and enter your account number.");
-        return;
-    }
+const handleVerifyAndJoin = async (e) => {
+  e.preventDefault();
+  // ... validation ...
 
-    setIsVerifying(true);
-    try {
-      // Technical Fix: Explicit headers for Edge Function invocation
-      const { data, error } = await supabase.functions.invoke('paystack-payout-setup', {
-        body: { 
-          account_number: payoutForm.account_number, 
-          bank_code: payoutForm.bank_code,
-          type: "ghipss",
-          currency: "GHS"
-        },
-        headers: {
-            "Content-Type": "application/json"
-        }
-      });
+  setIsVerifying(true);
+  try {
+    // Determine type: Mobile money codes are usually strings, Bank codes are digits
+    const isMobileMoney = ['MTN', 'VOD', 'ATL'].includes(payoutForm.bank_code);
+    
+    const { data, error } = await supabase.functions.invoke('paystack-payout-setup', {
+      body: { 
+        account_number: payoutForm.account_number, 
+        bank_code: payoutForm.bank_code,
+        type: isMobileMoney ? "mobile_money" : "ghipss", // Dynamic type
+        currency: "GHS"
+      }
+    });
 
-      if (error) throw error;
-
+    if (error) throw error;
+    // ... rest of your insert logic ...
       // 2. Insert into Resellers table
       const { error: dbError } = await supabase
         .from('resellers')
