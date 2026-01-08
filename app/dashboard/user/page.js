@@ -47,24 +47,31 @@ export default function UserDashboard() {
     { name: "Absa Bank Ghana", code: "020100" }
   ];
 
+  // --- INITIALIZATION ---
   useEffect(() => {
-    fetchVaultData();
-  }, []);
-
-  const fetchVaultData = async () => {
-    try {
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
-      if (authError || !user) { 
-        router.push('/login'); 
-        return; 
+    const checkUser = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        router.push('/login');
+      } else {
+        setUser(user);
+        await fetchVaultData(user);
       }
-      setUser(user);
+    };
+    checkUser();
+  }, [router]);
 
-      // 1. Fetch Tickets with Event Details
+  const fetchVaultData = async (currentUser) => {
+    try {
+      // 1. Fetch Tickets with Event Details AND Tier Names
       const { data: ticketData, error: ticketError } = await supabase
         .from('tickets')
-        .select(`*, events!event_id (id, title, date, time, location, lat, lng, image_url)`)
-        .eq('guest_email', user.email)
+        .select(`
+          *, 
+          events!event_id (id, title, date, time, location, lat, lng, image_url),
+          ticket_tiers:tier_id (name)
+        `)
+        .eq('guest_email', currentUser.email)
         .order('created_at', { ascending: false });
       
       if (ticketError) throw ticketError;
@@ -74,16 +81,20 @@ export default function UserDashboard() {
       const { data: resellerData } = await supabase
         .from('resellers')
         .select('*')
-        .eq('user_id', user.id)
+        .eq('user_id', currentUser.id)
         .maybeSingle(); 
       
       setResellerProfile(resellerData);
 
       if (resellerData) {
-        // 3. If Reseller, fetch their active links
+        // 3. Fetch active links with sale counts from your reseller_sales table
         const { data: links } = await supabase
           .from('event_resellers')
-          .select(`*, events:event_id (id, title, image_url, price)`)
+          .select(`
+            *, 
+            events:event_id (id, title, image_url, price),
+            reseller_sales(count)
+          `)
           .eq('reseller_id', resellerData.id);
         setMyResellerLinks(links || []);
       }
@@ -112,35 +123,38 @@ export default function UserDashboard() {
 
     setIsVerifying(true);
     try {
-      // 1. Call your Edge Function to verify with Paystack
-      // This ensures your Secret Key is never exposed on the client
+      // Technical Fix: Explicit headers for Edge Function invocation
       const { data, error } = await supabase.functions.invoke('paystack-payout-setup', {
         body: { 
           account_number: payoutForm.account_number, 
           bank_code: payoutForm.bank_code,
-          type: "ghipss", // Standard for Ghana
+          type: "ghipss",
           currency: "GHS"
+        },
+        headers: {
+            "Content-Type": "application/json"
         }
       });
 
       if (error) throw error;
 
-      // 2. Insert into Resellers table with the Paystack Recipient Code
+      // 2. Insert into Resellers table
       const { error: dbError } = await supabase
         .from('resellers')
         .insert([{ 
             user_id: user.id,
             bank_name: payoutForm.bank_name,
             account_number: payoutForm.account_number,
-            paystack_recipient_code: data.recipient_code, // Crucial for automated split payouts
-            account_name: data.account_name, // Name returned by Paystack verification
-            is_active: true
+            paystack_recipient_code: data.recipient_code,
+            account_name: data.account_name,
+            is_active: true,
+            total_earned: 0
         }]);
 
       if (dbError) throw dbError;
 
       setShowJoinForm(false);
-      fetchVaultData();
+      fetchVaultData(user);
     } catch (err) {
       alert("Verification Failed: " + (err.message || "Invalid account details"));
     } finally {
@@ -153,36 +167,25 @@ export default function UserDashboard() {
     
     const userSlug = user.email.split('@')[0].replace(/[^a-zA-Z0-9]/g, '');
     const eventSlug = event.title.toLowerCase().replace(/\s+/g, '-').slice(0, 10);
-    const uniqueCode = `${userSlug}-${eventSlug}`;
+    const uniqueCode = `${userSlug}-${eventSlug}-${Math.random().toString(36).substring(2, 5)}`;
 
     const { error } = await supabase.from('event_resellers').insert([{
         reseller_id: resellerProfile.id,
         event_id: event.id,
         unique_code: uniqueCode,
-        commission_rate: 0.10 // Explicitly set 10%
+        commission_rate: 0.10 
     }]);
 
     if (!error) {
-        alert("Link Generated!");
+        alert("Luxury Link Generated!");
         setShowMarketplace(false);
-        fetchVaultData();
+        fetchVaultData(user);
     } else {
         if (error.code === '23505') alert("You already have a link for this event.");
         else alert(error.message);
     }
   };
-// Add a check to prevent pushing to a null route
-useEffect(() => {
-  const checkUser = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      router.push('/login');
-    } else {
-      fetchVaultData();
-    }
-  };
-  checkUser();
-}, [router]);
+
   const openMarketplace = async () => {
     const { data } = await supabase
       .from('events')
@@ -218,11 +221,10 @@ useEffect(() => {
     window.location.href = url;
     setTimeout(() => {
         if (type === 'uber') window.open(`https://m.uber.com/ul/?action=setPickup&dropoff[latitude]=${lat}&dropoff[longitude]=${lng}`);
-        if (type === 'google') window.open(url);
     }, 500);
   };
 
-  // --- SUB-COMPONENTS ---
+  // --- SUB-COMPONENTS (RESTORED) ---
 
   const RideButton = ({ label, onClick, isSecondary }) => (
     <button 
@@ -245,7 +247,7 @@ useEffect(() => {
         <div style={{ position: 'relative', zIndex: 2 }}>
             <h3 style={{ fontSize: '22px', fontWeight: '900', margin: '0 0 10px' }}>THE INNER CIRCLE</h3>
             <p style={{ fontSize: '14px', fontWeight: '600', marginBottom: '20px', maxWidth: '80%' }}>
-                Become an authorized partner. Sell tickets and earn <span style={{fontSize: '16px', fontWeight: '900'}}>10% commission</span> paid directly to your bank via Paystack.
+                Become an authorized partner. Sell tickets and earn <span style={{fontSize: '16px', fontWeight: '900'}}>10% commission</span> paid directly to your bank.
             </p>
             <button onClick={() => setShowJoinForm(true)} style={{ background: '#000', color: '#fff', border: 'none', padding: '12px 24px', borderRadius: '14px', fontWeight: '800', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 Start Earning <ChevronRight size={16} />
@@ -279,7 +281,7 @@ useEffect(() => {
                     <div style={{ width: '50px', height: '50px', borderRadius: '12px', background: `url(${link.events?.image_url}) center/cover`, marginRight: '15px' }} />
                     <div style={{ flex: 1 }}>
                         <div style={{ fontWeight: 'bold', fontSize: '14px' }}>{link.events?.title}</div>
-                        <div style={{ fontSize: '11px', color: '#666', marginTop: '4px' }}>{link.sales_count || 0} Sales • 10% Comm.</div>
+                        <div style={{ fontSize: '11px', color: '#666', marginTop: '4px' }}>{link.reseller_sales?.[0]?.count || 0} Sales • 10% Comm.</div>
                     </div>
                     <button onClick={() => copyLink(link.unique_code)} style={{ background: '#222', border: 'none', color: '#fff', width: '40px', height: '40px', borderRadius: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <Copy size={16} />
@@ -326,7 +328,7 @@ useEffect(() => {
              <div key={ticket.id} style={{ background: '#111', borderRadius: '24px', overflow: 'hidden', marginBottom: '20px', border: '1px solid #222', position: 'relative' }}>
                 <div style={{ height: '160px', background: `linear-gradient(to bottom, transparent, #111), url(${ticket.events?.image_url}) center/cover`, position: 'relative' }}>
                     <div style={{ position: 'absolute', top: 15, left: 15, background: '#CDa434', color: '#000', fontSize: '10px', fontWeight: '900', padding: '4px 8px', borderRadius: '6px' }}>
-                      {ticket.tier_name || 'VIP'}
+                      {ticket.ticket_tiers?.name || 'VIP'}
                     </div>
                 </div>
                 <div style={{ padding: '24px' }}>
@@ -345,7 +347,7 @@ useEffect(() => {
         )}
       </div>
 
-      {/* TRANSPORT MODAL */}
+      {/* TRANSPORT MODAL (RESTORED) */}
       {showLocationModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', zIndex: 1000, display: 'flex', alignItems: 'flex-end' }} onClick={() => setShowLocationModal(null)}>
           <div style={{ background: '#0a0a0a', width: '100%', borderTopLeftRadius: '30px', borderTopRightRadius: '30px', padding: '30px', border: '1px solid rgba(255,255,255,0.1)' }} onClick={e => e.stopPropagation()}>
@@ -398,7 +400,7 @@ useEffect(() => {
         </div>
       )}
 
-      {/* PAYSTACK OPTIMIZED JOIN FORM */}
+      {/* PAYOUT SETUP MODAL */}
       {showJoinForm && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.9)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
             <div style={{ background: '#161616', padding: '30px', borderRadius: '30px', maxWidth: '400px', width: '100%', border: '1px solid #333' }}>
