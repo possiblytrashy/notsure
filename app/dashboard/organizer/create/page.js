@@ -438,7 +438,41 @@ export default function CreateEvent() {
       marginBottom: '20px',
       border: '1px solid #f1f5f9',
       transition: 'all 0.3s ease'
-    }
+    },
+    // Add these inside your const styles = { ... } object
+  leafletSearch: {
+    position: 'absolute',
+    top: '20px',
+    left: '20px',
+    zIndex: 1000,
+    width: '350px',
+    background: '#fff',
+    border: '2px solid #000',
+    borderRadius: '18px',
+    boxShadow: '0 10px 30px rgba(0,0,0,0.1)',
+    overflow: 'hidden'
+  },
+  luxuryPin: {
+    width: '16px', 
+    height: '16px',
+    background: '#000', 
+    border: '3px solid #fff',
+    borderRadius: '50%',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+    position: 'relative'
+  },
+  pulseAnimation: {
+    position: 'absolute',
+    top: '50%',
+    left: '50%',
+    transform: 'translate(-50%, -50%)',
+    width: '40px',
+    height: '40px',
+    background: 'rgba(0,0,0,0.1)',
+    borderRadius: '50%',
+    // Note: CSS animations must still be defined in a style tag or global CSS
+    animation: 'pinPulse 2s infinite' 
+  }
   };
 
   return (
