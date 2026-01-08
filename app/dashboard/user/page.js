@@ -7,7 +7,8 @@ import {
   Ticket, Calendar, MapPin, QrCode, LogOut, 
   Loader2, CheckCircle2, Navigation, 
   Car, Map as MapIcon, ChevronRight, ExternalLink,
-  Clock, ShieldCheck, TrendingUp, DollarSign, Copy, Users, X
+  Clock, ShieldCheck, TrendingUp, DollarSign, Copy, Users, X,
+  Building2, CreditCard, AlertCircle
 } from 'lucide-react';
 
 export default function UserDashboard() {
@@ -18,17 +19,33 @@ export default function UserDashboard() {
   // Data States
   const [tickets, setTickets] = useState([]);
   const [resellerProfile, setResellerProfile] = useState(null);
-  const [availableEvents, setAvailableEvents] = useState([]); // For the marketplace
-  const [myResellerLinks, setMyResellerLinks] = useState([]); // Links they already own
+  const [availableEvents, setAvailableEvents] = useState([]); 
+  const [myResellerLinks, setMyResellerLinks] = useState([]); 
   
   // UI States
   const [selectedTicket, setSelectedTicket] = useState(null);
   const [showLocationModal, setShowLocationModal] = useState(null);
   const [showMarketplace, setShowMarketplace] = useState(false);
   const [showJoinForm, setShowJoinForm] = useState(false);
+  const [isVerifying, setIsVerifying] = useState(false);
 
-  // Form States
-  const [payoutForm, setPayoutForm] = useState({ bank_name: '', account_number: '' });
+  // Paystack Optimized Form States
+  const [payoutForm, setPayoutForm] = useState({ 
+    bank_code: '', 
+    account_number: '',
+    bank_name: '' 
+  });
+
+  // Ghana Bank Codes for Paystack
+  const GH_BANKS = [
+    { name: "MTN Mobile Money", code: "MTN" },
+    { name: "Vodafone Cash", code: "VOD" },
+    { name: "AirtelTigo Money", code: "ATL" },
+    { name: "GCB Bank", code: "040100" },
+    { name: "Ecobank Ghana", code: "130100" },
+    { name: "Zenith Bank", code: "210100" },
+    { name: "Absa Bank Ghana", code: "020100" }
+  ];
 
   useEffect(() => {
     fetchVaultData();
@@ -37,7 +54,6 @@ export default function UserDashboard() {
   const fetchVaultData = async () => {
     try {
       const { data: { user }, error: authError } = await supabase.auth.getUser();
-      
       if (authError || !user) { 
         router.push('/login'); 
         return; 
@@ -85,67 +101,56 @@ export default function UserDashboard() {
   };
 
   /**
-   * RIDE HAILING DEEP LINKS
+   * PAYSTACK OPTIMIZED: Verify Account & Create Transfer Recipient
    */
-  const openRideApp = (type, lat, lng) => {
-    if (!lat || !lng) {
-      alert("Venue coordinates not set for this event.");
-      return;
-    }
-
-    let url = "";
-    switch (type) {
-      case 'uber':
-        url = `uber://?action=setPickup&dropoff[latitude]=${lat}&dropoff[longitude]=${lng}`;
-        break;
-      case 'bolt':
-        url = `bolt://explore?dropoff_lat=${lat}&dropoff_lng=${lng}`;
-        break;
-      case 'yango':
-        url = `yango://?finish_lat=${lat}&finish_lng=${lng}`;
-        break;
-      case 'google':
-        url = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
-        break;
-    }
-
-    window.location.href = url;
-    
-    // Fallback for desktop/missing app
-    setTimeout(() => {
-        if (type === 'uber') window.open(`https://m.uber.com/ul/?action=setPickup&dropoff[latitude]=${lat}&dropoff[longitude]=${lng}`);
-        if (type === 'google') window.open(url);
-    }, 500);
-  };
-
-  const handleJoinProgram = async (e) => {
+  const handleVerifyAndJoin = async (e) => {
     e.preventDefault();
-    if (!payoutForm.bank_name || !payoutForm.account_number) {
-        alert("Please fill in your payout details.");
+    if (!payoutForm.bank_code || !payoutForm.account_number) {
+        alert("Please select a bank and enter your account number.");
         return;
     }
 
-    const { error } = await supabase
+    setIsVerifying(true);
+    try {
+      // 1. Call your Edge Function to verify with Paystack
+      // This ensures your Secret Key is never exposed on the client
+      const { data, error } = await supabase.functions.invoke('paystack-payout-setup', {
+        body: { 
+          account_number: payoutForm.account_number, 
+          bank_code: payoutForm.bank_code,
+          type: "ghipss", // Standard for Ghana
+          currency: "GHS"
+        }
+      });
+
+      if (error) throw error;
+
+      // 2. Insert into Resellers table with the Paystack Recipient Code
+      const { error: dbError } = await supabase
         .from('resellers')
         .insert([{ 
             user_id: user.id,
             bank_name: payoutForm.bank_name,
             account_number: payoutForm.account_number,
+            paystack_recipient_code: data.recipient_code, // Crucial for automated split payouts
+            account_name: data.account_name, // Name returned by Paystack verification
             is_active: true
         }]);
 
-    if (!error) {
-        setShowJoinForm(false);
-        fetchVaultData(); 
-    } else {
-        alert(error.message);
+      if (dbError) throw dbError;
+
+      setShowJoinForm(false);
+      fetchVaultData();
+    } catch (err) {
+      alert("Verification Failed: " + (err.message || "Invalid account details"));
+    } finally {
+      setIsVerifying(false);
     }
   };
 
   const handleGenerateLink = async (event) => {
     if (!resellerProfile) return;
     
-    // Clean unique code generation
     const userSlug = user.email.split('@')[0].replace(/[^a-zA-Z0-9]/g, '');
     const eventSlug = event.title.toLowerCase().replace(/\s+/g, '-').slice(0, 10);
     const uniqueCode = `${userSlug}-${eventSlug}`;
@@ -153,7 +158,8 @@ export default function UserDashboard() {
     const { error } = await supabase.from('event_resellers').insert([{
         reseller_id: resellerProfile.id,
         event_id: event.id,
-        unique_code: uniqueCode
+        unique_code: uniqueCode,
+        commission_rate: 0.10 // Explicitly set 10%
     }]);
 
     if (!error) {
@@ -186,25 +192,37 @@ export default function UserDashboard() {
     alert("Reseller Link Copied!");
   };
 
+  const openRideApp = (type, lat, lng) => {
+    if (!lat || !lng) {
+      alert("Venue coordinates not set for this event.");
+      return;
+    }
+    let url = "";
+    switch (type) {
+      case 'uber': url = `uber://?action=setPickup&dropoff[latitude]=${lat}&dropoff[longitude]=${lng}`; break;
+      case 'bolt': url = `bolt://explore?dropoff_lat=${lat}&dropoff_lng=${lng}`; break;
+      case 'yango': url = `yango://?finish_lat=${lat}&finish_lng=${lng}`; break;
+      case 'google': url = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`; break;
+    }
+    window.location.href = url;
+    setTimeout(() => {
+        if (type === 'uber') window.open(`https://m.uber.com/ul/?action=setPickup&dropoff[latitude]=${lat}&dropoff[longitude]=${lng}`);
+        if (type === 'google') window.open(url);
+    }, 500);
+  };
+
   // --- SUB-COMPONENTS ---
 
   const RideButton = ({ label, onClick, isSecondary }) => (
     <button 
         onClick={onClick}
         style={{ 
-            width: '100%', 
-            padding: '18px', 
-            borderRadius: '15px', 
+            width: '100%', padding: '18px', borderRadius: '15px', 
             border: isSecondary ? '1px solid rgba(255,255,255,0.1)' : 'none', 
             background: isSecondary ? 'transparent' : '#fff', 
             color: isSecondary ? '#fff' : '#000', 
-            fontWeight: '900', 
-            fontSize: '14px',
-            cursor: 'pointer',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: '10px'
+            fontWeight: '900', fontSize: '14px', cursor: 'pointer',
+            display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px'
         }}
     >
         {label} <ChevronRight size={16} />
@@ -216,12 +234,9 @@ export default function UserDashboard() {
         <div style={{ position: 'relative', zIndex: 2 }}>
             <h3 style={{ fontSize: '22px', fontWeight: '900', margin: '0 0 10px' }}>THE INNER CIRCLE</h3>
             <p style={{ fontSize: '14px', fontWeight: '600', marginBottom: '20px', maxWidth: '80%' }}>
-                Become an authorized partner. Sell tickets to exclusive events and earn <span style={{fontSize: '16px', fontWeight: '900'}}>10% commission</span> on every sale instantly.
+                Become an authorized partner. Sell tickets and earn <span style={{fontSize: '16px', fontWeight: '900'}}>10% commission</span> paid directly to your bank via Paystack.
             </p>
-            <button 
-                onClick={() => setShowJoinForm(true)}
-                style={{ background: '#000', color: '#fff', border: 'none', padding: '12px 24px', borderRadius: '14px', fontWeight: '800', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}
-            >
+            <button onClick={() => setShowJoinForm(true)} style={{ background: '#000', color: '#fff', border: 'none', padding: '12px 24px', borderRadius: '14px', fontWeight: '800', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 Start Earning <ChevronRight size={16} />
             </button>
         </div>
@@ -239,11 +254,11 @@ export default function UserDashboard() {
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '20px' }}>
             <div style={{ background: '#111', padding: '20px', borderRadius: '24px', border: '1px solid #222' }}>
                 <div style={{ color: '#666', fontSize: '12px', fontWeight: '700', marginBottom: '5px' }}>TOTAL EARNED</div>
-                <div style={{ fontSize: '24px', fontWeight: '900', color: '#fff' }}>GH₵ {resellerProfile?.total_earned || 0}</div>
+                <div style={{ fontSize: '24px', fontWeight: '900', color: '#fff' }}>GH₵ {resellerProfile?.total_earned?.toFixed(2) || "0.00"}</div>
             </div>
             <div style={{ background: '#111', padding: '20px', borderRadius: '24px', border: '1px solid #222' }}>
-                <div style={{ color: '#666', fontSize: '12px', fontWeight: '700', marginBottom: '5px' }}>ACTIVE LINKS</div>
-                <div style={{ fontSize: '24px', fontWeight: '900', color: '#fff' }}>{myResellerLinks.length}</div>
+                <div style={{ color: '#666', fontSize: '12px', fontWeight: '700', marginBottom: '5px' }}>PAYOUT STATUS</div>
+                <div style={{ fontSize: '14px', fontWeight: '900', color: '#4ade80', marginTop: '5px' }}>VERIFIED <CheckCircle2 size={14} style={{display:'inline'}}/></div>
             </div>
         </div>
 
@@ -253,16 +268,13 @@ export default function UserDashboard() {
                     <div style={{ width: '50px', height: '50px', borderRadius: '12px', background: `url(${link.events?.image_url}) center/cover`, marginRight: '15px' }} />
                     <div style={{ flex: 1 }}>
                         <div style={{ fontWeight: 'bold', fontSize: '14px' }}>{link.events?.title}</div>
-                        <div style={{ fontSize: '11px', color: '#666', marginTop: '4px' }}>{link.sales_count || 0} Sales • {link.clicks || 0} Clicks</div>
+                        <div style={{ fontSize: '11px', color: '#666', marginTop: '4px' }}>{link.sales_count || 0} Sales • 10% Comm.</div>
                     </div>
                     <button onClick={() => copyLink(link.unique_code)} style={{ background: '#222', border: 'none', color: '#fff', width: '40px', height: '40px', borderRadius: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <Copy size={16} />
                     </button>
                 </div>
             ))}
-            {myResellerLinks.length === 0 && (
-                <p style={{textAlign: 'center', color: '#444', fontSize: '13px', padding: '20px'}}>No links yet. Click "+ Find Events" to start.</p>
-            )}
         </div>
     </div>
   );
@@ -292,11 +304,8 @@ export default function UserDashboard() {
       </div>
 
       <div style={{ maxWidth: '500px', margin: '0 auto' }}>
-        
-        {/* RESELLER SECTION - Dynamic Transition */}
         {resellerProfile ? <ResellerStats /> : <JoinResellerCard />}
         
-        {/* TICKET WALLET SECTION */}
         <h2 style={{ fontSize: '14px', fontWeight: '700', color: '#666', letterSpacing: '1px', marginBottom: '15px' }}>MY TICKETS</h2>
         
         {tickets.length === 0 ? (
@@ -315,20 +324,9 @@ export default function UserDashboard() {
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Calendar size={14}/> {ticket.events?.date}</div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><MapPin size={14}/> {ticket.events?.location}</div>
                     </div>
-
                     <div style={{ display: 'flex', gap: '10px' }}>
-                      <button 
-                        onClick={() => setSelectedTicket(ticket)}
-                        style={{ flex: 2, background: '#fff', color: '#000', border: 'none', padding: '16px', borderRadius: '16px', fontWeight: '800', cursor: 'pointer' }}
-                      >
-                        VIEW TICKET
-                      </button>
-                      <button 
-                        onClick={() => setShowLocationModal(ticket)}
-                        style={{ flex: 1, background: 'rgba(255,255,255,0.05)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '16px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-                      >
-                        <Navigation size={18} />
-                      </button>
+                      <button onClick={() => setSelectedTicket(ticket)} style={{ flex: 2, background: '#fff', color: '#000', border: 'none', padding: '16px', borderRadius: '16px', fontWeight: '800', cursor: 'pointer' }}>VIEW TICKET</button>
+                      <button onClick={() => setShowLocationModal(ticket)} style={{ flex: 1, background: 'rgba(255,255,255,0.05)', color: '#fff', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '16px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Navigation size={18} /></button>
                     </div>
                 </div>
              </div>
@@ -382,44 +380,41 @@ export default function UserDashboard() {
                             <span style={{ color: '#CDa434', fontSize: '12px', fontWeight: '800' }}>EARN 10% (GH₵ {(event.price * 0.1).toFixed(2)})</span>
                           </div>
                         </div>
-                        <button 
-                            onClick={() => handleGenerateLink(event)}
-                            style={{ width: '100%', padding: '12px', background: '#fff', color: '#000', borderRadius: '12px', fontWeight: '800', border: 'none', cursor: 'pointer' }}
-                        >
-                            Promote & Earn
-                        </button>
+                        <button onClick={() => handleGenerateLink(event)} style={{ width: '100%', padding: '12px', background: '#fff', color: '#000', borderRadius: '12px', fontWeight: '800', border: 'none', cursor: 'pointer' }}>Promote & Earn</button>
                     </div>
                 ))}
-                {availableEvents.length === 0 && <p style={{color: '#666', textAlign: 'center', marginTop: '40px'}}>No new events available to resell.</p>}
             </div>
         </div>
       )}
 
-      {/* JOIN FORM MODAL */}
+      {/* PAYSTACK OPTIMIZED JOIN FORM */}
       {showJoinForm && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.9)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
             <div style={{ background: '#161616', padding: '30px', borderRadius: '30px', maxWidth: '400px', width: '100%', border: '1px solid #333' }}>
                 <h3 style={{ fontSize: '20px', fontWeight: '900', marginBottom: '10px' }}>Setup Payouts</h3>
-                <p style={{ fontSize: '13px', color: '#888', marginBottom: '20px' }}>Enter your details to receive commissions automatically.</p>
+                <p style={{ fontSize: '13px', color: '#888', marginBottom: '20px' }}>Verify your account via Paystack to enable automated commission payouts.</p>
                 
+                <select 
+                  onChange={(e) => setPayoutForm({...payoutForm, bank_code: e.target.value, bank_name: e.target.options[e.target.selectedIndex].text})}
+                  style={{ width: '100%', padding: '15px', background: '#000', border: '1px solid #333', borderRadius: '12px', color: '#fff', marginBottom: '10px' }}
+                >
+                  <option value="">Select Bank / Wallet</option>
+                  {GH_BANKS.map(b => <option key={b.code} value={b.code}>{b.name}</option>)}
+                </select>
+
                 <input 
                   type="text" 
-                  placeholder="Bank Name" 
-                  value={payoutForm.bank_name}
-                  onChange={(e) => setPayoutForm({...payoutForm, bank_name: e.target.value})}
-                  style={{ width: '100%', padding: '15px', background: '#000', border: '1px solid #333', borderRadius: '12px', color: '#fff', marginBottom: '10px' }} 
-                />
-                <input 
-                  type="text" 
-                  placeholder="Account Number" 
+                  placeholder="Account / Mobile Number" 
                   value={payoutForm.account_number}
                   onChange={(e) => setPayoutForm({...payoutForm, account_number: e.target.value})}
                   style={{ width: '100%', padding: '15px', background: '#000', border: '1px solid #333', borderRadius: '12px', color: '#fff', marginBottom: '20px' }} 
                 />
                 
                 <div style={{ display: 'flex', gap: '10px' }}>
-                    <button onClick={() => setShowJoinForm(false)} style={{ flex: 1, padding: '15px', background: 'transparent', color: '#fff', border: '1px solid #333', borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer' }}>Cancel</button>
-                    <button onClick={handleJoinProgram} style={{ flex: 1, padding: '15px', background: '#CDa434', color: '#000', border: 'none', borderRadius: '12px', fontWeight: '900', cursor: 'pointer' }}>Confirm</button>
+                    <button onClick={() => setShowJoinForm(false)} style={{ flex: 1, padding: '15px', background: 'transparent', color: '#fff', border: '1px solid #333', borderRadius: '12px', fontWeight: 'bold' }}>Cancel</button>
+                    <button onClick={handleVerifyAndJoin} disabled={isVerifying} style={{ flex: 1, padding: '15px', background: '#CDa434', color: '#000', borderRadius: '12px', fontWeight: '900', border: 'none', cursor: 'pointer' }}>
+                        {isVerifying ? <Loader2 className="animate-spin" size={18} style={{margin:'0 auto'}}/> : 'Verify & Join'}
+                    </button>
                 </div>
             </div>
         </div>
