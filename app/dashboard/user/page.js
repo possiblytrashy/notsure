@@ -171,7 +171,18 @@ export default function UserDashboard() {
         else alert(error.message);
     }
   };
-
+// Add a check to prevent pushing to a null route
+useEffect(() => {
+  const checkUser = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      router.push('/login');
+    } else {
+      fetchVaultData();
+    }
+  };
+  checkUser();
+}, [router]);
   const openMarketplace = async () => {
     const { data } = await supabase
       .from('events')
