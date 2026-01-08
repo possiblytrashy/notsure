@@ -19,7 +19,83 @@ import {
 // CSS Imports
 import 'mapbox-gl/dist/mapbox-gl.css';
 
+// --- LEAFLET CSS ---
+import 'leaflet/dist/leaflet.css';
+import 'leaflet-geosearch/dist/geosearch.css';
+
+// --- DYNAMIC LEAFLET COMPONENTS ---
+const MapContainer = dynamic(() => import('react-leaflet').then(mod => mod.MapContainer), { ssr: false });
+const TileLayer = dynamic(() => import('react-leaflet').then(mod => mod.TileLayer), { ssr: false });
+const Marker = dynamic(() => import('react-leaflet').then(mod => mod.Marker), { ssr: false });
+const useMapEvents = dynamic(() => import('react-leaflet').then(mod => mod.useMapEvents), { ssr: false });
+const useMap = dynamic(() => import('react-leaflet').then(mod => mod.useMap), { ssr: false });
+
+// Safely import GeoSearch for client-side only
+let GeoSearchControl, OpenStreetMapProvider;
+if (typeof window !== 'undefined') {
+  const GeoSearch = require('leaflet-geosearch');
+  GeoSearchControl = GeoSearch.GeoSearchControl;
+  OpenStreetMapProvider = GeoSearch.OpenStreetMapProvider;
+}
+
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN;
+
+// Custom Luxury Icon
+const getLuxuryIcon = () => {
+  if (typeof window === 'undefined') return null;
+  const L = require('leaflet');
+  return L.divIcon({
+    className: 'luxury-pin',
+    html: `
+      <div style="position: relative; width: 20px; height: 20px; background: #000; border: 3px solid #fff; border-radius: 50%; box-shadow: 0 4px 15px rgba(0,0,0,0.4);">
+        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 50px; height: 50px; background: rgba(0,0,0,0.1); border-radius: 50%; animation: pulse 2s infinite; z-index: -1;"></div>
+      </div>`,
+    iconSize: [50, 50],
+    iconAnchor: [25, 25]
+  });
+};
+
+// Location Picker Logic
+const MapLogic = ({ lat, lng, setEventData }) => {
+  const map = useMap();
+
+  // 1. Click to Place Pin
+  useMapEvents({
+    click(e) {
+      setEventData(prev => ({ ...prev, lat: e.latlng.lat, lng: e.latlng.lng }));
+    },
+  });
+
+  // 2. Search Bar Integration
+  useEffect(() => {
+    if (!GeoSearchControl || !OpenStreetMapProvider) return;
+    
+    const provider = new OpenStreetMapProvider();
+    const searchControl = new GeoSearchControl({
+      provider,
+      style: 'bar',
+      showMarker: false,
+      retainZoomLevel: false,
+      animateZoom: true,
+      searchLabel: 'Search venue in Ghana...',
+      classNames: { container: 'luxury-search-container' }
+    });
+
+    map.addControl(searchControl);
+    map.on('geosearch/showlocation', (result) => {
+      setEventData(prev => ({
+        ...prev,
+        location: result.location.label,
+        lat: result.location.y,
+        lng: result.location.x
+      }));
+    });
+
+    return () => map.removeControl(searchControl);
+  }, [map, setEventData]);
+
+  return null;
+};
 
 /**
  * CREATE EVENT COMPONENT
@@ -672,86 +748,42 @@ export default function CreateEvent() {
 
             {/* Modal Body */}
             <div style={{ padding: '32px 40px' }}>
-              {/* Search Bar */}
-              <div style={{ display: 'flex', gap: '14px', marginBottom: '24px' }}>
-                <div style={{ flex: 1, position: 'relative' }}>
-                  <Search size={20} style={{ position: 'absolute', left: '18px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
-                  <input 
-                    style={{ ...styles.input, paddingLeft: '54px', border: '2px solid #000' }} 
-                    placeholder="Search venue (e.g. Polo Club Accra)" 
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleManualSearch()}
-                  />
-                </div>
-                <button 
-                  type="button" 
-                  onClick={handleManualSearch} 
-                  style={{ background: '#000', color: '#fff', border: 'none', borderRadius: '20px', padding: '0 32px', fontWeight: '900', cursor: 'pointer', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '10px' }}
-                >
-                  {isSearching ? <Loader2 className="animate-spin" size={18}/> : <><Search size={18}/> LOCATE</>}
-                </button>
-              </div>
+             {/* Replace the "Search Bar" div (lines 434-453) and "Map Engine" div (lines 456-508) with this: */}
 
-              {/* Map Engine */}
-              <div style={{ height: '480px', borderRadius: '32px', overflow: 'hidden', border: '1px solid #f1f5f9', position: 'relative', boxShadow: 'inset 0 0 20px rgba(0,0,0,0.05)' }}>
-                <Map
-                  initialViewState={{ 
-                    latitude: eventData.lat, 
-                    longitude: eventData.lng, 
-                    zoom: 15 
-                  }}
-                  latitude={eventData.lat}
-                  longitude={eventData.lng}
-                  onMove={e => setEventData(prev => ({ ...prev, lat: e.viewState.latitude, lng: e.viewState.longitude }))}
-                  onClick={handleMapClick}
-                  style={{ width: '100%', height: '100%' }}
-                  mapStyle="mapbox://styles/mapbox/dark-v11"
-                  mapboxAccessToken={MAPBOX_TOKEN}
-                >
-                  <Marker 
-                    latitude={eventData.lat} 
-                    longitude={eventData.lng} 
-                    draggable 
-                    onDragEnd={handleMapClick}
-                  >
-                    <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                      <div style={{ 
-                        background: '#fff', 
-                        padding: '8px 16px', 
-                        borderRadius: '12px', 
-                        fontSize: '11px', 
-                        fontWeight: '900', 
-                        boxShadow: '0 10px 25px rgba(0,0,0,0.2)',
-                        marginBottom: '8px',
-                        whiteSpace: 'nowrap',
-                        border: '1px solid #000'
-                      }}>
-                        EVENT CENTERED HERE
-                      </div>
-                      <div style={{ width: '44px', height: '44px', background: 'rgba(255,255,255,0.2)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', backdropFilter: 'blur(4px)', border: '1px solid rgba(255,255,255,0.3)' }}>
-                         <div style={{ width: '14px', height: '14px', background: '#000', border: '3px solid #fff', borderRadius: '50%' }} />
-                      </div>
-                    </div>
-                  </Marker>
-                  <NavigationControl position="top-right" />
-                </Map>
-                
-                <div style={{ position: 'absolute', bottom: '24px', left: '24px', right: '24px', background: 'rgba(255,255,255,0.9)', backdropFilter: 'blur(10px)', padding: '16px 24px', borderRadius: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid #f1f5f9' }}>
-                   <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                      <div style={{ background: '#f8fafc', width: '36px', height: '36px', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                         <MapPin size={18} color="#000" />
-                      </div>
-                      <div>
-                         <p style={{ margin: 0, fontSize: '10px', fontWeight: '900', color: '#94a3b8' }}>COORDINATES</p>
-                         <p style={{ margin: 0, fontSize: '13px', fontWeight: '800', color: '#0f172a' }}>{eventData.lat.toFixed(5)}, {eventData.lng.toFixed(5)}</p>
-                      </div>
-                   </div>
-                   <p style={{ margin: 0, fontSize: '12px', color: '#64748b', fontWeight: '600', maxWidth: '300px', textAlign: 'right' }}>
-                     Click anywhere or drag the pin to set the destination.
-                   </p>
-                </div>
-              </div>
+<div style={{ height: '520px', borderRadius: '32px', overflow: 'hidden', border: '1px solid #f1f5f9', position: 'relative' }}>
+  <MapContainer 
+    center={[eventData.lat, eventData.lng]} 
+    zoom={15} 
+    style={{ height: '100%', width: '100%' }}
+    zoomControl={false}
+  >
+    {/* Clean Luxury Tiles */}
+    <TileLayer
+      url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+      attribution='&copy; CARTO'
+    />
+    
+    <MapLogic lat={eventData.lat} lng={eventData.lng} setEventData={setEventData} />
+    
+    <Marker position={[eventData.lat, eventData.lng]} icon={getLuxuryIcon()} />
+  </MapContainer>
+  
+  {/* Coordinates Overlay */}
+  <div style={{ position: 'absolute', bottom: '24px', left: '24px', right: '24px', background: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(10px)', padding: '16px 24px', borderRadius: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid #f1f5f9', zIndex: 1000 }}>
+     <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+        <div style={{ background: '#f8fafc', width: '36px', height: '36px', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+           <MapPin size={18} color="#000" />
+        </div>
+        <div>
+           <p style={{ margin: 0, fontSize: '10px', fontWeight: '900', color: '#94a3b8' }}>SELECTED COORDINATES</p>
+           <p style={{ margin: 0, fontSize: '13px', fontWeight: '800', color: '#0f172a' }}>{eventData.lat.toFixed(5)}, {eventData.lng.toFixed(5)}</p>
+        </div>
+     </div>
+     <p style={{ margin: 0, fontSize: '12px', color: '#64748b', fontWeight: '600' }}>
+       Click map or search to reposition
+     </p>
+  </div>
+</div>
 
               {/* Action */}
               <button 
