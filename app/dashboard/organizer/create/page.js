@@ -20,6 +20,7 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 // --- LEAFLET CSS ---
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-geosearch/dist/geosearch.css';
+import dynamic from "next/dynamic";
 
 // --- DYNAMIC LEAFLET COMPONENTS ---
 const MapContainer = dynamic(() => import('react-leaflet').then(mod => mod.MapContainer), { ssr: false });
