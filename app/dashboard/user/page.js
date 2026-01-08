@@ -116,40 +116,64 @@ export default function UserDashboard() {
    */
 const handleVerifyAndJoin = async (e) => {
   e.preventDefault();
+  
+  // Guard: Ensure user is loaded to prevent dashboard/null errors
+  if (!user?.id) {
+    alert("User session not found. Please log in again.");
+    return;
+  }
+
   setIsVerifying(true);
 
   try {
-    // 1. Call your own Next.js API (NO CORS ISSUES HERE)
+    // 1. Call your Next.js API
     const res = await fetch('/api/paystack/verify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         account_number: payoutForm.account_number,
         bank_code: payoutForm.bank_code,
+        // Ghana Paystack logic: strings for MoMo, ghipss for banks
         type: ['MTN', 'VOD', 'ATL'].includes(payoutForm.bank_code) ? "mobile_money" : "ghipss"
       })
     });
 
     const data = await res.json();
-    if (data.error) throw new Error(data.error);
 
-    // 2. Insert into Supabase from the Frontend
+    // Catch errors from the API (like 400 Bad Request)
+    if (!res.ok || data.error) {
+      throw new Error(data.error || "Failed to verify bank details");
+    }
+
+    // 2. Insert into Supabase matching your DB schema
     const { error: dbError } = await supabase
       .from('resellers')
       .insert([{ 
-        user_id: user.id,
+        user_id: user.id, // Links to auth.users (id)
         bank_name: payoutForm.bank_name,
         account_number: payoutForm.account_number,
-        paystack_subaccount_code: data.recipient_code,
-        is_active: true
+        paystack_subaccount_code: data.recipient_code, // Matches your SQL schema
+        is_active: true,
+        total_earned: 0
       }]);
 
-    if (dbError) throw dbError;
+    if (dbError) {
+      // If you see a 403 here, run the RLS SQL provided below
+      throw dbError;
+    }
     
     setShowJoinForm(false);
-    fetchVaultData(user);
+    
+    // Refresh the local state
+    if (typeof fetchVaultData === 'function') {
+      await fetchVaultData(user);
+    }
+
+    alert("Luxury Partner Account Verified!");
+
   } catch (err) {
-    alert(err.message);
+    console.error("Verification Error:", err);
+    alert("Verification Failed: " + err.message);
   } finally {
     setIsVerifying(false);
   }
