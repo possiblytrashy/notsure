@@ -116,48 +116,45 @@ export default function UserDashboard() {
    */
 const handleVerifyAndJoin = async (e) => {
   e.preventDefault();
-  // ... validation ...
-
   setIsVerifying(true);
+
   try {
-    // Determine type: Mobile money codes are usually strings, Bank codes are digits
-    const isMobileMoney = ['MTN', 'VOD', 'ATL'].includes(payoutForm.bank_code);
-    
-    const { data, error } = await supabase.functions.invoke('paystack-payout-setup', {
-      body: { 
-        account_number: payoutForm.account_number, 
+    // 1. Call your own Next.js API (NO CORS ISSUES HERE)
+    const res = await fetch('/api/paystack/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        account_number: payoutForm.account_number,
         bank_code: payoutForm.bank_code,
-        type: isMobileMoney ? "mobile_money" : "ghipss", // Dynamic type
-        currency: "GHS"
-      }
+        type: ['MTN', 'VOD', 'ATL'].includes(payoutForm.bank_code) ? "mobile_money" : "ghipss"
+      })
     });
 
-    if (error) throw error;
-    // ... rest of your insert logic ...
-      // 2. Insert into Resellers table
-      const { error: dbError } = await supabase
-        .from('resellers')
-        .insert([{ 
-            user_id: user.id,
-            bank_name: payoutForm.bank_name,
-            account_number: payoutForm.account_number,
-            paystack_recipient_code: data.recipient_code,
-            account_name: data.account_name,
-            is_active: true,
-            total_earned: 0
-        }]);
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
 
-      if (dbError) throw dbError;
+    // 2. Insert into Supabase from the Frontend
+    const { error: dbError } = await supabase
+      .from('resellers')
+      .insert([{ 
+        user_id: user.id,
+        bank_name: payoutForm.bank_name,
+        account_number: payoutForm.account_number,
+        paystack_recipient_code: data.recipient_code,
+        account_name: data.account_name,
+        is_active: true
+      }]);
 
-      setShowJoinForm(false);
-      fetchVaultData(user);
-    } catch (err) {
-      alert("Verification Failed: " + (err.message || "Invalid account details"));
-    } finally {
-      setIsVerifying(false);
-    }
-  };
-
+    if (dbError) throw dbError;
+    
+    setShowJoinForm(false);
+    fetchVaultData(user);
+  } catch (err) {
+    alert(err.message);
+  } finally {
+    setIsVerifying(false);
+  }
+};
   const handleGenerateLink = async (event) => {
     if (!resellerProfile) return;
     
