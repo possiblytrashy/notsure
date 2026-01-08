@@ -3,8 +3,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import Map, { Marker, NavigationControl } from 'react-map-gl';
-
 // UI & Icons
 import { 
   X, Plus, Trash2, Image as ImageIcon, 
