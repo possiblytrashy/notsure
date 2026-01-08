@@ -27,6 +27,9 @@ export default function UserDashboard() {
   const [showMarketplace, setShowMarketplace] = useState(false);
   const [showJoinForm, setShowJoinForm] = useState(false);
 
+  // Form States
+  const [payoutForm, setPayoutForm] = useState({ bank_name: '', account_number: '' });
+
   useEffect(() => {
     fetchVaultData();
   }, []);
@@ -56,7 +59,7 @@ export default function UserDashboard() {
         .from('resellers')
         .select('*')
         .eq('user_id', user.id)
-        .maybeSingle(); // Use maybeSingle to avoid 406/error if not found
+        .maybeSingle(); 
       
       setResellerProfile(resellerData);
 
@@ -64,7 +67,7 @@ export default function UserDashboard() {
         // 3. If Reseller, fetch their active links
         const { data: links } = await supabase
           .from('event_resellers')
-          .select(`*, events:event_id (title, image_url, price)`)
+          .select(`*, events:event_id (id, title, image_url, price)`)
           .eq('reseller_id', resellerData.id);
         setMyResellerLinks(links || []);
       }
@@ -117,16 +120,35 @@ export default function UserDashboard() {
 
   const handleJoinProgram = async (e) => {
     e.preventDefault();
-    const { error } = await supabase.from('resellers').insert([{ user_id: user.id }]);
+    if (!payoutForm.bank_name || !payoutForm.account_number) {
+        alert("Please fill in your payout details.");
+        return;
+    }
+
+    const { error } = await supabase
+        .from('resellers')
+        .insert([{ 
+            user_id: user.id,
+            bank_name: payoutForm.bank_name,
+            account_number: payoutForm.account_number,
+            is_active: true
+        }]);
+
     if (!error) {
         setShowJoinForm(false);
         fetchVaultData(); 
+    } else {
+        alert(error.message);
     }
   };
 
   const handleGenerateLink = async (event) => {
     if (!resellerProfile) return;
-    const uniqueCode = `${user.email.split('@')[0]}-${event.id.slice(0,4)}`.toLowerCase();
+    
+    // Clean unique code generation
+    const userSlug = user.email.split('@')[0].replace(/[^a-zA-Z0-9]/g, '');
+    const eventSlug = event.title.toLowerCase().replace(/\s+/g, '-').slice(0, 10);
+    const uniqueCode = `${userSlug}-${eventSlug}`;
 
     const { error } = await supabase.from('event_resellers').insert([{
         reseller_id: resellerProfile.id,
@@ -136,7 +158,11 @@ export default function UserDashboard() {
 
     if (!error) {
         alert("Link Generated!");
+        setShowMarketplace(false);
         fetchVaultData();
+    } else {
+        if (error.code === '23505') alert("You already have a link for this event.");
+        else alert(error.message);
     }
   };
 
@@ -234,6 +260,9 @@ export default function UserDashboard() {
                     </button>
                 </div>
             ))}
+            {myResellerLinks.length === 0 && (
+                <p style={{textAlign: 'center', color: '#444', fontSize: '13px', padding: '20px'}}>No links yet. Click "+ Find Events" to start.</p>
+            )}
         </div>
     </div>
   );
@@ -264,7 +293,7 @@ export default function UserDashboard() {
 
       <div style={{ maxWidth: '500px', margin: '0 auto' }}>
         
-        {/* RESELLER SECTION */}
+        {/* RESELLER SECTION - Dynamic Transition */}
         {resellerProfile ? <ResellerStats /> : <JoinResellerCard />}
         
         {/* TICKET WALLET SECTION */}
@@ -338,19 +367,21 @@ export default function UserDashboard() {
 
       {/* MARKETPLACE MODAL */}
       {showMarketplace && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.9)', zIndex: 1000, display: 'flex', flexDirection: 'column', padding: '20px' }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.95)', zIndex: 1000, display: 'flex', flexDirection: 'column', padding: '20px' }}>
             <div style={{ flex: 1, maxWidth: '500px', margin: '0 auto', width: '100%', overflowY: 'auto' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px', marginTop: '20px' }}>
                     <h2 style={{ fontSize: '20px', fontWeight: '800' }}>Event Marketplace</h2>
-                    <button onClick={() => setShowMarketplace(false)} style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer' }}><X /></button>
+                    <button onClick={() => setShowMarketplace(false)} style={{ background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', padding: '8px', borderRadius: '50%' }}><X size={20}/></button>
                 </div>
                 {availableEvents.map(event => (
-                    <div key={event.id} style={{ background: '#161616', borderRadius: '20px', padding: '20px', marginBottom: '15px', border: '1px solid #333' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}>
-                            <h3 style={{ fontWeight: 'bold' }}>{event.title}</h3>
-                            <span style={{ color: '#CDa434', fontWeight: 'bold' }}>Earn 10%</span>
+                    <div key={event.id} style={{ background: '#111', borderRadius: '20px', padding: '20px', marginBottom: '15px', border: '1px solid #222' }}>
+                        <div style={{ display: 'flex', gap: '15px', marginBottom: '15px' }}>
+                          <div style={{ width: '60px', height: '60px', borderRadius: '12px', background: `url(${event.image_url}) center/cover` }} />
+                          <div>
+                            <h3 style={{ fontWeight: 'bold', fontSize: '15px', margin: '0 0 4px' }}>{event.title}</h3>
+                            <span style={{ color: '#CDa434', fontSize: '12px', fontWeight: '800' }}>EARN 10% (GH₵ {(event.price * 0.1).toFixed(2)})</span>
+                          </div>
                         </div>
-                        <p style={{ fontSize: '12px', color: '#666', marginBottom: '15px' }}>Base Price: GH₵ {event.price || 'Varies'}</p>
                         <button 
                             onClick={() => handleGenerateLink(event)}
                             style={{ width: '100%', padding: '12px', background: '#fff', color: '#000', borderRadius: '12px', fontWeight: '800', border: 'none', cursor: 'pointer' }}
@@ -359,7 +390,7 @@ export default function UserDashboard() {
                         </button>
                     </div>
                 ))}
-                {availableEvents.length === 0 && <p style={{color: '#666', textAlign: 'center'}}>No new events available to resell.</p>}
+                {availableEvents.length === 0 && <p style={{color: '#666', textAlign: 'center', marginTop: '40px'}}>No new events available to resell.</p>}
             </div>
         </div>
       )}
@@ -369,10 +400,22 @@ export default function UserDashboard() {
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.9)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
             <div style={{ background: '#161616', padding: '30px', borderRadius: '30px', maxWidth: '400px', width: '100%', border: '1px solid #333' }}>
                 <h3 style={{ fontSize: '20px', fontWeight: '900', marginBottom: '10px' }}>Setup Payouts</h3>
-                <p style={{ fontSize: '13px', color: '#888', marginBottom: '20px' }}>We need your bank details to send your 10% commission automatically.</p>
+                <p style={{ fontSize: '13px', color: '#888', marginBottom: '20px' }}>Enter your details to receive commissions automatically.</p>
                 
-                <input type="text" placeholder="Bank Name" style={{ width: '100%', padding: '15px', background: '#000', border: '1px solid #333', borderRadius: '12px', color: '#fff', marginBottom: '10px' }} />
-                <input type="text" placeholder="Account Number" style={{ width: '100%', padding: '15px', background: '#000', border: '1px solid #333', borderRadius: '12px', color: '#fff', marginBottom: '20px' }} />
+                <input 
+                  type="text" 
+                  placeholder="Bank Name" 
+                  value={payoutForm.bank_name}
+                  onChange={(e) => setPayoutForm({...payoutForm, bank_name: e.target.value})}
+                  style={{ width: '100%', padding: '15px', background: '#000', border: '1px solid #333', borderRadius: '12px', color: '#fff', marginBottom: '10px' }} 
+                />
+                <input 
+                  type="text" 
+                  placeholder="Account Number" 
+                  value={payoutForm.account_number}
+                  onChange={(e) => setPayoutForm({...payoutForm, account_number: e.target.value})}
+                  style={{ width: '100%', padding: '15px', background: '#000', border: '1px solid #333', borderRadius: '12px', color: '#fff', marginBottom: '20px' }} 
+                />
                 
                 <div style={{ display: 'flex', gap: '10px' }}>
                     <button onClick={() => setShowJoinForm(false)} style={{ flex: 1, padding: '15px', background: 'transparent', color: '#fff', border: '1px solid #333', borderRadius: '12px', fontWeight: 'bold', cursor: 'pointer' }}>Cancel</button>
