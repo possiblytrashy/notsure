@@ -15,9 +15,113 @@ import {
   BarChart, PieChart, CreditCard, Layout, Grip
 } from 'lucide-react';
 
+// --- LEAFLET DYNAMIC IMPORTS ---
+import 'leaflet/dist/leaflet.css';
+import 'leaflet-geosearch/dist/geosearch.css';
+
+const MapContainer = dynamic(() => import('react-leaflet').then(mod => mod.MapContainer), { ssr: false });
+const TileLayer = dynamic(() => import('react-leaflet').then(mod => mod.TileLayer), { ssr: false });
+const Marker = dynamic(() => import('react-leaflet').then(mod => mod.Marker), { ssr: false });
+const useMapEvents = dynamic(() => import('react-leaflet').then(mod => mod.useMapEvents), { ssr: false });
+const useMap = dynamic(() => import('react-leaflet').then(mod => mod.useMap), { ssr: false });
+
+// --- SEARCH CONTROL IMPORT ---
+// We need to import this safely for Next.js
+let GeoSearchControl, OpenStreetMapProvider;
+if (typeof window !== 'undefined') {
+  const GeoSearch = require('leaflet-geosearch');
+  GeoSearchControl = GeoSearch.GeoSearchControl;
+  OpenStreetMapProvider = GeoSearch.OpenStreetMapProvider;
+}
+
 export default function OrganizerDashboard() {
   const router = useRouter();
 
+  
+  // --- LEAFLET HELPERS ---
+
+// Custom Icon for Luxury Feel
+const getLuxuryIcon = () => {
+  if (typeof window === 'undefined') return null;
+  const L = require('leaflet');
+  return L.divIcon({
+    className: 'luxury-pin',
+    html: `
+      <div style="
+        position: relative;
+        width: 16px; height: 16px;
+        background: #000; border: 2px solid #fff;
+        border-radius: 50%;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      ">
+        <div style="
+          position: absolute; top: 50%; left: 50%;
+          transform: translate(-50%, -50%);
+          width: 40px; height: 40px;
+          background: rgba(0,0,0,0.1);
+          border-radius: 50%;
+          animation: pulse 2s infinite;
+          z-index: -1;
+        "></div>
+      </div>`,
+    iconSize: [40, 40],
+    iconAnchor: [20, 20]
+  });
+};
+
+// Component to handle clicks and search
+const LocationPicker = ({ position, setPosition, setLocationName }) => {
+  // 1. Handle Click on Map
+  const MapEvents = () => {
+    const map = useMapEvents({
+      click(e) {
+        setPosition([e.latlng.lat, e.latlng.lng]);
+        map.flyTo(e.latlng, map.getZoom());
+      },
+    });
+    return null;
+  };
+
+  // 2. Handle Search Bar
+  const SearchField = () => {
+    const map = useMap();
+    useEffect(() => {
+      if (!GeoSearchControl || !OpenStreetMapProvider) return;
+      const provider = new OpenStreetMapProvider();
+      const searchControl = new GeoSearchControl({
+        provider,
+        style: 'bar',
+        showMarker: false, // We use our own marker
+        retainZoomLevel: false,
+        animateZoom: true,
+        searchLabel: 'Search venue in Ghana...',
+      });
+
+      map.addControl(searchControl);
+      
+      map.on('geosearch/showlocation', (result) => {
+        const { x, y, label } = result.location;
+        setPosition([y, x]);
+        if (setLocationName) setLocationName(label);
+      });
+
+      return () => map.removeControl(searchControl);
+    }, [map]);
+    return null;
+  };
+
+  return (
+    <>
+      <TileLayer
+        url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+        attribution='&copy; CARTO'
+      />
+      <MapEvents />
+      <SearchField />
+      {position && <Marker position={position} icon={getLuxuryIcon()} />}
+    </>
+  );
+};
   // --- 1. CORE STATE ---
   const [activeTab, setActiveTab] = useState('events'); 
   const [loading, setLoading] = useState(true);
@@ -30,6 +134,8 @@ export default function OrganizerDashboard() {
     tickets: [], 
     profile: null 
   });
+
+const [mapCoords, setMapCoords] = useState(null); // [lat, lng]
 
   // --- 2. UI & MODAL STATE ---
   const [copying, setCopying] = useState(null);
@@ -309,26 +415,41 @@ const deleteEvent = async (eventId) => {
 const handleEditSubmit = async (e) => {
   e.preventDefault();
   const formData = new FormData(e.target);
-  const updatedFields = Object.fromEntries(formData.entries());
+
+  // Merge form text with Map Coordinates
+  const updatedFields = {
+    ...Object.fromEntries(formData.entries()),
+    lat: mapCoords ? mapCoords[0] : (editingEvent?.lat || null),
+    lng: mapCoords ? mapCoords[1] : (editingEvent?.lng || null)
+  };
 
   try {
-    const { error } = await supabase
-      .from('events')
-      .update(updatedFields)
-      .eq('id', editingEvent.id);
+    let error;
+    if (editingEvent?.id) {
+      // Update existing
+      const res = await supabase.from('events').update(updatedFields).eq('id', editingEvent.id);
+      error = res.error;
+    } else {
+      // Create new (Handle the logic if you use this modal for creation too)
+      const { data: userData } = await supabase.auth.getUser();
+      const res = await supabase.from('events').insert([{
+        ...updatedFields,
+        organizer_id: userData.user.id,
+        status: 'active'
+      }]);
+      error = res.error;
+    }
 
     if (error) throw error;
 
-    // Sync UI
-    setData(prev => ({
-      ...prev,
-      events: prev.events.map(ev => ev.id === editingEvent.id ? { ...ev, ...updatedFields } : ev)
-    }));
-
+    // Refresh Data
+    loadDashboardData(true);
     setShowEventModal(false);
     setEditingEvent(null);
+    setMapCoords(null);
   } catch (error) {
     console.error("Update error:", error);
+    alert("Failed to save event.");
   }
 };
   // Add Candidate
@@ -656,15 +777,17 @@ const handleEditSubmit = async (e) => {
               <h3 style={itemTitle}>{event.title}</h3>
               <div style={{ display: 'flex', gap: '8px' }}>
                 {/* EDIT BUTTON */}
-                <button 
-                  style={circleAction} 
-                  onClick={() => {
-                    setEditingEvent(event); 
-                    setShowEventModal(true);
-                  }}
-                >
-                  <Edit3 size={16} />
-                </button>
+                 <button 
+  style={circleAction} 
+  onClick={() => {
+    setEditingEvent(event); 
+    // Load existing coordinates or default to Accra
+    setMapCoords(event.lat && event.lng ? [event.lat, event.lng] : [5.6037, -0.1870]); 
+    setShowEventModal(true);
+  }}
+>
+  <Edit3 size={16} />
+</button>
 
                 {/* DELETE BUTTON */}
                 <button 
