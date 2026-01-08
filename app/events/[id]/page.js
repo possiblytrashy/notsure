@@ -21,11 +21,54 @@ import {
   Car
 } from 'lucide-react';
 
-// --- MAPBOX IMPORTS ---
-import Map, { Marker } from 'react-map-gl';
-import 'mapbox-gl/dist/mapbox-gl.css';
+// --- LEAFLET IMPORTS ---
+import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
 
-const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN;
+// --- LEAFLET HELPER: UPDATE MAP VIEW ---
+// This component automatically pans the map when coordinates change
+function MapUpdater({ lat, lng }) {
+  const map = useMap();
+  useEffect(() => {
+    if (lat && lng) {
+      map.flyTo([lat, lng], 15, { duration: 1.5 });
+    }
+  }, [lat, lng, map]);
+  return null;
+}
+
+// --- LEAFLET HELPER: LUXURY CUSTOM ICON ---
+// Creates a clean black dot with a pulse effect using DivIcon
+const luxuryIcon = L.divIcon({
+  className: 'luxury-map-marker',
+  html: `
+    <div style="
+      position: relative;
+      width: 16px;
+      height: 16px;
+      background-color: #000;
+      border: 2px solid #fff;
+      border-radius: 50%;
+      box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+    ">
+      <div style="
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        width: 40px;
+        height: 40px;
+        background-color: rgba(0,0,0,0.1);
+        border-radius: 50%;
+        animation: mapPulse 2s infinite;
+        z-index: -1;
+      "></div>
+    </div>
+  `,
+  iconSize: [40, 40], // Size of the bounding box
+  iconAnchor: [20, 20], // Center of the icon
+});
 
 // --- HELPER: DATE FORMATTER ---
 const formatDate = (dateString) => {
@@ -236,7 +279,7 @@ export default function EventPage() {
       user_id: user ? user.id : null,
       guest_email: guestEmail.trim(), 
       guest_name: guestName.trim(),   
-      tier_name: tier.name,           
+      tier_name: tier.name,            
       amount: finalAmountPaid, 
       reference: response.reference,  
       status: 'valid',                
@@ -325,8 +368,8 @@ export default function EventPage() {
       const handler = PaystackPop.setup({
         key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
         access_code: initData.access_code,
-        email: guestEmail.trim(), // <--- ADD THIS LINE
-        amount: Math.ceil(activeTier.price * 100), // <--- ADD THIS (Price in Kobo)
+        email: guestEmail.trim(), // <--- KEPT AS REQUESTED
+        amount: Math.ceil(activeTier.price * 100), // <--- KEPT AS REQUESTED (Price in Kobo/Pesewas)
         currency: 'GHS', // Optional but good for clarity
         callback: (res) => recordPayment(res, activeTier), // Pass the full activeTier object
         onClose: () => setIsProcessing(false)
@@ -377,6 +420,17 @@ export default function EventPage() {
     
     return (
       <div style={styles.ticketWrapper}>
+        {/* INJECT ANIMATION STYLES FOR MARKER PULSE */}
+        <style>{`
+          @keyframes mapPulse {
+            0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0; }
+            50% { opacity: 0.3; }
+            100% { transform: translate(-50%, -50%) scale(1.5); opacity: 0; }
+          }
+          .leaflet-container { font-family: 'Inter', sans-serif; }
+          .leaflet-control-attribution { display: none !important; }
+        `}</style>
+
         <div style={styles.ticketCard} className="printable-ticket">
           <div style={{ textAlign: 'center' }}>
             <div style={styles.successIconWrap}><CheckCircle2 size={40} color="#22c55e" /></div>
@@ -399,26 +453,33 @@ export default function EventPage() {
               <p style={styles.refText}>REF: {paymentSuccess.reference}</p>
             </div>
 
-            {/* --- SUCCESS MAP INTEGRATION --- */}
+            {/* --- SUCCESS MAP INTEGRATION (LEAFLET) --- */}
             <div style={{ marginTop: '20px', marginBottom: '20px' }}>
               <div style={{...styles.mapContainer, height: '250px'}}>
-                <Map
-                  initialViewState={{
-                    latitude: event.lat || 5.6037,
-                    longitude: event.lng || -0.1870,
-                    zoom: 15
-                  }}
-                  style={{ width: '100%', height: '100%' }}
-                  mapStyle="mapbox://styles/mapbox/dark-v11"
-                  mapboxAccessToken={MAPBOX_TOKEN}
-                  interactive={false}
+                <MapContainer 
+                  center={[event.lat || 5.6037, event.lng || -0.1870]} 
+                  zoom={15} 
+                  style={{ height: '100%', width: '100%' }}
+                  zoomControl={false} // Clean look
+                  scrollWheelZoom={false}
                 >
-                  <Marker latitude={event.lat || 5.6037} longitude={event.lng || -0.1870}>
-                    <div style={styles.mapPulse}>
-                      <div style={styles.mapDot} />
-                    </div>
+                  {/* High-End "Voyager" Tile Layer for Luxury Feel */}
+                  <TileLayer
+                    url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+                  />
+                  
+                  {/* Auto Recenter */}
+                  <MapUpdater lat={event.lat} lng={event.lng} />
+
+                  <Marker 
+                    position={[event.lat || 5.6037, event.lng || -0.1870]} 
+                    icon={luxuryIcon}
+                  >
+                    {/* Optional: Add Popup if needed */}
                   </Marker>
-                </Map>
+                </MapContainer>
+
                 <div style={styles.mapOverlay}>
                     <p style={{margin: 0, fontWeight: 800, fontSize: '12px'}}>{event.location}</p>
                     <button onClick={() => handleRide('maps')} style={styles.mapActionBtn}>
@@ -456,7 +517,6 @@ export default function EventPage() {
     <div style={styles.pageLayout}>
       <style>{`
         * { box-sizing: border-box; }
-        .mapboxgl-ctrl-logo, .mapboxgl-ctrl-attrib { display: none !important; }
         @media (max-width: 1024px) {
           .content-grid { grid-template-columns: 1fr !important; gap: 40px !important; }
           .main-frame { height: 500px !important; }
@@ -640,12 +700,9 @@ const styles = {
   btnPrimary: { flex: 1, background: '#000', color: '#fff', border: 'none', padding: '18px', borderRadius: '18px', fontWeight: 800, cursor: 'pointer' },
   btnSecondary: { flex: 1, background: '#f1f5f9', color: '#000', border: 'none', padding: '18px', borderRadius: '18px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' },
     
-  mapContainer: { height: '350px', borderRadius: '30px', overflow: 'hidden', position: 'relative', border: '1px solid #f1f5f9' },
-  mapOverlay: { position: 'absolute', bottom: '20px', left: '20px', right: '20px', background: '#fff', padding: '10px 15px', borderRadius: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.1)' },
+  mapContainer: { height: '350px', borderRadius: '30px', overflow: 'hidden', position: 'relative', border: '1px solid #f1f5f9', zIndex: 0 },
+  mapOverlay: { position: 'absolute', bottom: '20px', left: '20px', right: '20px', background: '#fff', padding: '10px 15px', borderRadius: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.1)', zIndex: 999 },
   mapActionBtn: { background: '#000', color: '#fff', border: 'none', padding: '10px', borderRadius: '12px', fontSize: '11px', fontWeight: 900, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' },
-  mapPulse: { width: '40px', height: '40px', borderRadius: '50%', background: 'rgba(0,0,0,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' },
-  mapDot: { width: '12px', height: '12px', borderRadius: '50%', background: '#000', border: '2px solid #fff' },
   conciergeBox: { background: '#f8fafc', padding: '25px', borderRadius: '25px', marginBottom: '30px', border: '1px solid #f1f5f9' },
   rideBtn: { background: '#fff', border: '1px solid #e2e8f0', padding: '12px', borderRadius: '15px', fontSize: '13px', fontWeight: 800, cursor: 'pointer', transition: '0.2s', flex: 1 },
-  miniRideBtn: { flex: '0 0 auto', background: '#fff', border: '1px solid #e2e8f0', padding: '10px 15px', borderRadius: '12px', fontSize: '12px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }
 };
