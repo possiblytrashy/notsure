@@ -371,11 +371,14 @@ useEffect(() => {
 
       // Open Paystack
       const PaystackPop = await loadPaystackScript();
-      const handler = PaystackPop.setup({
-        key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
-        access_code: initData.access_code,
-        email: guestEmail.trim(), // <--- KEPT AS REQUESTED
-        amount: Math.ceil(activeTier.price * 100), // <--- KEPT AS REQUESTED (Price in Kobo/Pesewas)
+// In your EventPage.js handlePurchase function:
+const finalPrice = isResellerMode ? activeTier.price * 1.10 : activeTier.price;
+
+const handler = PaystackPop.setup({
+  key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
+  access_code: initData.access_code,
+  email: guestEmail.trim(),
+  amount: Math.round(finalPrice * 100),
         currency: 'GHS', // Optional but good for clarity
         callback: (res) => recordPayment(res, activeTier), // Pass the full activeTier object
         onClose: () => setIsProcessing(false)
