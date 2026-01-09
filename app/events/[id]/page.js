@@ -188,13 +188,12 @@ export default function EventPage() {
     validateReseller();
   }, [refCode, id]);
 
-  useEffect(() => {
-    if (ref) {
-      // Store the code so it persists through the checkout process
-      localStorage.setItem('active_reseller_code', ref);
-      console.log("Reseller attribution captured:", ref);
-    }
-  }, [ref]);
+useEffect(() => {
+  if (refCode) { 
+    localStorage.setItem('active_reseller_code', refCode);
+    console.log("Reseller attribution captured:", refCode);
+  }
+}, [refCode]);
   // --- REAL-TIME TICKET UPDATES ---
   useEffect(() => {
     const channel = supabase
