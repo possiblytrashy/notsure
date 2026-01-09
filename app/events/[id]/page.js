@@ -137,26 +137,37 @@ export default function EventPage() {
 
   // --- RESELLER VALIDATION & ANALYTICS ---
   useEffect(() => {
-    const validateReseller = async () => {
-      if (!refCode || !id) return;
-      
-      const { data, error } = await supabase
-        .from('event_resellers')
-        .select('*, resellers(id, paystack_subaccount_code)') 
-        .eq('unique_code', refCode)
-        .eq('event_id', id)
-        .single();
+   const validateReseller = async () => {
+  if (!refCode || !id) return;
+  
+  // Try to fetch with the explicit relationship
+  // Note: If your foreign key column in event_resellers is named 'reseller_id', 
+  // sometimes Supabase requires you to name the relation.
+  const { data, error } = await supabase
+    .from('event_resellers')
+    .select(`
+      *,
+      resellers!reseller_id ( 
+        id, 
+        paystack_subaccount_code 
+      )
+    `) // Added !reseller_id hint to tell Supabase which FK to use
+    .eq('unique_code', refCode)
+    .eq('event_id', id)
+    .single();
 
-      if (data && !error) {
-        setReseller(data);
-        setIsResellerMode(true);
-        // Increment clicks via RPC for performance
-        await supabase.rpc('increment_reseller_clicks', { link_id: data.id });
-      }
-    };
-    validateReseller();
-  }, [refCode, id]);
+  if (error) {
+    console.error("Reseller Validation Error Details:", error.message, error.hint);
+    return;
+  }
 
+  if (data) {
+    setReseller(data);
+    setIsResellerMode(true);
+    // Increment clicks
+    await supabase.rpc('increment_reseller_clicks', { link_id: data.id });
+  }
+};
   useEffect(() => {
     if (refCode) { 
       localStorage.setItem('active_reseller_code', refCode);
