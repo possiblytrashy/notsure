@@ -136,45 +136,45 @@ export default function EventPage() {
   }, [id]);
 
   // --- RESELLER VALIDATION & ANALYTICS ---
-  useEffect(() => {
-   const validateReseller = async () => {
-  if (!refCode || !id) return;
-  
-  // Try to fetch with the explicit relationship
-  // Note: If your foreign key column in event_resellers is named 'reseller_id', 
-  // sometimes Supabase requires you to name the relation.
-  const { data, error } = await supabase
-    .from('event_resellers')
-    .select(`
-      *,
-      resellers!reseller_id ( 
-        id, 
-        paystack_subaccount_code 
-      )
-    `) // Added !reseller_id hint to tell Supabase which FK to use
-    .eq('unique_code', refCode)
-    .eq('event_id', id)
-    .single();
+ useEffect(() => {
+    const validateReseller = async () => {
+      if (!refCode || !id) return;
+      
+      try {
+        const { data, error } = await supabase
+          .from('event_resellers')
+          .select(`
+            *,
+            resellers!reseller_id ( 
+              id, 
+              paystack_subaccount_code 
+            )
+          `)
+          .eq('unique_code', refCode)
+          .eq('event_id', id)
+          .single();
 
-  if (error) {
-    console.error("Reseller Validation Error Details:", error.message, error.hint);
-    return;
-  }
+        if (error) {
+          console.error("Reseller Validation Error:", error.message);
+          return;
+        }
 
-  if (data) {
-    setReseller(data);
-    setIsResellerMode(true);
-    // Increment clicks
-    await supabase.rpc('increment_reseller_clicks', { link_id: data.id });
-  }
-};
-  useEffect(() => {
-    if (refCode) { 
+        if (data) {
+          setReseller(data);
+          setIsResellerMode(true);
+          await supabase.rpc('increment_reseller_clicks', { link_id: data.id });
+        }
+      } catch (err) {
+        console.error("Critical Reseller Error:", err);
+      }
+    };
+
+    if (refCode) {
       localStorage.setItem('active_reseller_code', refCode);
       console.log("Reseller attribution captured:", refCode);
+      validateReseller();
     }
-  }, [refCode]);
-
+  }, [refCode, id]); // Added proper dependency array
   // --- REAL-TIME TICKET UPDATES ---
   useEffect(() => {
     const channel = supabase
