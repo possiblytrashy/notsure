@@ -92,6 +92,7 @@ export default function UserDashboard() {
           .from('event_resellers')
           .select(`
             *, 
+            event_id,
             events:event_id (id, title, image_url, price),
             reseller_sales(count)
           `)
