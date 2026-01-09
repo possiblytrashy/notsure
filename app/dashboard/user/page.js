@@ -219,13 +219,21 @@ const handleVerifyAndJoin = async (e) => {
     setShowMarketplace(true);
   };
 
-  const copyLink = (link) => {
-  // link.event_id is the [id] in your folder structure
-  // link.unique_code is the reseller's custom code
+const copyLink = (link) => {
+  // Defensive check: log the link to see what's inside if it fails
+  console.log("Generating link for:", link);
+
+  if (!link || !link.event_id || !link.unique_code) {
+    alert("Error: Link data is missing. Please refresh.");
+    return;
+  }
+
+  // Path: /events/[id]?ref=[code]
   const url = `${window.location.origin}/events/${link.event_id}?ref=${link.unique_code}`;
   
-  navigator.clipboard.writeText(url);
-  alert("Luxury Reseller Link Copied!");
+  navigator.clipboard.writeText(url)
+    .then(() => alert("Luxury Link Copied!"))
+    .catch(err => console.error("Clipboard error", err));
 };
   const openRideApp = (type, lat, lng) => {
     if (!lat || !lng) {
