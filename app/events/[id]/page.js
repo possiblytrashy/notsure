@@ -40,37 +40,21 @@ function MapUpdater({ lat, lng }) {
 
 // --- LEAFLET HELPER: LUXURY CUSTOM ICON ---
 // Creates a clean black dot with a pulse effect using DivIcon
-const luxuryIcon = L.divIcon({
-  className: 'luxury-map-marker',
-  html: `
-    <div style="
-      position: relative;
-      width: 16px;
-      height: 16px;
-      background-color: #000;
-      border: 2px solid #fff;
-      border-radius: 50%;
-      box-shadow: 0 4px 10px rgba(0,0,0,0.3);
-    ">
-      <div style="
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        width: 40px;
-        height: 40px;
-        background-color: rgba(0,0,0,0.1);
-        border-radius: 50%;
-        animation: mapPulse 2s infinite;
-        z-index: -1;
-      "></div>
-    </div>
-  `,
-  iconSize: [40, 40], // Size of the bounding box
-  iconAnchor: [20, 20], // Center of the icon
-});
-
-// --- HELPER: DATE FORMATTER ---
+useEffect(() => {
+  // Only runs in the browser
+  if (typeof window !== 'undefined') {
+    const L = require('leaflet'); 
+    const icon = L.divIcon({
+      className: 'luxury-map-marker',
+      html: `<div style="position: relative; width: 16px; height: 16px; background-color: #000; border: 2px solid #fff; border-radius: 50%; box-shadow: 0 4px 10px rgba(0,0,0,0.3);">
+               <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 40px; height: 40px; background-color: rgba(0,0,0,0.1); border-radius: 50%; animation: mapPulse 2s infinite; z-index: -1;"></div>
+             </div>`,
+      iconSize: [40, 40],
+      iconAnchor: [20, 20],
+    });
+    setMapIcon(icon);
+  }
+}, []);
 const formatDate = (dateString) => {
   if (!dateString) return 'Date TBA';
   const options = { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' };
