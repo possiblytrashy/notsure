@@ -1,20 +1,37 @@
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
 
 export async function POST(req) {
   try {
-    const { account_number, bank_code, type, user_id } = await req.json();
+    const { account_number, bank_code, type } = await req.json();
     const PAYSTACK_SECRET = process.env.PAYSTACK_SECRET_KEY;
 
-    // 1. Verify Account Name with Paystack
+    // 1. Log for Vercel Debugging (See exactly what Paystack receives)
+    console.log(`Resolving: ${account_number} for Bank Code: ${bank_code}`);
+
+    // 2. Verify Account Name with Paystack
     const resolveRes = await fetch(
       `https://api.paystack.co/bank/resolve?account_number=${account_number}&bank_code=${bank_code}`,
-      { headers: { Authorization: `Bearer ${PAYSTACK_SECRET}` } }
+      { 
+        headers: { 
+          Authorization: `Bearer ${PAYSTACK_SECRET}`,
+          'Content-Type': 'application/json'
+        } 
+      }
     );
-    const resolveData = await resolveRes.json();
-    if (!resolveData.status) return NextResponse.json({ error: "Invalid Account" }, { status: 400 });
 
-    // 2. Create Recipient
+    const resolveData = await resolveRes.json();
+
+    // If Paystack fails, return THEIR specific error message for better debugging
+    if (!resolveData.status) {
+      console.error("Paystack Resolve Error:", resolveData.message);
+      return NextResponse.json(
+        { error: resolveData.message || "Invalid Account" }, 
+        { status: 400 }
+      );
+    }
+
+    // 3. Create Recipient
+    // For Ghana: MoMo must be "mobile_money", Banks must be "ghipss"
     const recipientRes = await fetch('https://api.paystack.co/transferrecipient', {
       method: 'POST',
       headers: {
@@ -22,14 +39,19 @@ export async function POST(req) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        type: type || "ghipss",
+        type: type || (['MTN', 'VOD', 'ATL'].includes(bank_code) ? "mobile_money" : "ghipss"),
         name: resolveData.data.account_name,
-        account_number,
-        bank_code,
+        account_number: account_number,
+        bank_code: bank_code,
         currency: "GHS",
       }),
     });
+
     const recipientData = await recipientRes.json();
+
+    if (!recipientData.status) {
+      return NextResponse.json({ error: "Could not create payout recipient" }, { status: 400 });
+    }
 
     return NextResponse.json({
       recipient_code: recipientData.data.recipient_code,
@@ -37,6 +59,7 @@ export async function POST(req) {
     });
 
   } catch (error) {
+    console.error("Internal API Error:", error);
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
