@@ -61,13 +61,13 @@ export default function UserDashboard() {
     checkUser();
   }, [router]);
 
-const fetchVaultData = async (currentUser) => {
-  // Add this guard immediately to prevent the "reading id of null" error
-  if (!currentUser?.id) return; 
+  const fetchVaultData = async (currentUser) => {
+    // Add this guard immediately to prevent the "reading id of null" error
+    if (!currentUser?.id) return; 
 
-  try {
-    setLoading(true);
-      try {
+    try {
+      setLoading(true);
+      
       // 1. Fetch Tickets with Event Details AND Tier Names
       const { data: ticketData, error: ticketError } = await supabase
         .from('tickets')
@@ -94,16 +94,16 @@ const fetchVaultData = async (currentUser) => {
       if (resellerData) {
         // 3. Fetch active links with sale counts from your reseller_sales table
         const { data: links } = await supabase
-  .from('event_resellers')
-  .select(`
-    id,
-    unique_code,
-    event_id, 
-    reseller_id,
-    events:event_id (id, title, image_url, price),
-    reseller_sales(count)
-  `)
-  .eq('reseller_id', resellerProfile.id);
+          .from('event_resellers')
+          .select(`
+            id,
+            unique_code,
+            event_id, 
+            reseller_id,
+            events:event_id (id, title, image_url, price),
+            reseller_sales(count)
+          `)
+          .eq('reseller_id', resellerData.id); // Fixed: Use local variable instead of state to avoid sync issues
         setMyResellerLinks(links || []);
       }
 
@@ -122,70 +122,71 @@ const fetchVaultData = async (currentUser) => {
   /**
    * PAYSTACK OPTIMIZED: Verify Account & Create Transfer Recipient
    */
-const handleVerifyAndJoin = async (e) => {
-  e.preventDefault();
-  
-  // Guard: Ensure user is loaded to prevent dashboard/null errors
-  if (!user?.id) {
-    alert("User session not found. Please log in again.");
-    return;
-  }
-
-  setIsVerifying(true);
-
-  try {
-    // 1. Call your Next.js API
-    const res = await fetch('/api/paystack/verify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        account_number: payoutForm.account_number,
-        bank_code: payoutForm.bank_code,
-        // Ghana Paystack logic: strings for MoMo, ghipss for banks
-        type: ['MTN', 'VOD', 'ATL'].includes(payoutForm.bank_code) ? "mobile_money" : "ghipss"
-      })
-    });
-
-    const data = await res.json();
-
-    // Catch errors from the API (like 400 Bad Request)
-    if (!res.ok || data.error) {
-      throw new Error(data.error || "Failed to verify bank details");
-    }
-
-    // 2. Insert into Supabase matching your DB schema
-    const { error: dbError } = await supabase
-      .from('resellers')
-      .insert([{ 
-        user_id: user.id, // Links to auth.users (id)
-        bank_name: payoutForm.bank_name,
-        account_number: payoutForm.account_number,
-        paystack_subaccount_code: data.recipient_code, // Matches your SQL schema
-        is_active: true,
-        total_earned: 0
-      }]);
-
-    if (dbError) {
-      // If you see a 403 here, run the RLS SQL provided below
-      throw dbError;
-    }
+  const handleVerifyAndJoin = async (e) => {
+    e.preventDefault();
     
-    setShowJoinForm(false);
-    
-    // Refresh the local state
-    if (typeof fetchVaultData === 'function') {
-      await fetchVaultData(user);
+    // Guard: Ensure user is loaded to prevent dashboard/null errors
+    if (!user?.id) {
+      alert("User session not found. Please log in again.");
+      return;
     }
 
-    alert("Luxury Partner Account Verified!");
+    setIsVerifying(true);
 
-  } catch (err) {
-    console.error("Verification Error:", err);
-    alert("Verification Failed: " + err.message);
-  } finally {
-    setIsVerifying(false);
-  }
-};
+    try {
+      // 1. Call your Next.js API
+      const res = await fetch('/api/paystack/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          account_number: payoutForm.account_number,
+          bank_code: payoutForm.bank_code,
+          // Ghana Paystack logic: strings for MoMo, ghipss for banks
+          type: ['MTN', 'VOD', 'ATL'].includes(payoutForm.bank_code) ? "mobile_money" : "ghipss"
+        })
+      });
+
+      const data = await res.json();
+
+      // Catch errors from the API (like 400 Bad Request)
+      if (!res.ok || data.error) {
+        throw new Error(data.error || "Failed to verify bank details");
+      }
+
+      // 2. Insert into Supabase matching your DB schema
+      const { error: dbError } = await supabase
+        .from('resellers')
+        .insert([{ 
+          user_id: user.id, // Links to auth.users (id)
+          bank_name: payoutForm.bank_name,
+          account_number: payoutForm.account_number,
+          paystack_subaccount_code: data.recipient_code, // Matches your SQL schema
+          is_active: true,
+          total_earned: 0
+        }]);
+
+      if (dbError) {
+        // If you see a 403 here, run the RLS SQL provided below
+        throw dbError;
+      }
+      
+      setShowJoinForm(false);
+      
+      // Refresh the local state
+      if (typeof fetchVaultData === 'function') {
+        await fetchVaultData(user);
+      }
+
+      alert("Luxury Partner Account Verified!");
+
+    } catch (err) {
+      console.error("Verification Error:", err);
+      alert("Verification Failed: " + err.message);
+    } finally {
+      setIsVerifying(false);
+    }
+  };
+
   const handleGenerateLink = async (event) => {
     if (!resellerProfile) return;
     
@@ -224,28 +225,22 @@ const handleVerifyAndJoin = async (e) => {
     setShowMarketplace(true);
   };
 
-const copyLink = (linkObj) => {
-  console.log("Generating link for object:", linkObj);
+  const copyLink = (linkObj) => {
+    console.log("Generating link for object:", linkObj);
 
-  // If linkObj is just a string, it won't have .event_id
-  if (!linkObj || typeof linkObj === 'string' || !linkObj.event_id) {
-    alert("Error: Link data incomplete. Please try again.");
-    return;
-  }
+    // If linkObj is just a string, it won't have .event_id
+    if (!linkObj || typeof linkObj === 'string' || !linkObj.event_id) {
+      alert("Error: Link data incomplete. Please try again.");
+      return;
+    }
 
-  const url = `${window.location.origin}/events/${linkObj.event_id}?ref=${linkObj.unique_code}`;
-  
-  navigator.clipboard.writeText(url);
-  alert("Luxury Link Copied!");
-};
+    const url = `${window.location.origin}/events/${linkObj.event_id}?ref=${linkObj.unique_code}`;
+    
+    navigator.clipboard.writeText(url)
+      .then(() => alert("Luxury Link Copied!"))
+      .catch(err => console.error("Clipboard error", err));
+  };
 
-  // Path: /events/[id]?ref=[code]
-  const url = `${window.location.origin}/events/${link.event_id}?ref=${link.unique_code}`;
-  
-  navigator.clipboard.writeText(url)
-    .then(() => alert("Luxury Link Copied!"))
-    .catch(err => console.error("Clipboard error", err));
-};
   const openRideApp = (type, lat, lng) => {
     if (!lat || !lng) {
       alert("Venue coordinates not set for this event.");
@@ -256,7 +251,7 @@ const copyLink = (linkObj) => {
       case 'uber': url = `uber://?action=setPickup&dropoff[latitude]=${lat}&dropoff[longitude]=${lng}`; break;
       case 'bolt': url = `bolt://explore?dropoff_lat=${lat}&dropoff_lng=${lng}`; break;
       case 'yango': url = `yango://?finish_lat=${lat}&finish_lng=${lng}`; break;
-      case 'google': url = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`; break;
+      case 'google': url = `https://www.google.com/maps/search/?api=1&query=$${lat},${lng}`; break;
     }
     window.location.href = url;
     setTimeout(() => {
@@ -264,7 +259,7 @@ const copyLink = (linkObj) => {
     }, 500);
   };
 
-  // --- SUB-COMPONENTS (RESTORED) ---
+  // --- SUB-COMPONENTS ---
 
   const RideButton = ({ label, onClick, isSecondary }) => (
     <button 
