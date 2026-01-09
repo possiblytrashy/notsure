@@ -168,6 +168,7 @@ export default function EventPage() {
     await supabase.rpc('increment_reseller_clicks', { link_id: data.id });
   }
 };
+  }
   useEffect(() => {
     if (refCode) { 
       localStorage.setItem('active_reseller_code', refCode);
