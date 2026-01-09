@@ -216,12 +216,14 @@ const handleVerifyAndJoin = async (e) => {
     setShowMarketplace(true);
   };
 
-  const copyLink = (code) => {
-    const url = `${window.location.origin}/event/checkout?ref=${code}`;
-    navigator.clipboard.writeText(url);
-    alert("Reseller Link Copied!");
-  };
-
+  const copyLink = (link) => {
+  // link.event_id is the [id] in your folder structure
+  // link.unique_code is the reseller's custom code
+  const url = `${window.location.origin}/events/${link.event_id}?ref=${link.unique_code}`;
+  
+  navigator.clipboard.writeText(url);
+  alert("Luxury Reseller Link Copied!");
+};
   const openRideApp = (type, lat, lng) => {
     if (!lat || !lng) {
       alert("Venue coordinates not set for this event.");
