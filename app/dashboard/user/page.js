@@ -61,8 +61,13 @@ export default function UserDashboard() {
     checkUser();
   }, [router]);
 
-  const fetchVaultData = async (currentUser) => {
-    try {
+const fetchVaultData = async (currentUser) => {
+  // Add this guard immediately to prevent the "reading id of null" error
+  if (!currentUser?.id) return; 
+
+  try {
+    setLoading(true);
+      try {
       // 1. Fetch Tickets with Event Details AND Tier Names
       const { data: ticketData, error: ticketError } = await supabase
         .from('tickets')
@@ -219,14 +224,20 @@ const handleVerifyAndJoin = async (e) => {
     setShowMarketplace(true);
   };
 
-const copyLink = (link) => {
-  // Defensive check: log the link to see what's inside if it fails
-  console.log("Generating link for:", link);
+const copyLink = (linkObj) => {
+  console.log("Generating link for object:", linkObj);
 
-  if (!link || !link.event_id || !link.unique_code) {
-    alert("Error: Link data is missing. Please refresh.");
+  // If linkObj is just a string, it won't have .event_id
+  if (!linkObj || typeof linkObj === 'string' || !linkObj.event_id) {
+    alert("Error: Link data incomplete. Please try again.");
     return;
   }
+
+  const url = `${window.location.origin}/events/${linkObj.event_id}?ref=${linkObj.unique_code}`;
+  
+  navigator.clipboard.writeText(url);
+  alert("Luxury Link Copied!");
+};
 
   // Path: /events/[id]?ref=[code]
   const url = `${window.location.origin}/events/${link.event_id}?ref=${link.unique_code}`;
@@ -312,7 +323,7 @@ const copyLink = (link) => {
                         <div style={{ fontWeight: 'bold', fontSize: '14px' }}>{link.events?.title}</div>
                         <div style={{ fontSize: '11px', color: '#666', marginTop: '4px' }}>{link.reseller_sales?.[0]?.count || 0} Sales • 10% Comm.</div>
                     </div>
-                    <button onClick={() => copyLink(link.unique_code)} style={{ background: '#222', border: 'none', color: '#fff', width: '40px', height: '40px', borderRadius: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <button onClick={() => copyLink(link)} style={{ background: '#222', border: 'none', color: '#fff', width: '40px', height: '40px', borderRadius: '12px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                         <Copy size={16} />
                     </button>
                 </div>
