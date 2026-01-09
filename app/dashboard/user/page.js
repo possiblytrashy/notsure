@@ -89,14 +89,16 @@ export default function UserDashboard() {
       if (resellerData) {
         // 3. Fetch active links with sale counts from your reseller_sales table
         const { data: links } = await supabase
-          .from('event_resellers')
-          .select(`
-            *, 
-            event_id,
-            events:event_id (id, title, image_url, price),
-            reseller_sales(count)
-          `)
-          .eq('reseller_id', resellerData.id);
+  .from('event_resellers')
+  .select(`
+    id,
+    unique_code,
+    event_id, 
+    reseller_id,
+    events:event_id (id, title, image_url, price),
+    reseller_sales(count)
+  `)
+  .eq('reseller_id', resellerProfile.id);
         setMyResellerLinks(links || []);
       }
 
