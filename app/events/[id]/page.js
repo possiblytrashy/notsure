@@ -2,7 +2,8 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import { supabase } from '../../../lib/supabase'; // Adjust path if needed
+import dynamic from 'next/dynamic'; // IMPORT DYNAMIC
+import { supabase } from '../../../lib/supabase'; 
 import { 
   ChevronLeft, 
   ChevronRight, 
@@ -21,47 +22,18 @@ import {
   Car
 } from 'lucide-react';
 
-// --- LEAFLET IMPORTS ---
-import { MapContainer, TileLayer, Marker, useMap } from 'react-leaflet';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
+// --- DYNAMIC IMPORT FOR MAP (Fixes Error #321 & 500) ---
+const LuxuryMap = dynamic(() => import('../../../components/LuxuryMap'), { 
+  ssr: false,
+  loading: () => <div style={{height: '100%', background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center'}}><Loader2 className="animate-spin" /></div>
+});
 
-// --- LEAFLET HELPER: UPDATE MAP VIEW ---
-// This component automatically pans the map when coordinates change
-function MapUpdater({ lat, lng }) {
-  const map = useMap();
-  useEffect(() => {
-    if (lat && lng) {
-      map.flyTo([lat, lng], 15, { duration: 1.5 });
-    }
-  }, [lat, lng, map]);
-  return null;
-}
-
-// --- LEAFLET HELPER: LUXURY CUSTOM ICON ---
-// Creates a clean black dot with a pulse effect using DivIcon
-useEffect(() => {
-  // Only runs in the browser
-  if (typeof window !== 'undefined') {
-    const L = require('leaflet'); 
-    const icon = L.divIcon({
-      className: 'luxury-map-marker',
-      html: `<div style="position: relative; width: 16px; height: 16px; background-color: #000; border: 2px solid #fff; border-radius: 50%; box-shadow: 0 4px 10px rgba(0,0,0,0.3);">
-               <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 40px; height: 40px; background-color: rgba(0,0,0,0.1); border-radius: 50%; animation: mapPulse 2s infinite; z-index: -1;"></div>
-             </div>`,
-      iconSize: [40, 40],
-      iconAnchor: [20, 20],
-    });
-    setMapIcon(icon);
-  }
-}, []);
 const formatDate = (dateString) => {
   if (!dateString) return 'Date TBA';
   const options = { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' };
   return new Date(dateString).toLocaleDateString('en-US', options);
 };
 
-// --- HELPER: TIME FORMATTER ---
 const formatTime = (timeString) => {
     if (!timeString) return 'Time TBA';
     return timeString.substring(0, 5);
@@ -122,7 +94,6 @@ export default function EventPage() {
       // Logic to calculate counts
       const counts = {};
       ticketData?.forEach(t => {
-        // Use tier_id (the UUID) as the key
         counts[t.tier_id] = (counts[t.tier_id] || 0) + 1;
       });
 
@@ -130,7 +101,6 @@ export default function EventPage() {
       setEvent(eventData);
 
       if (eventData.ticket_tiers?.length > 0) {
-        // Set the UUID as the selected tier
         setSelectedTier(eventData.ticket_tiers[0].id);
       }
         
@@ -172,12 +142,13 @@ export default function EventPage() {
     validateReseller();
   }, [refCode, id]);
 
-useEffect(() => {
-  if (refCode) { 
-    localStorage.setItem('active_reseller_code', refCode);
-    console.log("Reseller attribution captured:", refCode);
-  }
-}, [refCode]);
+  useEffect(() => {
+    if (refCode) { 
+      localStorage.setItem('active_reseller_code', refCode);
+      console.log("Reseller attribution captured:", refCode);
+    }
+  }, [refCode]);
+
   // --- REAL-TIME TICKET UPDATES ---
   useEffect(() => {
     const channel = supabase
@@ -206,7 +177,7 @@ useEffect(() => {
     return originalPrice;
   };
     
-  // --- 3. RIDESHARING & MAP LOGIC ---
+  // --- 3. RIDESHARING LOGIC ---
   const handleRide = (type) => {
     if (!event.lat || !event.lng) return;
     
@@ -259,8 +230,6 @@ useEffect(() => {
     }
 
     const finalAmountPaid = isResellerMode ? parseFloat(tier.price) * 1.10 : parseFloat(tier.price);
-
-    // Ensure we have a valid Tier ID. If the JSON didn't have one, we use a fallback or the index.
     const tierIdToSave = tier.id || `tier_${selectedTier}`;
 
     const ticketData = {
@@ -269,7 +238,7 @@ useEffect(() => {
       user_id: user ? user.id : null,
       guest_email: guestEmail.trim(), 
       guest_name: guestName.trim(),   
-      tier_name: tier.name,            
+      tier_name: tier.name,           
       amount: finalAmountPaid, 
       reference: response.reference,  
       status: 'valid',                
@@ -308,7 +277,7 @@ useEffect(() => {
 
     if (!selectedTier || !activeTier || isProcessing) return;
     
-    const currentlySold = soldCounts[selectedTier] || 0; // Use the UUID key
+    const currentlySold = soldCounts[selectedTier] || 0; 
     
     if (activeTier.max_quantity && currentlySold >= activeTier.max_quantity) {
       alert("This ticket tier is sold out.");
@@ -333,7 +302,7 @@ useEffect(() => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           event_id: id,
-          tier_id: selectedTier, // This is already the UUID
+          tier_id: selectedTier, 
           email: guestEmail.trim(),
           guest_name: guestName.trim(),
           reseller_code: refCode || null
@@ -355,19 +324,21 @@ useEffect(() => {
 
       // Open Paystack
       const PaystackPop = await loadPaystackScript();
-// In your EventPage.js handlePurchase function:
-const finalPrice = isResellerMode ? activeTier.price * 1.10 : activeTier.price;
+      
+      // Calculate Price for Frontend Display matching backend logic
+      const finalPrice = isResellerMode ? Number(activeTier.price) * 1.10 : Number(activeTier.price);
 
-const handler = PaystackPop.setup({
-  key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
-  access_code: initData.access_code,
-  email: guestEmail.trim(),
-  amount: Math.round(finalPrice * 100),
-        currency: 'GHS', // Optional but good for clarity
-        callback: (res) => recordPayment(res, activeTier), // Pass the full activeTier object
+      const handler = PaystackPop.setup({
+        key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
+        access_code: initData.access_code,
+        email: guestEmail.trim(),
+        amount: Math.round(finalPrice * 100),
+        currency: 'GHS',
+        callback: (res) => recordPayment(res, activeTier),
         onClose: () => setIsProcessing(false)
       });
       handler.openIframe();
+
     } catch (err) {
       console.error("Payment initiation failed:", err);
       alert(err.message || "Could not start payment.");
@@ -413,15 +384,12 @@ const handler = PaystackPop.setup({
     
     return (
       <div style={styles.ticketWrapper}>
-        {/* INJECT ANIMATION STYLES FOR MARKER PULSE */}
         <style>{`
           @keyframes mapPulse {
             0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0; }
             50% { opacity: 0.3; }
             100% { transform: translate(-50%, -50%) scale(1.5); opacity: 0; }
           }
-          .leaflet-container { font-family: 'Inter', sans-serif; }
-          .leaflet-control-attribution { display: none !important; }
         `}</style>
 
         <div style={styles.ticketCard} className="printable-ticket">
@@ -446,33 +414,11 @@ const handler = PaystackPop.setup({
               <p style={styles.refText}>REF: {paymentSuccess.reference}</p>
             </div>
 
-            {/* --- SUCCESS MAP INTEGRATION (LEAFLET) --- */}
+            {/* --- SUCCESS MAP INTEGRATION (DYNAMIC) --- */}
             <div style={{ marginTop: '20px', marginBottom: '20px' }}>
-              <div style={{...styles.mapContainer, height: '250px'}}>
-                <MapContainer 
-                  center={[event.lat || 5.6037, event.lng || -0.1870]} 
-                  zoom={15} 
-                  style={{ height: '100%', width: '100%' }}
-                  zoomControl={false} // Clean look
-                  scrollWheelZoom={false}
-                >
-                  {/* High-End "Voyager" Tile Layer for Luxury Feel */}
-                  <TileLayer
-                    url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-                  />
-                  
-                  {/* Auto Recenter */}
-                  <MapUpdater lat={event.lat} lng={event.lng} />
-
-                  <Marker 
-                    position={[event.lat || 5.6037, event.lng || -0.1870]} 
-                    icon={luxuryIcon}
-                  >
-                    {/* Optional: Add Popup if needed */}
-                  </Marker>
-                </MapContainer>
-
+              <div style={styles.mapContainer}>
+                <LuxuryMap lat={event.lat} lng={event.lng} />
+                
                 <div style={styles.mapOverlay}>
                     <p style={{margin: 0, fontWeight: 800, fontSize: '12px'}}>{event.location}</p>
                     <button onClick={() => handleRide('maps')} style={styles.mapActionBtn}>
@@ -592,7 +538,6 @@ const handler = PaystackPop.setup({
                   <h3 style={styles.formHeading}>2. SELECT TIER</h3>
                   <div style={styles.tiersWrapper}>
                   {event.ticket_tiers?.map((tier) => {
-                    // Match soldCounts by tier.id (UUID)
                     const soldOut = tier.max_quantity > 0 && (soldCounts[tier.id] || 0) >= tier.max_quantity;
                     const displayPrice = getDisplayPrice(tier.price);
                     
