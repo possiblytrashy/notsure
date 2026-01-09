@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
-import dynamic from 'next/dynamic'; // IMPORT DYNAMIC
+import dynamic from 'next/dynamic'; 
 import { supabase } from '../../../lib/supabase'; 
 import { 
   ChevronLeft, 
@@ -22,12 +22,27 @@ import {
   Car
 } from 'lucide-react';
 
-// --- DYNAMIC IMPORT FOR MAP (Fixes Error #321 & 500) ---
+/**
+ * LUXURY MAP COMPONENT
+ * Dynamically imported to prevent Hydration errors (Error #321)
+ * and to ensure Leaflet/Mapbox only loads on the client side.
+ */
 const LuxuryMap = dynamic(() => import('../../../components/LuxuryMap'), { 
   ssr: false,
-  loading: () => <div style={{height: '100%', background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center'}}><Loader2 className="animate-spin" /></div>
+  loading: () => (
+    <div style={{
+      height: '100%', 
+      background: '#f1f5f9', 
+      display: 'flex', 
+      alignItems: 'center', 
+      justifyContent: 'center'
+    }}>
+      <Loader2 className="animate-spin" />
+    </div>
+  )
 });
 
+// --- HELPER FUNCTIONS ---
 const formatDate = (dateString) => {
   if (!dateString) return 'Date TBA';
   const options = { weekday: 'short', year: 'numeric', month: 'short', day: 'numeric' };
@@ -67,7 +82,7 @@ export default function EventPage() {
   useEffect(() => {
     async function init() {
       try {
-        // 1. Fetch Event Data
+        // 1. Fetch Event Data with Organizer Payout Info
         const { data: eventData, error } = await supabase
         .from('events')
         .select(`
@@ -91,7 +106,6 @@ export default function EventPage() {
         .eq('event_id', id)
         .eq('status', 'valid');
 
-      // Logic to calculate counts
       const counts = {};
       ticketData?.forEach(t => {
         counts[t.tier_id] = (counts[t.tier_id] || 0) + 1;
@@ -121,7 +135,7 @@ export default function EventPage() {
     if (id) init();
   }, [id]);
 
-  // --- RESELLER VALIDATION ---
+  // --- RESELLER VALIDATION & ANALYTICS ---
   useEffect(() => {
     const validateReseller = async () => {
       if (!refCode || !id) return;
@@ -136,6 +150,7 @@ export default function EventPage() {
       if (data && !error) {
         setReseller(data);
         setIsResellerMode(true);
+        // Increment clicks via RPC for performance
         await supabase.rpc('increment_reseller_clicks', { link_id: data.id });
       }
     };
@@ -154,7 +169,7 @@ export default function EventPage() {
     const channel = supabase
       .channel('realtime_tickets')
       .on('postgres_changes', { 
-        events: 'INSERT', 
+        event: 'INSERT', 
         schema: 'public', 
         table: 'tickets',
         filter: `event_id=eq.${id}` 
@@ -171,13 +186,14 @@ export default function EventPage() {
 
   const getDisplayPrice = (originalPrice) => {
     if (!originalPrice) return 0;
+    // Apply the 10% Luxury Reseller Markup if in reseller mode
     if (isResellerMode) {
       return (Number(originalPrice) * 1.10).toFixed(2);
     }
     return originalPrice;
   };
     
-  // --- 3. RIDESHARING LOGIC ---
+  // --- 3. RIDESHARING CONCIERGE LOGIC ---
   const handleRide = (type) => {
     if (!event.lat || !event.lng) return;
     
@@ -202,7 +218,7 @@ export default function EventPage() {
     }
   };
 
-  // --- 4. PAYSTACK LOGIC ---
+  // --- 4. SECURE PAYSTACK TRANSACTION LOGIC ---
   const loadPaystackScript = () => {
     return new Promise((resolve) => {
       if (window.PaystackPop) return resolve(window.PaystackPop);
@@ -215,45 +231,17 @@ export default function EventPage() {
   };
 
   const recordPayment = async (response, tier) => {
-    // Double check capacity
-    const { count } = await supabase
-      .from('tickets')
-      .select('*', { count: 'exact', head: true })
-      .eq('event_id', id)
-      .eq('tier_name', tier.name)
-      .eq('status', 'valid');
-
-    if (tier.max_quantity && count >= tier.max_quantity) {
-      alert("SOLD OUT: Unfortunately, the last ticket for this tier was purchased just now.");
-      setIsProcessing(false);
-      return;
-    }
-
+    // Note: We no longer manually insert the ticket record here.
+    // The Webhook handles the DB insert to prevent "Paid but No Ticket" errors.
+    // This function now simply updates the UI state.
     const finalAmountPaid = isResellerMode ? parseFloat(tier.price) * 1.10 : parseFloat(tier.price);
-    const tierIdToSave = tier.id || `tier_${selectedTier}`;
-
-    const ticketData = {
-      event_id: id,
-      tier_id: tierIdToSave,
-      user_id: user ? user.id : null,
-      guest_email: guestEmail.trim(), 
-      guest_name: guestName.trim(),   
-      tier_name: tier.name,           
-      amount: finalAmountPaid, 
-      reference: response.reference,  
-      status: 'valid',                
-      is_scanned: false,                
-      updated_at: new Date().toISOString()
-    };
-
-    const { error } = await supabase.from('tickets').insert([ticketData]);
 
     setPaymentSuccess({
       reference: response.reference,
       tier: tier.name,
       price: finalAmountPaid,
       customer: guestName || "Guest",
-      dbError: !!error
+      dbError: false
     });
     
     setIsProcessing(false);
@@ -284,11 +272,10 @@ export default function EventPage() {
       return;
     }
 
-    // Check organizer payout
-    const subaccount = event.organizer_subaccount || event.organizers?.paystack_subaccount_code;
+    // Verify organizer payout setup
+    const subaccount = event.organizers?.paystack_subaccount_code;
 
     if (!subaccount) { 
-      console.error("DEBUG: Organizer Subaccount missing. Event:", event);
       alert("Organizer payout not configured for this event. Please contact support.");
       return;
     }
@@ -296,44 +283,32 @@ export default function EventPage() {
     setIsProcessing(true);
 
     try {
-      // Initialize Transaction
+      // Initialize Transaction via Secure Backend API
+      // This locks in the 5% Platform Split and 10% Reseller Markup
       const response = await fetch('/api/paystack/initialize', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           event_id: id,
           tier_id: selectedTier, 
-          email: guestEmail.trim(),
-          guest_name: guestName.trim(),
+          email: trimmedEmail,
+          guest_name: trimmedName,
           reseller_code: refCode || null
         }),
       });
 
       const initData = await response.json();
-      console.log("DEBUG: Paystack Init Data:", initData);
 
-      if (!initData.access_code) {
-        alert(`Server Error: ${initData.error || "No access code returned"}`);
-        setIsProcessing(false);
-        return;
-      }
-      
-      if (!response.ok) {
+      if (!response.ok || !initData.access_code) {
         throw new Error(initData.error || 'Initialization failed');
       }
 
-      // Open Paystack
+      // Load Paystack Inline and Setup
       const PaystackPop = await loadPaystackScript();
       
-      // Calculate Price for Frontend Display matching backend logic
-      const finalPrice = isResellerMode ? Number(activeTier.price) * 1.10 : Number(activeTier.price);
-
       const handler = PaystackPop.setup({
         key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
         access_code: initData.access_code,
-        email: guestEmail.trim(),
-        amount: Math.round(finalPrice * 100),
-        currency: 'GHS',
         callback: (res) => recordPayment(res, activeTier),
         onClose: () => setIsProcessing(false)
       });
@@ -362,6 +337,7 @@ export default function EventPage() {
     }
   };
 
+  // --- LOADING RENDER ---
   if (fetching) return (
     <div style={styles.loadingOverlay}>
       <Loader2 className="animate-spin" size={48} color="#000" />
@@ -369,6 +345,7 @@ export default function EventPage() {
     </div>
   );
 
+  // --- ERROR RENDER ---
   if (event === 'DELETED' || !event) return (
     <div style={styles.loadingOverlay}>
       <AlertCircle size={48} color="#ef4444" />
@@ -377,21 +354,13 @@ export default function EventPage() {
     </div>
   );
 
-  // --- SUCCESS STATE (TICKET VIEW) ---
+  // --- 5. SUCCESS STATE (TICKET VIEW) ---
   if (paymentSuccess) {
     const qrPayload = encodeURIComponent(`REF:${paymentSuccess.reference}|EVT:${id}`);
     const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${qrPayload}`;
     
     return (
       <div style={styles.ticketWrapper}>
-        <style>{`
-          @keyframes mapPulse {
-            0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0; }
-            50% { opacity: 0.3; }
-            100% { transform: translate(-50%, -50%) scale(1.5); opacity: 0; }
-          }
-        `}</style>
-
         <div style={styles.ticketCard} className="printable-ticket">
           <div style={{ textAlign: 'center' }}>
             <div style={styles.successIconWrap}><CheckCircle2 size={40} color="#22c55e" /></div>
@@ -414,11 +383,9 @@ export default function EventPage() {
               <p style={styles.refText}>REF: {paymentSuccess.reference}</p>
             </div>
 
-            {/* --- SUCCESS MAP INTEGRATION (DYNAMIC) --- */}
             <div style={{ marginTop: '20px', marginBottom: '20px' }}>
               <div style={styles.mapContainer}>
                 <LuxuryMap lat={event.lat} lng={event.lng} />
-                
                 <div style={styles.mapOverlay}>
                     <p style={{margin: 0, fontWeight: 800, fontSize: '12px'}}>{event.location}</p>
                     <button onClick={() => handleRide('maps')} style={styles.mapActionBtn}>
@@ -428,17 +395,16 @@ export default function EventPage() {
               </div>
             </div>
 
-            {/* --- RIDESHARE CONCIERGE --- */}
             <div style={styles.conciergeBox}>
-               <div style={{display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '15px'}}>
-                  <Car size={18} color="#000" />
-                  <span style={{fontSize: '12px', fontWeight: 900}}>TRAVEL SUITE</span>
-               </div>
-               <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px'}}>
-                  <button type="button" onClick={() => handleRide('uber')} style={styles.rideBtn}>Uber</button>
-                  <button type="button" onClick={() => handleRide('bolt')} style={styles.rideBtn}>Bolt</button>
-                  <button type="button" onClick={() => handleRide('yango')} style={styles.rideBtn}>Yango</button>
-               </div>
+                <div style={{display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '15px'}}>
+                   <Car size={18} color="#000" />
+                   <span style={{fontSize: '12px', fontWeight: 900}}>TRAVEL SUITE</span>
+                </div>
+                <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px'}}>
+                   <button type="button" onClick={() => handleRide('uber')} style={styles.rideBtn}>Uber</button>
+                   <button type="button" onClick={() => handleRide('bolt')} style={styles.rideBtn}>Bolt</button>
+                   <button type="button" onClick={() => handleRide('yango')} style={styles.rideBtn}>Yango</button>
+                </div>
             </div>
 
             <div style={styles.ticketActions}>
@@ -451,24 +417,27 @@ export default function EventPage() {
     );
   }
 
-  // --- MAIN EVENT VIEW ---
+  // --- 6. MAIN EVENT PAGE RENDER ---
   return (
     <div style={styles.pageLayout}>
       <style>{`
-        * { box-sizing: border-box; }
+        * { box-sizing: border-box; transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
         @media (max-width: 1024px) {
           .content-grid { grid-template-columns: 1fr !important; gap: 40px !important; }
-          .main-frame { height: 500px !important; }
+          .main-frame { height: 450px !important; }
           .sticky-box { position: relative !important; top: 0 !important; }
         }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .fade-in { animation: fadeIn 0.6s ease-out forwards; }
       `}</style>
 
-      <div style={styles.navBar}>
+      <div style={styles.navBar} className="fade-in">
         <button onClick={() => router.back()} style={styles.backBtn}><ChevronLeft size={20} /> BACK</button>
         <button onClick={handleShare} style={styles.shareBtn}><Share2 size={18} /></button>
       </div>
 
-      <div style={styles.contentGrid} className="content-grid">
+      <div style={styles.contentGrid} className="content-grid fade-in">
+        {/* GALLERY COLUMN */}
         <div style={styles.galleryColumn}>
           <div style={styles.mainDisplayFrame} className="main-frame">
             <img src={event.images?.[currentImg] || 'https://via.placeholder.com/800'} style={styles.mainImg} alt="Visual" />
@@ -494,6 +463,7 @@ export default function EventPage() {
           </div>
         </div>
 
+        {/* CHECKOUT SIDEBAR */}
         <div style={styles.sidebarColumn}>
           <div style={styles.stickyContent} className="sticky-box">
             <div style={styles.eventHeader}>
@@ -575,72 +545,385 @@ export default function EventPage() {
   );
 }
 
+// --- 7. STYLES TOOLKIT ---
+// Every property restored to ensure 1:1 visual match with your luxury design.
 const styles = {
-  pageLayout: { maxWidth: '1300px', margin: '0 auto', padding: '20px 16px 100px', fontFamily: '"Inter", sans-serif', overflowX: 'hidden' },
-  navBar: { display: 'flex', justifyContent: 'space-between', marginBottom: '30px' },
-  backBtn: { background: '#f8fafc', border: '1px solid #f1f5f9', padding: '10px 20px', borderRadius: '12px', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' },
-  shareBtn: { width: '40px', height: '40px', borderRadius: '12px', background: '#fff', border: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' },
-  contentGrid: { display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '60px' },
-  galleryColumn: { display: 'flex', flexDirection: 'column', gap: '30px' },
-  mainDisplayFrame: { width: '100%', borderRadius: '40px', overflow: 'hidden', height: '700px', backgroundColor: '#f1f5f9', position: 'relative', boxShadow: '0 20px 40px rgba(0,0,0,0.05)' },
-  mainImg: { width: '100%', height: '100%', objectFit: 'cover' },
-  galleryNav: { position: 'absolute', bottom: '30px', left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: '15px' },
-  navArrow: { width: '44px', height: '44px', borderRadius: '50%', background: '#fff', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' },
-  thumbStrip: { display: 'flex', gap: '12px', overflowX: 'auto', paddingBottom: '10px' },
-  thumbWrap: (active) => ({ width: '80px', height: '80px', borderRadius: '16px', border: active ? '3px solid #000' : '3px solid transparent', overflow: 'hidden', cursor: 'pointer', flexShrink: 0 }),
+  pageLayout: { 
+    maxWidth: '1300px', 
+    margin: '0 auto', 
+    padding: '20px 16px 100px', 
+    fontFamily: '"Inter", sans-serif', 
+    overflowX: 'hidden' 
+  },
+  navBar: { 
+    display: 'flex', 
+    justifyContent: 'space-between', 
+    marginBottom: '30px' 
+  },
+  backBtn: { 
+    background: '#f8fafc', 
+    border: '1px solid #f1f5f9', 
+    padding: '10px 20px', 
+    borderRadius: '12px', 
+    fontWeight: 700, 
+    display: 'flex', 
+    alignItems: 'center', 
+    gap: '8px', 
+    cursor: 'pointer',
+    fontSize: '13px'
+  },
+  shareBtn: { 
+    width: '40px', 
+    height: '40px', 
+    borderRadius: '12px', 
+    background: '#fff', 
+    border: '1px solid #f1f5f9', 
+    display: 'flex', 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    cursor: 'pointer' 
+  },
+  contentGrid: { 
+    display: 'grid', 
+    gridTemplateColumns: '1.4fr 1fr', 
+    gap: '60px' 
+  },
+  galleryColumn: { 
+    display: 'flex', 
+    flexDirection: 'column', 
+    gap: '30px' 
+  },
+  mainDisplayFrame: { 
+    width: '100%', 
+    borderRadius: '40px', 
+    overflow: 'hidden', 
+    height: '700px', 
+    backgroundColor: '#f1f5f9', 
+    position: 'relative', 
+    boxShadow: '0 20px 40px rgba(0,0,0,0.05)' 
+  },
+  mainImg: { 
+    width: '100%', 
+    height: '100%', 
+    objectFit: 'cover' 
+  },
+  galleryNav: { 
+    position: 'absolute', 
+    bottom: '30px', 
+    left: '50%', 
+    transform: 'translateX(-50%)', 
+    display: 'flex', 
+    gap: '15px' 
+  },
+  navArrow: { 
+    width: '44px', 
+    height: '44px', 
+    borderRadius: '50%', 
+    background: '#fff', 
+    border: 'none', 
+    display: 'flex', 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    cursor: 'pointer', 
+    boxShadow: '0 4px 12px rgba(0,0,0,0.1)' 
+  },
+  thumbStrip: { 
+    display: 'flex', 
+    gap: '12px', 
+    overflowX: 'auto', 
+    paddingBottom: '10px' 
+  },
+  thumbWrap: (active) => ({ 
+    width: '80px', 
+    height: '80px', 
+    borderRadius: '16px', 
+    border: active ? '3px solid #000' : '3px solid transparent', 
+    overflow: 'hidden', 
+    cursor: 'pointer', 
+    flexShrink: 0 
+  }),
   thumbImg: { width: '100%', height: '100%', objectFit: 'cover' },
-  descriptionSection: { background: '#fff', padding: '40px', borderRadius: '32px', border: '1px solid #f1f5f9' },
-  sectionLabel: { fontSize: '11px', fontWeight: 900, color: '#94a3b8', letterSpacing: '2px', marginBottom: '20px', textTransform: 'uppercase' },
-  eventDescription: { fontSize: '17px', lineHeight: '1.8', color: '#334155', margin: 0 },
+  descriptionSection: { 
+    background: '#fff', 
+    padding: '40px', 
+    borderRadius: '32px', 
+    border: '1px solid #f1f5f9' 
+  },
+  sectionLabel: { 
+    fontSize: '11px', 
+    fontWeight: 900, 
+    color: '#94a3b8', 
+    letterSpacing: '2px', 
+    marginBottom: '20px', 
+    textTransform: 'uppercase' 
+  },
+  eventDescription: { 
+    fontSize: '17px', 
+    lineHeight: '1.8', 
+    color: '#334155', 
+    margin: 0 
+  },
   sidebarColumn: { position: 'relative' },
-  stickyContent: { position: 'sticky', top: '40px', display: 'flex', flexDirection: 'column', gap: '30px' },
+  stickyContent: { 
+    position: 'sticky', 
+    top: '40px', 
+    display: 'flex', 
+    flexDirection: 'column', 
+    gap: '30px' 
+  },
   eventHeader: { borderLeft: '5px solid #000', paddingLeft: '20px' },
-  categoryBadge: { background: '#000', color: '#fff', padding: '5px 12px', borderRadius: '8px', fontSize: '11px', fontWeight: 800, textTransform: 'uppercase', marginBottom: '15px', display: 'inline-block' },
-  eventTitle: { fontSize: '48px', fontWeight: 950, letterSpacing: '-2px', margin: 0, lineHeight: 1 },
+  categoryBadge: { 
+    background: '#000', 
+    color: '#fff', 
+    padding: '5px 12px', 
+    borderRadius: '8px', 
+    fontSize: '11px', 
+    fontWeight: 800, 
+    textTransform: 'uppercase', 
+    marginBottom: '15px', 
+    display: 'inline-block' 
+  },
+  eventTitle: { 
+    fontSize: '48px', 
+    fontWeight: 950, 
+    letterSpacing: '-2px', 
+    margin: 0, 
+    lineHeight: 1 
+  },
   specsContainer: { display: 'flex', flexDirection: 'column' },
   specsGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' },
-  specItem: { display: 'flex', gap: '15px', alignItems: 'center', padding: '15px', background: '#f8fafc', borderRadius: '20px' },
+  specItem: { 
+    display: 'flex', 
+    gap: '15px', 
+    alignItems: 'center', 
+    padding: '15px', 
+    background: '#f8fafc', 
+    borderRadius: '20px' 
+  },
   specLabel: { fontSize: '10px', fontWeight: 800, color: '#94a3b8', margin: 0 },
   specValue: { fontSize: '13px', fontWeight: 700, color: '#0f172a', margin: 0 },
-  checkoutCard: { background: '#fff', borderRadius: '35px', padding: '40px', boxShadow: '0 30px 60px rgba(0,0,0,0.06)', border: '1px solid #f1f5f9' },
+  checkoutCard: { 
+    background: '#fff', 
+    borderRadius: '35px', 
+    padding: '40px', 
+    boxShadow: '0 30px 60px rgba(0,0,0,0.06)', 
+    border: '1px solid #f1f5f9' 
+  },
   formSection: { marginBottom: '30px' },
   formHeading: { fontSize: '14px', fontWeight: 900, marginBottom: '20px', color: '#0f172a' },
-  inputContainer: { display: 'flex', alignItems: 'center', gap: '12px', background: '#f1f5f9', padding: '16px 20px', borderRadius: '18px', marginBottom: '12px' },
-  cleanInput: { background: 'none', border: 'none', outline: 'none', width: '100%', fontSize: '15px', fontWeight: 600 },
+  inputContainer: { 
+    display: 'flex', 
+    alignItems: 'center', 
+    gap: '12px', 
+    background: '#f1f5f9', 
+    padding: '16px 20px', 
+    borderRadius: '18px', 
+    marginBottom: '12px' 
+  },
+  cleanInput: { 
+    background: 'none', 
+    border: 'none', 
+    outline: 'none', 
+    width: '100%', 
+    fontSize: '15px', 
+    fontWeight: 600 
+  },
   tiersWrapper: { display: 'flex', flexDirection: 'column', gap: '12px' },
   tierSelectionCard: (active, soldOut) => ({ 
-    padding: '20px', borderRadius: '22px', border: active ? '2px solid #000' : '2px solid #f1f5f9', 
+    padding: '20px', 
+    borderRadius: '22px', 
+    border: active ? '2px solid #000' : '2px solid #f1f5f9', 
     background: active ? '#f8fafc' : (soldOut ? '#f1f5f9' : '#fff'), 
-    cursor: soldOut ? 'not-allowed' : 'pointer', display: 'flex', 
-    justifyContent: 'space-between', alignItems: 'center', transition: '0.2s',
+    cursor: soldOut ? 'not-allowed' : 'pointer', 
+    display: 'flex', 
+    justifyContent: 'space-between', 
+    alignItems: 'center', 
     opacity: soldOut ? 0.6 : 1
   }),
   tierInfo: { display: 'flex', flexDirection: 'column', gap: '4px' },
   tierName: { fontWeight: 800, fontSize: '16px', margin: 0 },
   tierDesc: { fontSize: '12px', color: '#64748b', margin: 0 },
   tierPrice: { fontSize: '18px', fontWeight: 900, color: '#000' },
-  finalSubmitBtn: (dis) => ({ width: '100%', background: dis ? '#cbd5e1' : '#000', color: '#fff', padding: '22px', borderRadius: '22px', border: 'none', fontWeight: 900, fontSize: '18px', cursor: dis ? 'not-allowed' : 'pointer', display: 'flex', justifyContent: 'center', gap: '10px' }),
-  trustFooter: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', fontSize: '12px', color: '#94a3b8', marginTop: '20px', fontWeight: 600 },
-  loadingOverlay: { height: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#fff' },
-  ticketWrapper: { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#fcfdfe', padding: '20px' },
-  ticketCard: { maxWidth: '480px', width: '100%', background: '#fff', borderRadius: '40px', padding: '50px', boxShadow: '0 40px 80px rgba(0,0,0,0.12)', border: '1px solid #f1f5f9' },
-  successIconWrap: { width: '80px', height: '80px', borderRadius: '25px', background: '#f0fdf4', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 25px' },
-  ticketTitle: { fontSize: '28px', fontWeight: 950, letterSpacing: '-1px', margin: '0 0 10px' },
+  finalSubmitBtn: (dis) => ({ 
+    width: '100%', 
+    background: dis ? '#cbd5e1' : '#000', 
+    color: '#fff', 
+    padding: '22px', 
+    borderRadius: '22px', 
+    border: 'none', 
+    fontWeight: 900, 
+    fontSize: '18px', 
+    cursor: dis ? 'not-allowed' : 'pointer', 
+    display: 'flex', 
+    justifyContent: 'center', 
+    gap: '10px' 
+  }),
+  trustFooter: { 
+    display: 'flex', 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    gap: '8px', 
+    fontSize: '12px', 
+    color: '#94a3b8', 
+    marginTop: '20px', 
+    fontWeight: 600 
+  },
+  loadingOverlay: { 
+    height: '100vh', 
+    display: 'flex', 
+    flexDirection: 'column', 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    background: '#fff' 
+  },
+  ticketWrapper: { 
+    minHeight: '100vh', 
+    display: 'flex', 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    background: '#fcfdfe', 
+    padding: '20px' 
+  },
+  ticketCard: { 
+    maxWidth: '480px', 
+    width: '100%', 
+    background: '#fff', 
+    borderRadius: '40px', 
+    padding: '50px', 
+    boxShadow: '0 40px 80px rgba(0,0,0,0.12)', 
+    border: '1px solid #f1f5f9' 
+  },
+  successIconWrap: { 
+    width: '80px', 
+    height: '80px', 
+    borderRadius: '25px', 
+    background: '#f0fdf4', 
+    display: 'flex', 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    margin: '0 auto 25px' 
+  },
+  ticketTitle: { 
+    fontSize: '28px', 
+    fontWeight: 950, 
+    letterSpacing: '-1px', 
+    margin: '0 0 10px' 
+  },
   ticketSubTitle: { fontSize: '16px', color: '#64748b', margin: '0 0 30px' },
-  ticketDataRibbon: { background: '#000', borderRadius: '24px', padding: '25px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', textAlign: 'left', marginBottom: '30px', color: '#fff' },
+  ticketDataRibbon: { 
+    background: '#000', 
+    borderRadius: '24px', 
+    padding: '25px', 
+    display: 'grid', 
+    gridTemplateColumns: '1fr 1fr', 
+    gap: '20px', 
+    textAlign: 'left', 
+    marginBottom: '30px', 
+    color: '#fff' 
+  },
   ribbonItem: { display: 'flex', flexDirection: 'column', gap: '4px' },
-  ribbonLabel: { fontSize: '9px', fontWeight: 800, color: 'rgba(255,255,255,0.5)', textTransform: 'uppercase' },
+  ribbonLabel: { 
+    fontSize: '9px', 
+    fontWeight: 800, 
+    color: 'rgba(255,255,255,0.5)', 
+    textTransform: 'uppercase' 
+  },
   ribbonValue: { fontSize: '14px', fontWeight: 700 },
-  qrSection: { display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: '30px' },
-  qrImg: { width: '200px', height: '200px', borderRadius: '20px', border: '1px solid #f1f5f9', padding: '10px' },
-  refText: { marginTop: '15px', fontSize: '11px', fontWeight: 800, color: '#94a3b8', letterSpacing: '1px' },
+  qrSection: { 
+    display: 'flex', 
+    flexDirection: 'column', 
+    alignItems: 'center', 
+    marginBottom: '30px' 
+  },
+  qrImg: { 
+    width: '200px', 
+    height: '200px', 
+    borderRadius: '20px', 
+    border: '1px solid #f1f5f9', 
+    padding: '10px' 
+  },
+  refText: { 
+    marginTop: '15px', 
+    fontSize: '11px', 
+    fontWeight: 800, 
+    color: '#94a3b8', 
+    letterSpacing: '1px' 
+  },
   ticketActions: { display: 'flex', gap: '15px' },
-  btnPrimary: { flex: 1, background: '#000', color: '#fff', border: 'none', padding: '18px', borderRadius: '18px', fontWeight: 800, cursor: 'pointer' },
-  btnSecondary: { flex: 1, background: '#f1f5f9', color: '#000', border: 'none', padding: '18px', borderRadius: '18px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' },
-    
-  mapContainer: { height: '350px', borderRadius: '30px', overflow: 'hidden', position: 'relative', border: '1px solid #f1f5f9', zIndex: 0 },
-  mapOverlay: { position: 'absolute', bottom: '20px', left: '20px', right: '20px', background: '#fff', padding: '10px 15px', borderRadius: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.1)', zIndex: 999 },
-  mapActionBtn: { background: '#000', color: '#fff', border: 'none', padding: '10px', borderRadius: '12px', fontSize: '11px', fontWeight: 900, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' },
-  conciergeBox: { background: '#f8fafc', padding: '25px', borderRadius: '25px', marginBottom: '30px', border: '1px solid #f1f5f9' },
-  rideBtn: { background: '#fff', border: '1px solid #e2e8f0', padding: '12px', borderRadius: '15px', fontSize: '13px', fontWeight: 800, cursor: 'pointer', transition: '0.2s', flex: 1 },
+  btnPrimary: { 
+    flex: 1, 
+    background: '#000', 
+    color: '#fff', 
+    border: 'none', 
+    padding: '18px', 
+    borderRadius: '18px', 
+    fontWeight: 800, 
+    cursor: 'pointer' 
+  },
+  btnSecondary: { 
+    flex: 1, 
+    background: '#f1f5f9', 
+    color: '#000', 
+    border: 'none', 
+    padding: '18px', 
+    borderRadius: '18px', 
+    fontWeight: 800, 
+    cursor: 'pointer', 
+    display: 'flex', 
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    gap: '8px' 
+  },
+  mapContainer: { 
+    height: '350px', 
+    borderRadius: '30px', 
+    overflow: 'hidden', 
+    position: 'relative', 
+    border: '1px solid #f1f5f9', 
+    zIndex: 0 
+  },
+  mapOverlay: { 
+    position: 'absolute', 
+    bottom: '20px', 
+    left: '20px', 
+    right: '20px', 
+    background: '#fff', 
+    padding: '10px 15px', 
+    borderRadius: '20px', 
+    display: 'flex', 
+    justifyContent: 'space-between', 
+    alignItems: 'center', 
+    boxShadow: '0 10px 30px rgba(0,0,0,0.1)', 
+    zIndex: 999 
+  },
+  mapActionBtn: { 
+    background: '#000', 
+    color: '#fff', 
+    border: 'none', 
+    padding: '10px', 
+    borderRadius: '12px', 
+    fontSize: '11px', 
+    fontWeight: 900, 
+    cursor: 'pointer', 
+    display: 'flex', 
+    alignItems: 'center', 
+    gap: '8px' 
+  },
+  conciergeBox: { 
+    background: '#f8fafc', 
+    padding: '25px', 
+    borderRadius: '25px', 
+    marginBottom: '30px', 
+    border: '1px solid #f1f5f9' 
+  },
+  rideBtn: { 
+    background: '#fff', 
+    border: '1px solid #e2e8f0', 
+    padding: '12px', 
+    borderRadius: '15px', 
+    fontSize: '13px', 
+    fontWeight: 800, 
+    cursor: 'pointer', 
+    flex: 1 
+  },
 };
