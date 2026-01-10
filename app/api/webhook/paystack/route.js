@@ -255,4 +255,73 @@ export async function POST(req) {
 /* ======================================================
    🔁 NEW: AUTOMATIC RESELLER PAYOUT (ADDITIVE ONLY)
 ====================================================== */
-async function
+async function attemptAutoResellerPayout(
+  supabase,
+  resellerCode
+) {
+  const { data: reseller } = await supabase
+    .from('resellers')
+    .select('*')
+    .eq('unique_code', resellerCode)
+    .single();
+
+  if (
+    !reseller ||
+    !reseller.payout_recipient_code ||
+    reseller.total_earned <
+      reseller.payout_threshold
+  ) {
+    return;
+  }
+
+  const { data: unpaidSales } = await supabase
+    .from('reseller_sales')
+    .select('*')
+    .eq('reseller_id', reseller.id)
+    .eq('paid', false);
+
+  if (!unpaidSales?.length) return;
+
+  const payoutAmount = unpaidSales.reduce(
+    (sum, s) =>
+      sum + parseFloat(s.commission_amount),
+    0
+  );
+
+  const res = await fetch(
+    'https://api.paystack.co/transfer',
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        source: 'balance',
+        amount: Math.round(payoutAmount * 100),
+        recipient: reseller.payout_recipient_code,
+        reason: 'Automatic reseller payout'
+      })
+    }
+  );
+
+  const data = await res.json();
+  if (!data.status) return;
+
+  await supabase
+    .from('reseller_sales')
+    .update({
+      paid: true,
+      payout_reference: data.data.reference
+    })
+    .eq('reseller_id', reseller.id)
+    .eq('paid', false);
+
+  await supabase
+    .from('resellers')
+    .update({
+      total_earned: 0,
+      last_payout_at: new Date()
+    })
+    .eq('id', reseller.id);
+}
