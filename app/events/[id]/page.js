@@ -258,20 +258,19 @@ useEffect(() => {
     setIsProcessing(false);
   };
 
-  const handlePurchase = async (e) => {
-    if (e) e.preventDefault();
-    
-    const trimmedEmail = guestEmail.trim();
-    const trimmedName = guestName.trim();
+const handlePurchase = async (e) => {
+  if (e) e.preventDefault();
+  
+  // 1. Force lowercase and trim right at the source
+  const cleanedEmail = guestEmail.toLowerCase().trim();
+  const cleanedName = guestName.trim();
 
-    if (!trimmedEmail || !trimmedEmail.includes('@')) {
-      alert("Please enter a valid email address.");
-      return;
-    }
-
-    if (!trimmedName) {
-      alert("Please enter your name.");
-      return;
+  // 2. More robust regex check
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  if (!emailRegex.test(cleanedEmail)) {
+    alert("Please enter a valid luxury concierge email.");
+    return;
+  }return;
     }
 
     if (!selectedTier || !activeTier || isProcessing) return;
