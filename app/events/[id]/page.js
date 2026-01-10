@@ -310,12 +310,12 @@ const handlePurchase = async (e) => {
       const PaystackPop = await loadPaystackScript();
       
       const handler = PaystackPop.setup({
-        key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
-        access_code: initData.access_code,
-        callback: (res) => recordPayment(res, activeTier),
-        onClose: () => setIsProcessing(false)
-      });
-      handler.openIframe();
+  key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
+  access_code: initData.access_code,
+  email: cleanedEmail, // 🔥 REQUIRED EVEN WITH access_code
+  callback: (res) => recordPayment(res, activeTier),
+  onClose: () => setIsProcessing(false)
+});
 
     } catch (err) {
       console.error("Payment initiation failed:", err);
