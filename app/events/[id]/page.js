@@ -1,4 +1,4 @@
-"use client";
+f"use client";
 import { useEffect, useState, useMemo } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic'; 
@@ -328,6 +328,7 @@ const handlePurchase = async (e) => {
   callback: (res) => recordPayment(res, activeTier),
   onClose: () => setIsProcessing(false)
 });
+handler.openIframe(); // 🔥 THIS WAS MISSING
 
     } catch (err) {
       console.error("Payment initiation failed:", err);
