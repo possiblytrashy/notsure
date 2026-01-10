@@ -32,16 +32,27 @@ export async function POST(req) {
 
     if (!tier) return NextResponse.json({ error: "Tier not found" }, { status: 404 });
 
-    /* 2. Base Price */
-    const basePrice = parseFloat(tier.price);
+   // --- 3. PRICE CALCULATION (BULLETPROOF) ---
+const basePrice = Number(tier.price);
 
-    /* 3. Apply reseller markup */
-    const isReseller = reseller_code && reseller_code !== "DIRECT";
-    const finalPrice = isReseller ? basePrice * 1.10 : basePrice;
+if (!basePrice || basePrice <= 0) {
+  return NextResponse.json({ error: 'Invalid ticket price' }, { status: 400 });
+}
 
-    /* 4. Paystack math (ONLY base price matters here) */
-    const organizerShare = basePrice * 0.95;
-    const platformFee = basePrice * 0.05;
+let totalAmount = basePrice;
+let resellerMarkup = 0;
+
+if (resellerData && resellerData.resellers?.paystack_subaccount_code) {
+  resellerMarkup = basePrice * 0.10;
+  totalAmount = basePrice + resellerMarkup;
+}
+
+// Paystack expects amount in pesewas (GHS × 100)
+const amountInPesewas = Math.round(totalAmount * 100);
+
+if (!amountInPesewas || amountInPesewas < 100) {
+  return NextResponse.json({ error: 'Transaction amount invalid' }, { status: 400 });
+}
 
     const organizerSubaccount =
       tier.events.organizer_subaccount ||
