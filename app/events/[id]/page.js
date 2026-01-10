@@ -1,43 +1,4 @@
-useEffect(() => {
-    const validateReseller = async () => {
-      if (!refCode || !id) return;
-      
-      try {
-        const { data, error } = await supabase
-          .from('event_resellers')
-          .select(`
-            *,
-            resellers!reseller_id ( 
-              id, 
-              paystack_subaccount_code 
-            )
-          `)
-          .eq('unique_code', refCode)
-          .eq('event_id', id)
-          .single();
-
-        if (error) {
-          console.error("Reseller Validation Error:", error.message);
-          return;
-        }
-
-        if (data) {
-          setReseller(data);
-          setIsResellerMode(true);
-          await supabase.rpc('increment_reseller_clicks', { link_id: data.id });
-        }
-      } catch (err) {
-        console.error("Critical Reseller Error:", err);
-      }
-    };
-
-    if (refCode) {
-      localStorage.setItem('active_reseller_code', refCode);
-      console.log("Reseller attribution captured:", refCode);
-      validateReseller();
-    }
-  }, [refCode, id]); // Added proper dependency array"use client";
-
+"use client";
 import { useEffect, useState, useMemo } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic'; 
@@ -174,7 +135,7 @@ export default function EventPage() {
   }, [id]);
 
   // --- RESELLER VALIDATION & ANALYTICS ---
- useEffect(() => {
+useEffect(() => {
     const validateReseller = async () => {
       if (!refCode || !id) return;
       
@@ -213,6 +174,7 @@ export default function EventPage() {
       validateReseller();
     }
   }, [refCode, id]); // Added proper dependency array
+
   // --- REAL-TIME TICKET UPDATES ---
   useEffect(() => {
     const channel = supabase
