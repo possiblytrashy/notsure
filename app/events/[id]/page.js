@@ -261,59 +261,47 @@ useEffect(() => {
 const handlePurchase = async (e) => {
   if (e) e.preventDefault();
   
-  // 1. Force lowercase and trim right at the source
   const cleanedEmail = guestEmail.toLowerCase().trim();
   const cleanedName = guestName.trim();
 
-  // 2. More robust regex check
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   if (!emailRegex.test(cleanedEmail)) {
     alert("Please enter a valid luxury concierge email.");
     return;
-  }return;
-    }
+  }
 
-    if (!selectedTier || !activeTier || isProcessing) return;
+  if (!selectedTier || !activeTier || isProcessing) return;
+  
+  const currentlySold = soldCounts[selectedTier] || 0; 
+  if (activeTier.max_quantity && currentlySold >= activeTier.max_quantity) {
+    alert("This ticket tier is sold out.");
+    return;
+  }
+
+  const subaccount = event.organizer_subaccount || event.organizers?.paystack_subaccount_code;
+
+  if (!subaccount) { 
+    alert("Organizer payout not configured for this event.");
+    return;
+  }
+
+  setIsProcessing(true);
+
+  try {
+    const response = await fetch('/api/paystack/initialize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        event_id: id,
+        tier_id: selectedTier, 
+        email: cleanedEmail, // Use cleanedEmail, not trimmedEmail
+        guest_name: cleanedName, // Use cleanedName, not trimmedName
+        reseller_code: refCode || "DIRECT" 
+      }),
+    });
     
-    const currentlySold = soldCounts[selectedTier] || 0; 
-    
-    if (activeTier.max_quantity && currentlySold >= activeTier.max_quantity) {
-      alert("This ticket tier is sold out.");
-      return;
-    }
-
-    // Verify organizer payout setup
-  // 1. Check direct column first, then fall back to the joined profile
-const subaccount = event.organizer_subaccount || event.organizers?.paystack_subaccount_code;
-
-console.log("Debug - Event Object:", event); // Add this to see what's actually coming back
-console.log("Debug - Subaccount Found:", subaccount);
-
-if (!subaccount) { 
-  alert("Organizer payout not configured for this event. Please contact support.");
-  return;
-}
-
-    setIsProcessing(true);
-
-    try {
-      // Initialize Transaction via Secure Backend API
-      // This locks in the 5% Platform Split and 10% Reseller Markup
-      // page.js
-const response = await fetch('/api/paystack/initialize', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    event_id: id,
-    tier_id: selectedTier, 
-    email: trimmedEmail,
-    guest_name: trimmedName,
-    // Ensure this is NEVER null. Use "DIRECT" as the fallback.
-    reseller_code: refCode || "DIRECT" 
-  }),
-});
-      const initData = await response.json();
-
+    const initData = await response.json();
+    // ... rest of logic
       if (!response.ok || !initData.access_code) {
         throw new Error(initData.error || 'Initialization failed');
       }
