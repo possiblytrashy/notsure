@@ -8,7 +8,16 @@ const supabaseAdmin = createClient(
 
 export async function POST(req) {
   try {
-    const { event_id, tier_id, email, guest_name, reseller_code } = await req.json();
+    const body = await req.json();
+    
+    // Explicitly trim and lowercase the email
+    const email = body.email?.trim().toLowerCase();
+    const { event_id, tier_id, guest_name, reseller_code } = body;
+
+    if (!email || !email.includes('@')) {
+      return NextResponse.json({ error: 'A valid email is required' }, { status: 400 });
+    }
+    
 
     // 1. Fetch Tier + Event + Organizer + Reseller Subaccount
     // We fetch the reseller's subaccount linked to their profile if a code is present
