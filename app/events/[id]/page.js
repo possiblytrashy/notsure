@@ -284,7 +284,7 @@ useEffect(() => {
     }
 
     // Verify organizer payout setup
-    const subaccount = event.organizers?.paystack_subaccount_code;
+    const subaccount = events.organizers?.paystack_subaccount_code;
 
     if (!subaccount) { 
       alert("Organizer payout not configured for this event. Please contact support.");
