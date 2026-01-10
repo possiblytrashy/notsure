@@ -3,23 +3,21 @@ import { createClient } from "@supabase/supabase-js";
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.PAYSTACK_SECRET_KEY // Use Service Role Key for Admin access
+  process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
 export async function POST(req) {
   try {
     const body = await req.json();
-    
-    // 1. Precise Email Sanitization
     const email = body.email?.trim().toLowerCase();
     const { event_id, tier_id, guest_name, reseller_code } = body;
 
     if (!email || !email.includes("@")) {
-      return NextResponse.json({ error: "Invalid email provided" }, { status: 400 });
+      return NextResponse.json({ error: "Valid email required" }, { status: 400 });
     }
 
-    // 2. Fetch Tier & Event Data
-    const { data: tier, error: tierError } = await supabaseAdmin
+    /* 1. Fetch Tier + Event */
+    const { data: tier } = await supabaseAdmin
       .from("ticket_tiers")
       .select(`
         *,
@@ -32,58 +30,65 @@ export async function POST(req) {
       .eq("id", tier_id)
       .single();
 
-    if (tierError || !tier) return NextResponse.json({ error: "Tier not found" }, { status: 404 });
+    if (!tier) return NextResponse.json({ error: "Tier not found" }, { status: 404 });
 
-    // 3. Pricing & Commission Logic
+    /* 2. Base Price */
     const basePrice = parseFloat(tier.price);
-    const systemCommission = basePrice * 0.05; // Your 5% cut
-    const amountInKobo = Math.round(basePrice * 100);
 
-    const organizerSubaccount = tier.events.organizer_subaccount || tier.events.organizers?.paystack_subaccount_code;
+    /* 3. Apply reseller markup */
+    const isReseller = reseller_code && reseller_code !== "DIRECT";
+    const finalPrice = isReseller ? basePrice * 1.10 : basePrice;
+
+    /* 4. Paystack math (ONLY base price matters here) */
+    const organizerShare = basePrice * 0.95;
+    const platformFee = basePrice * 0.05;
+
+    const organizerSubaccount =
+      tier.events.organizer_subaccount ||
+      tier.events.organizers?.paystack_subaccount_code;
 
     if (!organizerSubaccount) {
       return NextResponse.json({ error: "Organizer payout not configured" }, { status: 400 });
     }
 
-    // 4. Valid Paystack Payload (Single Split)
-    // Note: If you want 3-way splits, see Part 2 below.
-    const paystackPayload = {
+    /* 5. Valid Paystack payload */
+    const payload = {
       email,
-      amount: amountInKobo,
+      amount: Math.round(finalPrice * 100),
       subaccount: organizerSubaccount,
-      transaction_charge: Math.round(systemCommission * 100),
-      bearer: "subaccount", // Organizer pays the processing fee
+      transaction_charge: Math.round(platformFee * 100),
+      bearer: "subaccount",
       metadata: {
+        type: "TICKET",
         event_id,
         tier_id,
         guest_name,
         reseller_code: reseller_code || "DIRECT",
-        custom_fields: [
-          { display_name: "Event", variable_name: "event_name", value: tier.events.title },
-          { display_name: "Tier", variable_name: "tier_name", value: tier.name }
-        ]
+        base_price: basePrice
       }
     };
 
-    const paystackRes = await fetch("https://api.paystack.co/transaction/initialize", {
+    const res = await fetch("https://api.paystack.co/transaction/initialize", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
         "Content-Type": "application/json"
       },
-      body: JSON.stringify(paystackPayload)
+      body: JSON.stringify(payload)
     });
 
-    const paystackData = await paystackRes.json();
-    if (!paystackData.status) throw new Error(paystackData.message);
+    const data = await res.json();
+    if (!data.status) {
+      return NextResponse.json({ error: data.message }, { status: 400 });
+    }
 
     return NextResponse.json({
-      access_code: paystackData.data.access_code,
-      reference: paystackData.data.reference
+      access_code: data.data.access_code,
+      reference: data.data.reference
     });
 
   } catch (err) {
-    console.error("Initialization Error:", err.message);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error(err);
+    return NextResponse.json({ error: "Initialization failed" }, { status: 500 });
   }
 }
