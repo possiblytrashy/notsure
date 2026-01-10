@@ -230,16 +230,28 @@ useEffect(() => {
   };
 
   // --- 4. SECURE PAYSTACK TRANSACTION LOGIC ---
-  const loadPaystackScript = () => {
-    return new Promise((resolve) => {
-      if (window.PaystackPop) return resolve(window.PaystackPop);
-      const script = document.createElement('script');
-      script.src = 'https://js.paystack.co/v1/inline.js';
-      script.async = true;
-      script.onload = () => resolve(window.PaystackPop);
-      document.body.appendChild(script);
-    });
-  };
+const loadPaystackScript = () => {
+  return new Promise((resolve, reject) => {
+    if (typeof window === 'undefined') return;
+
+    if (window.PaystackPop) {
+      return resolve(window.PaystackPop);
+    }
+
+    const existing = document.querySelector('script[src="https://js.paystack.co/v1/inline.js"]');
+    if (existing) {
+      existing.onload = () => resolve(window.PaystackPop);
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = 'https://js.paystack.co/v1/inline.js';
+    script.async = true;
+    script.onload = () => resolve(window.PaystackPop);
+    script.onerror = reject;
+    document.body.appendChild(script);
+  });
+};
 
   const recordPayment = async (response, tier) => {
     // Note: We no longer manually insert the ticket record here.
