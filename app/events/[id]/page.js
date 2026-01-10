@@ -284,12 +284,16 @@ useEffect(() => {
     }
 
     // Verify organizer payout setup
-    const subaccount = event.organizers?.paystack_subaccount_code;
+  // 1. Check direct column first, then fall back to the joined profile
+const subaccount = event.organizer_subaccount || event.organizers?.paystack_subaccount_code;
 
-    if (!subaccount) { 
-      alert("Organizer payout not configured for this event. Please contact support.");
-      return;
-    }
+console.log("Debug - Event Object:", event); // Add this to see what's actually coming back
+console.log("Debug - Subaccount Found:", subaccount);
+
+if (!subaccount) { 
+  alert("Organizer payout not configured for this event. Please contact support.");
+  return;
+}
 
     setIsProcessing(true);
 
