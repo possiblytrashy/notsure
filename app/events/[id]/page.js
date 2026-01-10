@@ -300,18 +300,19 @@ if (!subaccount) {
     try {
       // Initialize Transaction via Secure Backend API
       // This locks in the 5% Platform Split and 10% Reseller Markup
-      const response = await fetch('/api/paystack/initialize', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          event_id: id,
-          tier_id: selectedTier, 
-          email: trimmedEmail,
-          guest_name: trimmedName,
-          reseller_code: refCode || null
-        }),
-      });
-
+      // page.js
+const response = await fetch('/api/paystack/initialize', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    event_id: id,
+    tier_id: selectedTier, 
+    email: trimmedEmail,
+    guest_name: trimmedName,
+    // Ensure this is NEVER null. Use "DIRECT" as the fallback.
+    reseller_code: refCode || "DIRECT" 
+  }),
+});
       const initData = await response.json();
 
       if (!response.ok || !initData.access_code) {
