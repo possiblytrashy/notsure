@@ -1,4 +1,4 @@
-f"use client";
+"use client";
 import { useEffect, useState, useMemo } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic'; 
