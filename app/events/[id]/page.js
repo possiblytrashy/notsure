@@ -306,16 +306,17 @@ const handlePurchase = async (e) => {
 
     // 4. Initialize Paystack
     const PaystackPop = await loadPaystackScript();
-    const handler = PaystackPop.setup({
-  // Force the handshake by providing both
-  key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY, 
-  access_code: data.access_code, 
-  onSuccess: (response) => {
-    window.location.href = `/success?ref=${response.reference}`;
-  },
-  onCancel: () => setIsProcessing(false)
-});
-     
+const handler = PaystackPop.setup({
+      key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
+      access_code: data.access_code,
+      onSuccess: (response) => {
+        // SUCCESS: Trigger your local state change instead of a redirect
+        recordPayment(response, activeTier);
+      },
+      onCancel: () => {
+        setIsProcessing(false);
+      },
+    });
 
     handler.openIframe();
 
