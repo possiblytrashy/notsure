@@ -272,22 +272,29 @@ const loadPaystackScript = () => {
 
 const handlePurchase = async () => {
   setIsProcessing(true);
-  
   try {
-    // A. Get the secure access code from your API
-   // Inside handlePurchase in EventPage.js
-const res = await fetch('/api/checkout/secure-session', { // Renamed to avoid ad-blockers
-  method: 'POST',
-  body: JSON.stringify({
-    event_id: id,
-    tier_id: selectedTier,
-    email: guestEmail,
-    guest_name: guestName,
-    reseller_code: refCode || "DIRECT"
-  })
-});
+    const res = await fetch('/api/checkout/secure-session', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json', // <--- THIS IS CRITICAL
+      },
+      body: JSON.stringify({
+        event_id: id,
+        tier_id: selectedTier,
+        email: guestEmail,
+        guest_name: guestName,
+        reseller_code: refCode || "DIRECT"
+      })
+    });
+
+    // Handle non-200 responses
+    if (!res.ok) {
+      const errorData = await res.json();
+      throw new Error(errorData.error || 'Server responded with an error');
+    }
     
-    const { access_code, error } = await res.json();
+    const { access_code } = await res.json();
+    // ... rest of your code
     if (error) throw new Error(error);
 
     // B. Launch Paystack Inline
