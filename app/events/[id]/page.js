@@ -270,43 +270,44 @@ const loadPaystackScript = () => {
     setIsProcessing(false);
   };
 
-// Add 'e' as a parameter
 const handlePurchase = async (e) => {
-  // 1. STOP the browser from refreshing the page
-  if (e && e.preventDefault) {
-    e.preventDefault();
+  if (e && e.preventDefault) e.preventDefault();
+  
+  // 1. Validate Input
+  if (!guestEmail || !guestEmail.includes('@')) {
+    alert("Luxury Access requires a valid email.");
+    return;
   }
 
-  console.log("LOG: Concierge request initiated...");
   setIsProcessing(true);
 
   try {
-    // 2. Execute the fetch (Keep the absolute path to be safe)
-    const res = await fetch(`/api/checkout/secure-session?t=${Date.now()}`, {
+    // 2. Fetch from your secure API
+    const res = await fetch('/api/checkout/secure-session', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         event_id: id,
         tier_id: selectedTier,
-        email: guestEmail,
+        email: guestEmail.trim(),
         guest_name: guestName,
         reseller_code: refCode || "DIRECT"
       })
     });
 
-    if (!res.ok) {
-      const errorData = await res.json().catch(() => ({ error: 'Initialization Error' }));
-      throw new Error(errorData.error || 'The concierge service is offline.');
-    }
-
     const data = await res.json();
 
-    // 3. Load Paystack
+    // 3. STOP if the backend failed
+    if (!res.ok || !data.access_code) {
+      throw new Error(data.error || "Could not initialize secure session.");
+    }
+
+    console.log("LOG: Secure Access Code Received:", data.access_code);
+
+    // 4. Initialize Paystack
     const PaystackPop = await loadPaystackScript();
     const handler = PaystackPop.setup({
-      key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
+      // ONLY pass the access_code. Do not pass key, email, or amount here.
       access_code: data.access_code, 
       onSuccess: (response) => {
         window.location.href = `/success?ref=${response.reference}`;
@@ -319,8 +320,8 @@ const handlePurchase = async (e) => {
     handler.openIframe();
 
   } catch (err) {
-    console.error("Luxury System Error:", err);
-    alert(`Transaction Error: ${err.message}`);
+    console.error("Initialization Error:", err);
+    alert(`Concierge Error: ${err.message}`);
     setIsProcessing(false);
   }
 };
