@@ -272,10 +272,10 @@ const loadPaystackScript = () => {
 
 const handlePurchase = async () => {
   setIsProcessing(true);
-  
   try {
-    // 1. Initiate the secure request to your API
-    const res = await fetch('/api/checkout/secure-session', {
+    // 1. Request session from our API
+    // Adding a timestamp ?t= avoids some aggressive browser caching/blocking
+    const res = await fetch(`/api/checkout/secure-session?t=${Date.now()}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -289,29 +289,22 @@ const handlePurchase = async () => {
       })
     });
 
-    // 2. Parse the JSON response ONCE
+    // 2. Check for Network/Server Errors
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({ error: 'Server crashed' }));
+      throw new Error(errorData.error || 'The concierge service is offline.');
+    }
+
     const data = await res.json();
 
-    // 3. Robust Error Handling: check for non-OK status OR an error field in the JSON
-    if (!res.ok || data.error) {
-      // We throw an error with the message from the server or a fallback
-      throw new Error(data.error || `Server Error: ${res.status}`);
-    }
-
-    // 4. Validate that we actually received the access_code
-    if (!data.access_code) {
-      throw new Error("The secure session could not be established. Missing access code.");
-    }
-
-    // 5. Load Paystack Script and Launch
+    // 3. Load Paystack and Setup
     const PaystackPop = await loadPaystackScript();
-    
     const handler = PaystackPop.setup({
       key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
-      access_code: data.access_code, // Uses the code from 'data'
+      access_code: data.access_code, 
       onSuccess: (response) => {
-        // Handed off to your webhook for DB insertion
-        recordPayment(response, activeTier);
+        // Redirect to a success page or call your recordPayment function
+        window.location.href = `/success?ref=${response.reference}`;
       },
       onCancel: () => {
         setIsProcessing(false);
@@ -321,11 +314,14 @@ const handlePurchase = async () => {
     handler.openIframe();
 
   } catch (err) {
-    // This catches both network errors and the manual 'throws' above
-    console.error("Luxury System Error:", err.message);
+    console.error("Luxury System Error:", err);
     
-    // Using a more informative alert for debugging
-    alert(`Concierge Note: ${err.message}`);
+    // Check if the error is specifically a 'Failed to fetch'
+    if (err.message === "Failed to fetch") {
+      alert("Network Error: Please disable your Ad-Blocker or check your internet connection.");
+    } else {
+      alert(`Transaction Error: ${err.message}`);
+    }
     
     setIsProcessing(false);
   }
