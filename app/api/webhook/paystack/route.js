@@ -6,9 +6,9 @@ import crypto from 'crypto';
 export const dynamic = 'force-dynamic';
 
 /**
- * LUXURY WEBHOOK CONCIERGE (V2 - Resilient)
- * Handles: Signature Security, Tiered Ticketing, 5% Splits, 10% Markups,
- * QR Storage, and Automated Reseller Payouts.
+ * LUXURY WEBHOOK CONCIERGE (FULL VERSION)
+ * Handles: Signature Security, Voting, Tiered Ticketing, 5% Splits, 10% Markups,
+ * QR Storage, Reseller RPCs, and Automated Reseller Payouts via Paystack.
  */
 export async function POST(req) {
   try {
@@ -27,17 +27,18 @@ export async function POST(req) {
       .digest('hex');
 
     if (hash !== req.headers.get('x-paystack-signature')) {
-      console.error('⚠️ SECURITY ALERT: Signature mismatch');
+      console.error('Unauthorized: Signature mismatch');
       return new Response('Unauthorized', { status: 401 });
     }
 
     const body = JSON.parse(bodyText);
 
+    // Filter for successful charges only
     if (body.event !== 'charge.success') {
       return new Response('Event ignored', { status: 200 });
     }
 
-    // --- 2. DATA EXTRACTION ---
+    // --- 2. METADATA & DATA PARSING ---
     const metadata = body.data.metadata || {};
     const {
       type,
@@ -47,11 +48,12 @@ export async function POST(req) {
       vote_count,
       organizer_id,
       guest_name,
+      guest_email,
       reseller_code
     } = metadata;
 
     const email = body.data.customer.email;
-    const amountPaid = body.data.amount / 100; 
+    const amountPaid = body.data.amount / 100; // Total GHS
     const reference = body.data.reference;
     const finalGuestName = guest_name || 'Valued Guest';
 
@@ -80,57 +82,57 @@ export async function POST(req) {
         candidate_id: candidate_id,
       });
       
-      return new Response('Vote Recorded', { status: 200 });
+      return new Response('Vote Processed', { status: 200 });
     }
 
     /* ======================================================
        CASE B: MULTI-TIER LUXURY TICKETING
     ====================================================== */
-    else if (type === 'TICKET_PURCHASE' || tier_id || event_id) {
+    else if (type === 'TICKET_PURCHASE' || tier_id) {
       
-      // 1. Fetch Source of Truth (Tier & Event Details)
+      // 1. Fetch Source of Truth from DB
       const { data: tierData, error: tierError } = await supabase
         .from('ticket_tiers')
         .select('*, events(title, location_name, event_date, event_time, organizer_profile_id)')
         .eq('id', tier_id)
         .single();
 
-      if (tierError || !tierData) {
-        console.error('❌ TIER VERIFICATION FAILED:', tierError);
-        throw new Error("Tier verification failed.");
-      }
+      if (tierError || !tierData) throw new Error("Tier verification failed.");
 
-      // 2. Financial Calculations
+      // 2. Financial Engineering
       const actualBasePrice = parseFloat(tierData.price);
       const platformFee = actualBasePrice * 0.05;
       const organizerAmount = actualBasePrice * 0.95;
-      const resellerCommission = (amountPaid > actualBasePrice) ? (amountPaid - actualBasePrice) : 0;
-
-      // 3. SECURE TICKET CREATION (DO THIS FIRST)
-      // We save the ticket record before attempting QR upload or Email
-      const ticketHash = `OUST-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
       
+      // Calculate reseller commission (anything above the base price due to 10% markup)
+      const resellerCommission = (amountPaid > actualBasePrice) 
+        ? (amountPaid - actualBasePrice) 
+        : 0;
+
+      // 3. Ticket Identity
+      const ticketNumber = `OUST-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+
+      // 4. Atomic Ticket Creation (Mapped to your public.tickets schema)
       const { error: dbError } = await supabase.from('tickets').insert({
-        event_id,
-        tier_id,
-        ticket_hash: ticketHash,
-        customer_email: email,
+        event_id: event_id,
+        tier_id: tier_id,
+        tier_name: tierData.name,
+        ticket_number: ticketNumber, // Schema: ticket_number
+        user_email: email,           // Schema: user_email
+        guest_email: guest_email || email,
         guest_name: finalGuestName,
         reference: reference,
         amount: amountPaid,
         status: 'valid',
-        reseller_code: (reseller_code && reseller_code !== 'DIRECT') ? reseller_code : null,
+        is_scanned: false
       });
 
-      if (dbError) {
-        console.error('❌ DATABASE INSERT ERROR:', dbError.message);
-        throw dbError; // Critical failure
-      }
+      if (dbError) throw dbError;
 
-      // 4. QR GENERATION & STORAGE (ASYNCHRONOUS FAIL-SAFE)
+      // 5. QR Generation & Storage
       let qrUrl = null;
       try {
-        const qrDataUrl = await QRCode.toDataURL(`TICKET:${ticketHash}|REF:${reference}`, {
+        const qrDataUrl = await QRCode.toDataURL(`TICKET:${ticketNumber}|REF:${reference}`, {
           width: 400,
           margin: 2,
           color: { dark: '#000000', light: '#ffffff' }
@@ -139,7 +141,7 @@ export async function POST(req) {
         const qrBuffer = Buffer.from(qrDataUrl.split(',')[1], 'base64');
         const { error: uploadError } = await supabase.storage
           .from('media')
-          .upload(`qrs/${ticketHash}.png`, qrBuffer, {
+          .upload(`qrs/${ticketNumber}.png`, qrBuffer, {
             contentType: 'image/png',
             upsert: true,
           });
@@ -147,83 +149,79 @@ export async function POST(req) {
         if (!uploadError) {
           const { data: { publicUrl } } = supabase.storage
             .from('media')
-            .getPublicUrl(`qrs/${ticketHash}.png`);
+            .getPublicUrl(`qrs/${ticketNumber}.png`);
           qrUrl = publicUrl;
           
-          // Update ticket with public QR URL
-          await supabase.from('tickets').update({ qr_url: qrUrl }).eq('ticket_hash', ticketHash);
+          // Update qr_code_url in DB
+          await supabase.from('tickets')
+            .update({ qr_code_url: qrUrl })
+            .eq('ticket_number', ticketNumber);
         }
       } catch (qrErr) {
-        console.error('⚠️ NON-CRITICAL QR ERROR:', qrErr.message);
-        // We don't throw here; ticket is already created.
+        console.error('QR Storage Error (Non-fatal):', qrErr.message);
       }
 
-      // 5. RESELLER & PAYOUT RECORDING
-      try {
-        if (reseller_code && reseller_code !== 'DIRECT') {
+      // 6. Handle Reseller Commissions & Auto-Payouts
+      if (reseller_code && reseller_code !== 'DIRECT') {
+        try {
           await supabase.rpc('record_reseller_sale', {
             target_unique_code: reseller_code,
             t_ref: reference,
             t_amount: amountPaid,
             t_commission: resellerCommission,
           });
+
           await attemptAutoResellerPayout(supabase, reseller_code);
+        } catch (resellerErr) {
+          console.error('Reseller RPC Error:', resellerErr.message);
         }
-
-        await supabase.from('payouts').insert({
-          organizer_id: tierData.events.organizer_profile_id,
-          amount_total: amountPaid,
-          platform_fee: platformFee,
-          organizer_amount: organizerAmount,
-          type: 'TICKET',
-          reference: reference,
-        });
-      } catch (finErr) {
-        console.error('⚠️ FINANCIAL RECORDING ERROR:', finErr.message);
       }
 
-      // 6. CONFIRMATION EMAIL (RESEND)
-      try {
-        await resend.emails.send({
-          from: 'OUSTED Concierge <tickets@ousted.com>',
-          to: email,
-          subject: `Access Confirmed: ${tierData.events.title}`,
-          html: generateLuxuryEmail(tierData, qrUrl, ticketHash, finalGuestName)
-        });
-      } catch (mailErr) {
-        console.error('⚠️ EMAIL DELIVERY ERROR:', mailErr.message);
-      }
+      // 7. Record Platform/Organizer Payout Split
+      await supabase.from('payouts').insert({
+        organizer_id: tierData.events.organizer_profile_id,
+        amount_total: amountPaid,
+        platform_fee: platformFee,
+        organizer_amount: organizerAmount,
+        type: 'TICKET',
+        reference: reference,
+      });
+
+      // 8. Send Luxury Confirmation Email
+      await resend.emails.send({
+        from: 'OUSTED Concierge <tickets@ousted.com>',
+        to: email,
+        subject: `Access Confirmed: ${tierData.events.title}`,
+        html: generateLuxuryEmail(tierData, qrUrl, ticketNumber, finalGuestName)
+      });
     }
 
     return new Response('Webhook Handled Successfully', { status: 200 });
 
   } catch (error) {
-    console.error('🚨 CRITICAL WEBHOOK FATAL ERROR:', error.message);
+    console.error('CRITICAL WEBHOOK ERROR:', error.message);
     return new Response(`Webhook Error: ${error.message}`, { status: 500 });
   }
 }
 
-/* --- HELPER FUNCTIONS --- */
-
-function generateLuxuryEmail(tierData, qrUrl, hash, name) {
+/* --- HELPER: LUXURY EMAIL GENERATOR --- */
+function generateLuxuryEmail(tierData, qrUrl, ticketNumber, name) {
   const event = tierData.events;
-  const qrDisplay = qrUrl ? `<img src="${qrUrl}" width="280" style="border-radius: 15px; border: 1px solid #eee;" />` : `<div style="padding: 40px; border: 2px dashed #ccc;">[QR Code Available at Venue]</div>`;
-  
   return `
     <div style="font-family: 'Helvetica', sans-serif; max-width: 600px; margin: auto; padding: 40px; border: 1px solid #f0f0f0; border-radius: 30px;">
-      <h1 style="font-size: 24px; font-weight: 900; letter-spacing: -1px; text-transform: uppercase; color: #000;">Access Granted</h1>
+      <h1 style="font-size: 24px; font-weight: 900; letter-spacing: -1px; text-transform: uppercase;">Access Granted</h1>
       <p style="color: #666;">Hello ${name}, your reservation is confirmed.</p>
       
       <div style="background: #000; color: #fff; padding: 30px; border-radius: 20px; margin: 30px 0;">
         <p style="margin: 0; font-size: 10px; font-weight: 800; opacity: 0.6; text-transform: uppercase;">Experience</p>
         <h2 style="margin: 0 0 15px 0; font-size: 20px;">${event.title}</h2>
         
-        <div style="display: flex;">
-          <div style="flex: 1;">
+        <div style="display: flex; gap: 20px;">
+          <div style="margin-right: 30px;">
             <p style="margin: 0; font-size: 10px; opacity: 0.6;">TIER</p>
             <p style="margin: 0; font-weight: 700;">${tierData.name}</p>
           </div>
-          <div style="flex: 1;">
+          <div>
             <p style="margin: 0; font-size: 10px; opacity: 0.6;">DATE</p>
             <p style="margin: 0; font-weight: 700;">${event.event_date}</p>
           </div>
@@ -231,8 +229,8 @@ function generateLuxuryEmail(tierData, qrUrl, hash, name) {
       </div>
 
       <div style="text-align: center; padding: 20px;">
-        ${qrDisplay}
-        <p style="font-family: monospace; font-size: 12px; color: #999; margin-top: 15px;">SECURE HASH: ${hash}</p>
+        ${qrUrl ? `<img src="${qrUrl}" width="280" style="border-radius: 15px; border: 1px solid #eee;" />` : ''}
+        <p style="font-family: monospace; font-size: 12px; color: #999; margin-top: 15px;">TICKET ID: ${ticketNumber}</p>
       </div>
 
       <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; font-size: 12px; color: #999;">
@@ -243,6 +241,7 @@ function generateLuxuryEmail(tierData, qrUrl, hash, name) {
   `;
 }
 
+/* --- HELPER: AUTOMATIC RESELLER PAYOUT --- */
 async function attemptAutoResellerPayout(supabase, resellerCode) {
   const { data: reseller } = await supabase
     .from('resellers')
@@ -250,7 +249,9 @@ async function attemptAutoResellerPayout(supabase, resellerCode) {
     .eq('unique_code', resellerCode)
     .single();
 
-  if (!reseller || !reseller.payout_recipient_code || reseller.total_earned < reseller.payout_threshold) return;
+  if (!reseller || !reseller.payout_recipient_code || reseller.total_earned < reseller.payout_threshold) {
+    return;
+  }
 
   const { data: unpaidSales } = await supabase
     .from('reseller_sales')
@@ -279,6 +280,14 @@ async function attemptAutoResellerPayout(supabase, resellerCode) {
   const data = await res.json();
   if (!data.status) return;
 
-  await supabase.from('reseller_sales').update({ paid: true, payout_reference: data.data.reference }).eq('reseller_id', reseller.id).eq('paid', false);
-  await supabase.from('resellers').update({ total_earned: 0, last_payout_at: new Date() }).eq('id', reseller.id);
+  await supabase
+    .from('reseller_sales')
+    .update({ paid: true, payout_reference: data.data.reference })
+    .eq('reseller_id', reseller.id)
+    .eq('paid', false);
+
+  await supabase
+    .from('resellers')
+    .update({ total_earned: 0, last_payout_at: new Date() })
+    .eq('id', reseller.id);
 }
