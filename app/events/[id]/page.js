@@ -295,30 +295,29 @@ const handlePurchase = async (e) => {
       })
     });
 
-    const data = await res.json();
+   // ... after fetch call
+const data = await res.json();
 
-    // 3. STOP if the backend failed
-    if (!res.ok || !data.access_code) {
-      throw new Error(data.error || "Could not initialize secure session.");
-    }
+// DEBUG: Confirm the frontend actually sees the code from the backend
+console.log("FRONTEND_RECEIVE_CHECK:", data.access_code);
 
-    console.log("LOG: Secure Access Code Received:", data.access_code);
+if (!data.access_code) {
+    alert("Concierge Error: Secure session not established.");
+    setIsProcessing(false);
+    return;
+}
 
-    // 4. Initialize Paystack
-    const PaystackPop = await loadPaystackScript();
+const PaystackPop = await loadPaystackScript();
 const handler = PaystackPop.setup({
-      key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
-      access_code: data.access_code,
-      onSuccess: (response) => {
-        // SUCCESS: Trigger your local state change instead of a redirect
-        recordPayment(response, activeTier);
-      },
-      onCancel: () => {
-        setIsProcessing(false);
-      },
-    });
-
-    handler.openIframe();
+  // Ensure this EXACT key is used. Do not let it be undefined.
+  key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY || 'pk_test_07a5e0148214c3f7e0704b014b8d37c5803a0299',
+  access_code: data.access_code, 
+  onSuccess: (response) => {
+    recordPayment(response, activeTier);
+  },
+  onCancel: () => setIsProcessing(false)
+});
+handler.openIframe();
 
   } catch (err) {
     console.error("Initialization Error:", err);
