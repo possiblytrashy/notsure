@@ -306,11 +306,10 @@ if (!data.access_code) {
     setIsProcessing(false);
     return;
 }
-
 const PaystackPop = await loadPaystackScript();
 const handler = PaystackPop.setup({
-  // Ensure this EXACT key is used. Do not let it be undefined.
-  key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY || 'pk_test_07a5e0148214c3f7e0704b014b8d37c5803a0299',
+  // HARDCODE your pk_test here temporarily to verify the handshake
+  key: "pk_test_07a5e0148214c3f7e0704b014b8d37c5803a0299", 
   access_code: data.access_code, 
   onSuccess: (response) => {
     recordPayment(response, activeTier);
@@ -318,7 +317,6 @@ const handler = PaystackPop.setup({
   onCancel: () => setIsProcessing(false)
 });
 handler.openIframe();
-
   } catch (err) {
     console.error("Initialization Error:", err);
     alert(`Concierge Error: ${err.message}`);
