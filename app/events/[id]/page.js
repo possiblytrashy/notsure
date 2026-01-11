@@ -270,11 +270,18 @@ const loadPaystackScript = () => {
     setIsProcessing(false);
   };
 
-const handlePurchase = async () => {
+// Add 'e' as a parameter
+const handlePurchase = async (e) => {
+  // 1. STOP the browser from refreshing the page
+  if (e && e.preventDefault) {
+    e.preventDefault();
+  }
+
+  console.log("LOG: Concierge request initiated...");
   setIsProcessing(true);
+
   try {
-    // 1. Request session from our API
-    // Adding a timestamp ?t= avoids some aggressive browser caching/blocking
+    // 2. Execute the fetch (Keep the absolute path to be safe)
     const res = await fetch(`/api/checkout/secure-session?t=${Date.now()}`, {
       method: 'POST',
       headers: {
@@ -289,21 +296,19 @@ const handlePurchase = async () => {
       })
     });
 
-    // 2. Check for Network/Server Errors
     if (!res.ok) {
-      const errorData = await res.json().catch(() => ({ error: 'Server crashed' }));
+      const errorData = await res.json().catch(() => ({ error: 'Initialization Error' }));
       throw new Error(errorData.error || 'The concierge service is offline.');
     }
 
     const data = await res.json();
 
-    // 3. Load Paystack and Setup
+    // 3. Load Paystack
     const PaystackPop = await loadPaystackScript();
     const handler = PaystackPop.setup({
       key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
       access_code: data.access_code, 
       onSuccess: (response) => {
-        // Redirect to a success page or call your recordPayment function
         window.location.href = `/success?ref=${response.reference}`;
       },
       onCancel: () => {
@@ -315,14 +320,7 @@ const handlePurchase = async () => {
 
   } catch (err) {
     console.error("Luxury System Error:", err);
-    
-    // Check if the error is specifically a 'Failed to fetch'
-    if (err.message === "Failed to fetch") {
-      alert("Network Error: Please disable your Ad-Blocker or check your internet connection.");
-    } else {
-      alert(`Transaction Error: ${err.message}`);
-    }
-    
+    alert(`Transaction Error: ${err.message}`);
     setIsProcessing(false);
   }
 };
