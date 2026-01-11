@@ -2,26 +2,28 @@ import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
 export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
 
 export async function POST(req) {
   try {
     const body = await req.json();
     const { event_id, tier_id, email, guest_name, reseller_code } = body;
 
+    // 1. Validation: If email is missing here, the access_code will be broken
+    if (!email || email === "") {
+      return NextResponse.json({ error: "Email is required for GHS transactions" }, { status: 400 });
+    }
+
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL,
       process.env.SUPABASE_SERVICE_ROLE_KEY
     );
 
-    // FIX: Joined with 'organizers' table based on your schema
+    // 2. Fetch Tier & Subaccount
     const { data: tier, error: tierError } = await supabase
       .from('ticket_tiers')
       .select(`
         price,
         events (
-          id,
-          title,
           organizers:organizer_profile_id (
             paystack_subaccount_code
           )
@@ -31,14 +33,13 @@ export async function POST(req) {
       .single();
 
     if (tierError || !tier) {
-      console.error("Lookup Error:", tierError);
-      return NextResponse.json({ error: "Ticket Tier Not Found" }, { status: 404 });
+      return NextResponse.json({ error: "Tier not found" }, { status: 404 });
     }
 
-    // Accessing the subaccount from the organizers join
     const subaccount = tier.events?.organizers?.paystack_subaccount_code;
     const amountInKobo = Math.round(tier.price * 100);
 
+    // 3. Initialize Paystack FORCE GHS
     const paystackRes = await fetch('https://api.paystack.co/transaction/initialize', {
       method: 'POST',
       headers: {
@@ -46,17 +47,20 @@ export async function POST(req) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        email,
+        email: email.trim(),
         amount: amountInKobo,
+        currency: "GHS", // <--- CRITICAL: Forces Ghana Cedis
         subaccount: subaccount || undefined,
-        // 5% Split Logic: 'subaccount' bearer means organizer pays the Paystack fee
         bearer: subaccount ? "subaccount" : "account",
         metadata: {
           event_id,
           tier_id,
           guest_name,
           reseller_code: reseller_code || "DIRECT",
-          tier_name: tier.name // Added for the webhook
+          custom_fields: [
+            { display_name: "Guest Name", variable_name: "guest_name", value: guest_name },
+            { display_name: "Event ID", variable_name: "event_id", value: event_id }
+          ]
         }
       }),
     });
@@ -64,24 +68,15 @@ export async function POST(req) {
     const result = await paystackRes.json();
 
     if (!result.status) {
+      console.error("Paystack Init Error:", result.message);
       return NextResponse.json({ error: result.message }, { status: 400 });
     }
 
+    // 4. Return the valid access_code
     return NextResponse.json({ access_code: result.data.access_code });
 
   } catch (err) {
-    console.error("CRITICAL_ROUTE_ERROR:", err.message);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    console.error("Server Crash:", err.message);
+    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
-}
-
-export async function OPTIONS() {
-  return new NextResponse(null, {
-    status: 204,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-    },
-  });
 }
