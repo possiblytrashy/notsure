@@ -270,74 +270,45 @@ const loadPaystackScript = () => {
     setIsProcessing(false);
   };
 
-const handlePurchase = async (e) => {
-  if (e) e.preventDefault();
-  
-  const cleanedEmail = guestEmail.toLowerCase().trim();
-  const cleanedName = guestName.trim();
-
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  if (!emailRegex.test(cleanedEmail)) {
-    alert("Please enter a valid luxury concierge email.");
-    return;
-  }
-
-  if (!selectedTier || !activeTier || isProcessing) return;
-  
-  const currentlySold = soldCounts[selectedTier] || 0; 
-  if (activeTier.max_quantity && currentlySold >= activeTier.max_quantity) {
-    alert("This ticket tier is sold out.");
-    return;
-  }
-
-  const subaccount = event.organizer_subaccount || event.organizers?.paystack_subaccount_code;
-
-  if (!subaccount) { 
-    alert("Organizer payout not configured for this event.");
-    return;
-  }
-
+const handlePurchase = async () => {
   setIsProcessing(true);
-
+  
   try {
-    const response = await fetch('/api/paystack/initialize', {
+    // A. Get the secure access code from your API
+    const res = await fetch('/api/paystack/initialize', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         event_id: id,
-        tier_id: selectedTier, 
-        email: cleanedEmail, // Use cleanedEmail, not trimmedEmail
-        guest_name: cleanedName, // Use cleanedName, not trimmedName
-        reseller_code: refCode || "DIRECT" 
-      }),
+        tier_id: selectedTier,
+        email: guestEmail,
+        guest_name: guestName,
+        reseller_code: refCode || "DIRECT"
+      })
     });
     
-    const initData = await response.json();
-    // ... rest of logic
-      if (!response.ok || !initData.access_code) {
-        throw new Error(initData.error || 'Initialization failed');
-      }
+    const { access_code, error } = await res.json();
+    if (error) throw new Error(error);
 
-      // Load Paystack Inline and Setup
-      const PaystackPop = await loadPaystackScript();
-      
-const handler = PaystackPop.setup({
-  key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
-  access_code: initData.access_code,
-  email: cleanedEmail,
-  callback: (res) => recordPayment(res, activeTier),
-  onClose: () => setIsProcessing(false)
-});
+    // B. Launch Paystack Inline
+    const PaystackPop = await loadPaystackScript();
+    const handler = PaystackPop.setup({
+      key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
+      access_code: access_code, // This "bundle" contains all the split/price logic securely
+      onSuccess: (response) => {
+        // Webhook handles the DB work, we just show the success UI
+        recordPayment(response, activeTier);
+      },
+      onCancel: () => setIsProcessing(false)
+    });
 
-handler.openIframe(); // 🔥 REQUIRED
+    handler.openIframe();
 
-
-    } catch (err) {
-      console.error("Payment initiation failed:", err);
-      alert(err.message || "Could not start payment.");
-      setIsProcessing(false);
-    }
-  };
+  } catch (err) {
+    console.error("Luxury System Error:", err.message);
+    alert("Transaction could not be initialized. Please contact the concierge.");
+    setIsProcessing(false);
+  }
+};
 
   const handleShare = async () => {
     const shareUrl = window.location.href;
