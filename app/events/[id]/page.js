@@ -253,19 +253,32 @@ const loadPaystackScript = () => {
   });
 };
 
-  const recordPayment = async (response, tier) => {
-  // Use the price from the tier passed in, or default to 0 to prevent crash
+const recordPayment = async (response, tier) => {
   const basePrice = tier?.price || 0;
   const finalAmountPaid = isResellerMode ? parseFloat(basePrice) * 1.10 : parseFloat(basePrice);
 
-  console.log("Payment Verified on Frontend. Switching to Ticket View...");
+  // --- ADD THIS DB SAVE ---
+  const { error } = await supabase.from('tickets').insert({
+    event_id: id,
+    tier_id: tier.id,
+    ticket_hash: `OUST-${response.reference.slice(-6).toUpperCase()}`,
+    customer_email: guestEmail,
+    guest_name: guestName || "Valued Guest",
+    reference: response.reference,
+    amount: finalAmountPaid,
+    status: 'valid',
+    reseller_code: refCode !== 'DIRECT' ? refCode : null,
+  });
+
+  if (error) console.error("Immediate Save Error:", error);
+  // -------------------------
 
   setPaymentSuccess({
     reference: response.reference,
     tier: tier?.name || "Standard Access",
     price: finalAmountPaid,
     customer: guestName || "Valued Guest",
-    dbError: false
+    dbError: !!error
   });
   
   setIsProcessing(false);
