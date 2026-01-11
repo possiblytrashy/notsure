@@ -1,4 +1,4 @@
-"use client";
+ "use client";
 import { useEffect, useState, useMemo } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import dynamic from 'next/dynamic'; 
@@ -254,22 +254,23 @@ const loadPaystackScript = () => {
 };
 
   const recordPayment = async (response, tier) => {
-    // Note: We no longer manually insert the ticket record here.
-    // The Webhook handles the DB insert to prevent "Paid but No Ticket" errors.
-    // This function now simply updates the UI state.
-    const finalAmountPaid = isResellerMode ? parseFloat(tier.price) * 1.10 : parseFloat(tier.price);
+  // Use the price from the tier passed in, or default to 0 to prevent crash
+  const basePrice = tier?.price || 0;
+  const finalAmountPaid = isResellerMode ? parseFloat(basePrice) * 1.10 : parseFloat(basePrice);
 
-    setPaymentSuccess({
-      reference: response.reference,
-      tier: tier.name,
-      price: finalAmountPaid,
-      customer: guestName || "Guest",
-      dbError: false
-    });
-    
-    setIsProcessing(false);
-  };
-const handlePurchase = async (e) => {
+  console.log("Payment Verified on Frontend. Switching to Ticket View...");
+
+  setPaymentSuccess({
+    reference: response.reference,
+    tier: tier?.name || "Standard Access",
+    price: finalAmountPaid,
+    customer: guestName || "Valued Guest",
+    dbError: false
+  });
+  
+  setIsProcessing(false);
+};
+  const handlePurchase = async (e) => {
   if (e && e.preventDefault) e.preventDefault();
   
   if (!guestEmail || !guestEmail.includes('@')) {
@@ -308,17 +309,21 @@ const handlePurchase = async (e) => {
     const amountInPesewas = Math.round(parseFloat(displayPrice) * 100);
 
     const PaystackPop = await loadPaystackScript();
-    const handler = PaystackPop.setup({
-key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,  
-  access_code: data.access_code, // The secure link
-      email: guestEmail.trim(),      // Extra validation
-      amount: amountInPesewas,       // FIX: This solves "Transaction amount not set"
-      currency: "GHS",               // Forces Ghana Cedis
-      onSuccess: (response) => {
-        recordPayment(response, activeTier);
-      },
-      onCancel: () => setIsProcessing(false)
-    });
+    // Inside handlePurchase, right before handler.openIframe()
+const currentTierRef = activeTier; // Capture the current tier object
+
+const handler = PaystackPop.setup({
+  key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
+  access_code: data.access_code,
+  email: guestEmail.trim(),
+  amount: amountInPesewas,
+  currency: "GHS",
+  onSuccess: (response) => {
+    // Pass the captured tier ref to ensure it's not null
+    recordPayment(response, currentTierRef);
+  },
+  onCancel: () => setIsProcessing(false)
+});
     
     handler.openIframe();
 
