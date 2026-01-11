@@ -269,11 +269,9 @@ const loadPaystackScript = () => {
     
     setIsProcessing(false);
   };
-
 const handlePurchase = async (e) => {
   if (e && e.preventDefault) e.preventDefault();
   
-  // 1. Validate Input
   if (!guestEmail || !guestEmail.includes('@')) {
     alert("Luxury Access requires a valid email.");
     return;
@@ -282,7 +280,7 @@ const handlePurchase = async (e) => {
   setIsProcessing(true);
 
   try {
-    // 2. Fetch from your secure API
+    // 1. Get the secure session from your backend
     const res = await fetch('/api/checkout/secure-session', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -295,40 +293,42 @@ const handlePurchase = async (e) => {
       })
     });
 
-   // ... after fetch call
-const data = await res.json();
+    const data = await res.json();
+    console.log("FRONTEND_RECEIVE_CHECK:", data.access_code);
 
-// DEBUG: Confirm the frontend actually sees the code from the backend
-console.log("FRONTEND_RECEIVE_CHECK:", data.access_code);
+    if (!data.access_code) {
+      alert(`Concierge Error: ${data.error || "Secure session failed"}`);
+      setIsProcessing(false);
+      return;
+    }
 
-if (!data.access_code) {
-    alert("Concierge Error: Secure session not established.");
-    setIsProcessing(false);
-    return;
-}
-const PaystackPop = await loadPaystackScript();
-      const handler = PaystackPop.setup({
-        // Use environment variable, fallback to hardcoded test key if needed
-        key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY || "pk_test_07a5e0148214c3f7e0704b014b8d37c5803a0299", 
-        access_code: data.access_code,
-        
-        // --- CRITICAL FIX: FORCE GHS AND EMAIL ---
-        email: guestEmail.trim(), // Explicitly passing email prevents the "Enter valid email" error
-        currency: 'GHS',          // Explicitly passing GHS prevents the "NGN" default fallback
-        // ----------------------------------------
+    // 2. Calculate amount for the frontend setup (Must match backend exactly)
+    // If your price is 50 GHS, this becomes 5000
+    const displayPrice = getDisplayPrice(activeTier.price);
+    const amountInPesewas = Math.round(parseFloat(displayPrice) * 100);
 
-        onSuccess: (response) => {
-          recordPayment(response, activeTier);
-        },
-        onCancel: () => setIsProcessing(false)
-      });
-      handler.openIframe();
+    const PaystackPop = await loadPaystackScript();
+    const handler = PaystackPop.setup({
+key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,  
+  access_code: data.access_code, // The secure link
+      email: guestEmail.trim(),      // Extra validation
+      amount: amountInPesewas,       // FIX: This solves "Transaction amount not set"
+      currency: "GHS",               // Forces Ghana Cedis
+      onSuccess: (response) => {
+        recordPayment(response, activeTier);
+      },
+      onCancel: () => setIsProcessing(false)
+    });
+    
+    handler.openIframe();
+
   } catch (err) {
     console.error("Initialization Error:", err);
     alert(`Concierge Error: ${err.message}`);
     setIsProcessing(false);
   }
 };
+
   const handleShare = async () => {
     const shareUrl = window.location.href;
     if (navigator.share) {
