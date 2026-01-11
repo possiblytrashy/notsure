@@ -369,18 +369,18 @@ const handler = PaystackPop.setup({
 
   // --- 5. SUCCESS STATE (TICKET VIEW) ---
   if (paymentSuccess) {
-    const qrPayload = encodeURIComponent(`REF:${paymentSuccess.reference}|EVT:${id}`);
-    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${qrPayload}`;
-    
-    return (
-      <div style={styles.ticketWrapper}>
-        <div style={styles.ticketCard} className="printable-ticket">
-          <div style={{ textAlign: 'center' }}>
-            <div style={styles.successIconWrap}><CheckCircle2 size={40} color="#22c55e" /></div>
-            <h2 style={styles.ticketTitle}>ACCESS GRANTED</h2>
-            <p style={styles.ticketSubTitle}>{event.title}</p>
-            
-            <div style={styles.ticketDataRibbon}>
+// Inside the if (paymentSuccess) block
+const qrPayload = encodeURIComponent(paymentSuccess.reference);
+// Use a higher quality, reliable QR generator for the luxury look
+const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${qrPayload}&qzone=2&format=png`;
+
+return (
+  <div style={styles.ticketWrapper}>
+    <div style={styles.ticketCard} className="printable-ticket">
+      <div style={{ textAlign: 'center' }}>
+        <div style={styles.successIconWrap}><CheckCircle2 size={40} color="#22c55e" /></div>
+        <h2 style={styles.ticketTitle}>ACCESS GRANTED</h2>
+         <div style={styles.ticketDataRibbon}>
               <div style={styles.ribbonItem}>
                 <span style={styles.ribbonLabel}>ATTENDEE</span>
                 <span style={styles.ribbonValue}>{paymentSuccess.customer}</span>
@@ -390,11 +390,20 @@ const handler = PaystackPop.setup({
                 <span style={styles.ribbonValue}>{paymentSuccess.tier}</span>
               </div>
             </div>
-
-            <div style={styles.qrSection}>
-              <img src={qrUrl} alt="QR Code" style={styles.qrImg} />
-              <p style={styles.refText}>REF: {paymentSuccess.reference}</p>
-            </div>
+        
+        <div style={styles.qrSection}>
+           {/* Ensure the image has a fixed height so it doesn't "jump" when loading */}
+           <div style={{ minHeight: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+             <img 
+               src={qrUrl} 
+               alt="Digital Access Key" 
+               style={styles.qrImg} 
+               onLoad={() => console.log("QR Rendered")}
+             />
+           </div>
+           <p style={styles.refText}>SECURE REF: {paymentSuccess.reference}</p>
+        </div>
+   
 
             <div style={{ marginTop: '20px', marginBottom: '20px' }}>
               <div style={styles.mapContainer}>
