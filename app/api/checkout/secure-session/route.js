@@ -56,6 +56,7 @@ export async function POST(req) {
       currency: "GHS",
       callback_url: `${process.env.NEXT_PUBLIC_SITE_URL}/verify-payment`, // Redirect after popup closes
       metadata: {
+        type: 'TICKET_PURCHASE', 
         event_id,
         tier_id,
         tier_name: tier.name,
