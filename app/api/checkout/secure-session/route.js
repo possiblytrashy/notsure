@@ -8,9 +8,9 @@ export async function POST(req) {
     const body = await req.json();
     const { event_id, tier_id, email, guest_name, reseller_code } = body;
 
-    // 1. Validation: If email is missing here, the access_code will be broken
-    if (!email || email === "") {
-      return NextResponse.json({ error: "Email is required for GHS transactions" }, { status: 400 });
+    // 1. Strict Validation
+    if (!email || !email.includes('@')) {
+      return NextResponse.json({ error: "A valid email is required for ticket delivery." }, { status: 400 });
     }
 
     const supabase = createClient(
@@ -18,12 +18,17 @@ export async function POST(req) {
       process.env.SUPABASE_SERVICE_ROLE_KEY
     );
 
-    // 2. Fetch Tier & Subaccount
+    // 2. Fetch Tier details and Organizer's Paystack Subaccount
     const { data: tier, error: tierError } = await supabase
       .from('ticket_tiers')
       .select(`
+        id,
+        name,
         price,
         events (
+          id,
+          title,
+          organizer_profile_id,
           organizers:organizer_profile_id (
             paystack_subaccount_code
           )
@@ -33,60 +38,70 @@ export async function POST(req) {
       .single();
 
     if (tierError || !tier) {
-      return NextResponse.json({ error: "Tier not found" }, { status: 404 });
+      console.error("Database Error:", tierError);
+      return NextResponse.json({ error: "Ticket luxury tier not found." }, { status: 404 });
     }
 
     const subaccount = tier.events?.organizers?.paystack_subaccount_code;
-    const amountInKobo = Math.round(tier.price * 100);
+    const amountInPesewas = Math.round(tier.price * 100);
+    
+    // 3. Calculate 5% Commission (Transaction Fee)
+    // If ticket is 100 GHS, commission is 5 GHS (500 Pesewas)
+    const commissionInPesewas = Math.round(amountInPesewas * 0.05);
 
-    // 3. Initialize Paystack FORCE GHS
+    // 4. Initialize Paystack with Logic for Splitting
+    const paystackPayload = {
+      email: email.trim(),
+      amount: amountInPesewas,
+      currency: "GHS",
+      callback_url: `${process.env.NEXT_PUBLIC_SITE_URL}/verify-payment`, // Redirect after popup closes
+      metadata: {
+        event_id,
+        tier_id,
+        tier_name: tier.name,
+        guest_name,
+        reseller_code: reseller_code || "DIRECT",
+        // This metadata is CRITICAL for your webhook later
+        custom_fields: [
+          { display_name: "Event", variable_name: "event_title", value: tier.events.title },
+          { display_name: "Ticket Tier", variable_name: "tier_name", value: tier.name },
+          { display_name: "Guest Name", variable_name: "guest_name", value: guest_name }
+        ]
+      }
+    };
+
+    // If a subaccount exists, we apply the split
+    if (subaccount) {
+      paystackPayload.subaccount = subaccount;
+      paystackPayload.transaction_charge = commissionInPesewas; 
+      paystackPayload.bearer = "subaccount"; // Organizer pays the Paystack fee from their share
+    }
+
     const paystackRes = await fetch('https://api.paystack.co/transaction/initialize', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        email: email.trim(),
-        amount: amountInKobo,
-        currency: "GHS", // <--- CRITICAL: Forces Ghana Cedis
-        subaccount: subaccount || undefined,
-        bearer: subaccount ? "subaccount" : "account",
-        metadata: {
-          event_id,
-          tier_id,
-          guest_name,
-          reseller_code: reseller_code || "DIRECT",
-          custom_fields: [
-            { display_name: "Guest Name", variable_name: "guest_name", value: guest_name },
-            { display_name: "Event ID", variable_name: "event_id", value: event_id }
-          ]
-        }
-      }),
+      body: JSON.stringify(paystackPayload),
     });
 
-    // ... after your fetch call
     const result = await paystackRes.json();
 
-    // LOG THIS IN VERCEL TO SEE THE REAL ERROR FROM PAYSTACK
-    console.log("PAYSTACK_DEBUG:", {
-      status: result.status,
-      message: result.message,
-      email_sent: email.trim(),
-      currency_sent: "GHS"
-    });
-
     if (!paystackRes.ok || !result.status) {
-      // If Paystack rejects the email or currency, we must stop here
-      return NextResponse.json({ 
-        error: result.message || "Paystack Initialization Failed" 
-      }, { status: paystackRes.status });
+      console.error("Paystack Error:", result.message);
+      return NextResponse.json({ error: result.message }, { status: 400 });
     }
 
-    return NextResponse.json({ access_code: result.data.access_code });
+    // Return everything needed for the frontend "setup" object
+    return NextResponse.json({ 
+      access_code: result.data.access_code,
+      amount: amountInPesewas,
+      email: email.trim()
+    });
 
   } catch (err) {
-    console.error("Server Crash:", err.message);
-    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
+    console.error("Server Crash:", err);
+    return NextResponse.json({ error: "Internal Concierge Error" }, { status: 500 });
   }
 }
