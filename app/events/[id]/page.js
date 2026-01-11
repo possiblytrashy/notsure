@@ -275,16 +275,17 @@ const handlePurchase = async () => {
   
   try {
     // A. Get the secure access code from your API
-    const res = await fetch('/api/paystack/initialize', {
-      method: 'POST',
-      body: JSON.stringify({
-        event_id: id,
-        tier_id: selectedTier,
-        email: guestEmail,
-        guest_name: guestName,
-        reseller_code: refCode || "DIRECT"
-      })
-    });
+   // Inside handlePurchase in EventPage.js
+const res = await fetch('/api/checkout/secure-session', { // Renamed to avoid ad-blockers
+  method: 'POST',
+  body: JSON.stringify({
+    event_id: id,
+    tier_id: selectedTier,
+    email: guestEmail,
+    guest_name: guestName,
+    reseller_code: refCode || "DIRECT"
+  })
+});
     
     const { access_code, error } = await res.json();
     if (error) throw new Error(error);
