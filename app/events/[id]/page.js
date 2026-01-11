@@ -307,16 +307,22 @@ if (!data.access_code) {
     return;
 }
 const PaystackPop = await loadPaystackScript();
-const handler = PaystackPop.setup({
-  // HARDCODE your pk_test here temporarily to verify the handshake
-  key: "pk_test_07a5e0148214c3f7e0704b014b8d37c5803a0299", 
-  access_code: data.access_code, 
-  onSuccess: (response) => {
-    recordPayment(response, activeTier);
-  },
-  onCancel: () => setIsProcessing(false)
-});
-handler.openIframe();
+      const handler = PaystackPop.setup({
+        // Use environment variable, fallback to hardcoded test key if needed
+        key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY || "pk_test_07a5e0148214c3f7e0704b014b8d37c5803a0299", 
+        access_code: data.access_code,
+        
+        // --- CRITICAL FIX: FORCE GHS AND EMAIL ---
+        email: guestEmail.trim(), // Explicitly passing email prevents the "Enter valid email" error
+        currency: 'GHS',          // Explicitly passing GHS prevents the "NGN" default fallback
+        // ----------------------------------------
+
+        onSuccess: (response) => {
+          recordPayment(response, activeTier);
+        },
+        onCancel: () => setIsProcessing(false)
+      });
+      handler.openIframe();
   } catch (err) {
     console.error("Initialization Error:", err);
     alert(`Concierge Error: ${err.message}`);
