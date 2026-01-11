@@ -15,6 +15,17 @@ export async function POST(req) {
     if (!email || !email.includes("@")) {
       return NextResponse.json({ error: "Valid email required" }, { status: 400 });
     }
+let resellerData = null;
+
+if (reseller_code && reseller_code !== "DIRECT") {
+  const { data } = await supabase
+    .from("resellers")
+    .select("id, commission_rate")
+    .eq("code", reseller_code)
+    .single();
+
+  resellerData = data;
+}
 
     /* 1. Fetch Tier + Event */
     const { data: tier } = await supabaseAdmin
