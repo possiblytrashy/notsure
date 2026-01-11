@@ -272,11 +272,13 @@ const loadPaystackScript = () => {
 
 const handlePurchase = async () => {
   setIsProcessing(true);
+  
   try {
+    // 1. Initiate the secure request to your API
     const res = await fetch('/api/checkout/secure-session', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json', // <--- THIS IS CRITICAL
+        'Content-Type': 'application/json',
       },
       body: JSON.stringify({
         event_id: id,
@@ -287,37 +289,47 @@ const handlePurchase = async () => {
       })
     });
 
-    // Handle non-200 responses
-    if (!res.ok) {
-      const errorData = await res.json();
-      throw new Error(errorData.error || 'Server responded with an error');
-    }
-    
-    const { access_code } = await res.json();
-    // ... rest of your code
-    if (error) throw new Error(error);
+    // 2. Parse the JSON response ONCE
+    const data = await res.json();
 
-    // B. Launch Paystack Inline
+    // 3. Robust Error Handling: check for non-OK status OR an error field in the JSON
+    if (!res.ok || data.error) {
+      // We throw an error with the message from the server or a fallback
+      throw new Error(data.error || `Server Error: ${res.status}`);
+    }
+
+    // 4. Validate that we actually received the access_code
+    if (!data.access_code) {
+      throw new Error("The secure session could not be established. Missing access code.");
+    }
+
+    // 5. Load Paystack Script and Launch
     const PaystackPop = await loadPaystackScript();
+    
     const handler = PaystackPop.setup({
       key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
-      access_code: access_code, // This "bundle" contains all the split/price logic securely
+      access_code: data.access_code, // Uses the code from 'data'
       onSuccess: (response) => {
-        // Webhook handles the DB work, we just show the success UI
+        // Handed off to your webhook for DB insertion
         recordPayment(response, activeTier);
       },
-      onCancel: () => setIsProcessing(false)
+      onCancel: () => {
+        setIsProcessing(false);
+      }
     });
 
     handler.openIframe();
 
   } catch (err) {
+    // This catches both network errors and the manual 'throws' above
     console.error("Luxury System Error:", err.message);
-    alert("Transaction could not be initialized. Please contact the concierge.");
+    
+    // Using a more informative alert for debugging
+    alert(`Concierge Note: ${err.message}`);
+    
     setIsProcessing(false);
   }
 };
-
   const handleShare = async () => {
     const shareUrl = window.location.href;
     if (navigator.share) {
