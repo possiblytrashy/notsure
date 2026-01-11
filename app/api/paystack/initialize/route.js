@@ -1,134 +1,69 @@
-import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-
-// --- Initialize Supabase clients ---
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY // Server-side key
-);
+import { NextResponse } from 'next/server';
+import { supabaseAdmin } from '@/lib/supabaseAdmin'; 
 
 export async function POST(req) {
   try {
-    const body = await req.json();
-    const email = body.email?.trim().toLowerCase();
-    const { event_id, tier_id, guest_name, reseller_code } = body;
+    const { event_id, tier_id, email, guest_name, reseller_code } = await req.json();
 
-    if (!email || !email.includes("@")) {
-      return NextResponse.json({ error: "Valid email required" }, { status: 400 });
-    }
-
-    // --- Fetch Tier + Event ---
-    const { data: tier, error: tierError } = await supabaseAdmin
-      .from("ticket_tiers")
-      .select(`
-        *,
-        events (
-          title,
-          organizer_subaccount,
-          organizers:organizer_profile_id (paystack_subaccount_code)
-        )
-      `)
-      .eq("id", tier_id)
+    // 1. DATA VERIFICATION (The "Truth" comes from DB, not user input)
+    const { data: event, error: eventErr } = await supabaseAdmin
+      .from('events')
+      .select('*, ticket_tiers(*), organizers(paystack_subaccount_code)')
+      .eq('id', event_id)
       .single();
 
-    if (tierError) {
-      console.error("Tier fetch error:", tierError);
-      return NextResponse.json({ error: "Tier not found" }, { status: 404 });
-    }
+    const tier = event.ticket_tiers.find(t => t.id === tier_id);
+    if (!tier) throw new Error("Invalid Tier");
 
-    if (!tier || !tier.price) {
-      return NextResponse.json({ error: "Invalid ticket price" }, { status: 400 });
-    }
-
-    // --- Price calculation ---
+    // 2. LUXURY PRICING LOGIC
+    // Base price from DB (e.g. 1000 GHS)
     let basePrice = parseFloat(tier.price);
-    if (isNaN(basePrice) || basePrice <= 0) {
-      return NextResponse.json({ error: "Invalid ticket price" }, { status: 400 });
-    }
+    // If reseller is present, we apply the 10% Luxury Markup we worked on
+    let finalPrice = reseller_code !== "DIRECT" ? basePrice * 1.10 : basePrice;
 
-    let finalPrice = basePrice;
-    let resellerMarkup = 0;
+    // 3. SPLIT CALCULATIONS (Converted to Pesewas for Paystack)
+    const totalAmountInPesewas = Math.round(finalPrice * 100);
+    const platformFeeInPesewas = Math.round(basePrice * 0.05 * 100); // Your 5%
 
-    // --- Fetch reseller if code provided ---
-    let resellerData = null;
-    if (reseller_code && reseller_code !== "DIRECT") {
-      const { data: resData, error: resellerError } = await supabaseAdmin
-        .from("resellers")
-        .select("id, commission_rate, paystack_subaccount_code")
-        .eq("code", reseller_code)
-        .single();
-
-      if (!resellerError && resData) {
-        resellerData = resData;
-        if (resellerData.paystack_subaccount_code) {
-          resellerMarkup = basePrice * 0.10; // 10% markup
-          finalPrice += resellerMarkup;
-        }
-      }
-    }
-
-    // --- Platform fee (5%) ---
-    const platformFee = finalPrice * 0.05;
-
-    // --- Convert to pesewas (smallest currency unit) ---
-    const amountInPesewas = Math.round(finalPrice * 100);
-    const transactionChargeInPesewas = Math.round(platformFee * 100);
-
-    if (!amountInPesewas || amountInPesewas < 100) {
-      return NextResponse.json({ error: "Transaction amount invalid" }, { status: 400 });
-    }
-
-    // --- Determine organizer subaccount ---
-    const organizerSubaccount =
-      tier.events.organizer_subaccount ||
-      tier.events.organizers?.paystack_subaccount_code;
-
-    if (!organizerSubaccount) {
-      return NextResponse.json({ error: "Organizer payout not configured" }, { status: 400 });
-    }
-
-    // --- Paystack payload ---
-    const payload = {
-      email,
-      amount: amountInPesewas,
-      subaccount: organizerSubaccount,
-      transaction_charge: transactionChargeInPesewas,
-      bearer: "subaccount",
-      metadata: {
-        type: "TICKET",
-        event_id,
-        tier_id,
-        guest_name,
-        reseller_code: reseller_code || "DIRECT",
-        base_price: basePrice,
-        reseller_markup: resellerMarkup,
-        platform_fee: platformFee,
-      },
-    };
-
-    // --- Initialize Paystack transaction ---
-    const res = await fetch("https://api.paystack.co/transaction/initialize", {
-      method: "POST",
+    // 4. INITIALIZE PAYSTACK (Using Secret Key - hidden from console)
+    const paystackResponse = await fetch('https://api.paystack.co/transaction/initialize', {
+      method: 'POST',
       headers: {
         Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-        "Content-Type": "application/json",
+        'Content-Type': 'application/json'
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        email,
+        amount: totalAmountInPesewas,
+        subaccount: event.organizers.paystack_subaccount_code,
+        bearer: "subaccount", // Organizer bears the transaction fee from their 95%
+        metadata: {
+          event_id,
+          tier_id,
+          reseller_code,
+          guest_name,
+          platform_fee: platformFeeInPesewas
+        },
+        split: {
+          type: "flat",
+          subaccounts: [
+            { 
+              subaccount: process.env.PLATFORM_SUBACCOUNT_CODE, 
+              share: platformFeeInPesewas 
+            }
+          ]
+        }
+      })
     });
 
-    const data = await res.json();
+    const result = await paystackResponse.json();
+    
+    if (!result.status) throw new Error(result.message);
 
-    if (!data.status) {
-      console.error("Paystack init error:", data);
-      return NextResponse.json({ error: data.message || "Paystack initialization failed" }, { status: 400 });
-    }
+    // We only return the access_code. The browser never sees the split math.
+    return NextResponse.json({ access_code: result.data.access_code });
 
-    return NextResponse.json({
-      access_code: data.data.access_code,
-      reference: data.data.reference,
-    });
-  } catch (err) {
-    console.error("Transaction initialization error:", err);
-    return NextResponse.json({ error: "Initialization failed" }, { status: 500 });
+  } catch (error) {
+    return NextResponse.json({ error: error.message }, { status: 400 });
   }
 }
