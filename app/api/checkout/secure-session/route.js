@@ -65,14 +65,24 @@ export async function POST(req) {
       }),
     });
 
+    // ... after your fetch call
     const result = await paystackRes.json();
 
-    if (!result.status) {
-      console.error("Paystack Init Error:", result.message);
-      return NextResponse.json({ error: result.message }, { status: 400 });
+    // LOG THIS IN VERCEL TO SEE THE REAL ERROR FROM PAYSTACK
+    console.log("PAYSTACK_DEBUG:", {
+      status: result.status,
+      message: result.message,
+      email_sent: email.trim(),
+      currency_sent: "GHS"
+    });
+
+    if (!paystackRes.ok || !result.status) {
+      // If Paystack rejects the email or currency, we must stop here
+      return NextResponse.json({ 
+        error: result.message || "Paystack Initialization Failed" 
+      }, { status: paystackRes.status });
     }
 
-    // 4. Return the valid access_code
     return NextResponse.json({ access_code: result.data.access_code });
 
   } catch (err) {
