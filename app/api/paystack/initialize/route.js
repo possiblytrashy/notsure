@@ -54,7 +54,7 @@ export async function POST(req) {
     const organizerShare = totalAmount - platformFee - resellerShare;
 
     // 5. Initialize Paystack
-    const paystackResponse = await fetch('https://api.api.paystack.co/transaction/initialize', {
+    const paystackResponse = await fetch('https://api.paystack.co/transaction/initialize', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
