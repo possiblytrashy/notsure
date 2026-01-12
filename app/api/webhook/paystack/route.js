@@ -6,9 +6,9 @@ import crypto from 'crypto';
 export const dynamic = 'force-dynamic';
 
 /**
- * LUXURY WEBHOOK CONCIERGE (FULL VERSION)
- * Handles: Signature Security, Voting, Tiered Ticketing, 5% Splits, 10% Markups,
- * QR Storage, Reseller RPCs, and Automated Reseller Payouts via Paystack.
+ * LUXURY WEBHOOK CONCIERGE
+ * Handles: Signature Security, Tiered Ticketing, 5% Splits, 10% Markups,
+ * QR Storage, Voting, and Automated Reseller Payouts.
  */
 export async function POST(req) {
   try {
@@ -27,8 +27,7 @@ export async function POST(req) {
       .digest('hex');
 
     if (hash !== req.headers.get('x-paystack-signature')) {
-      console.error('Unauthorized: Signature mismatch');
-      return new Response('Unauthorized', { status: 401 });
+      return new Response('Unauthorized: Signature mismatch', { status: 401 });
     }
 
     const body = JSON.parse(bodyText);
@@ -53,7 +52,7 @@ export async function POST(req) {
     } = metadata;
 
     const email = body.data.customer.email;
-    const amountPaid = body.data.amount / 100; // Total GHS
+    const amountPaid = body.data.amount / 100; // Total GHS including potential markups
     const reference = body.data.reference;
     const finalGuestName = guest_name || 'Valued Guest';
 
@@ -90,7 +89,7 @@ export async function POST(req) {
     ====================================================== */
     else if (type === 'TICKET_PURCHASE' || tier_id) {
       
-      // 1. Fetch Source of Truth from DB
+      // 1. Fetch Source of Truth from DB (Prevents price tampering)
       const { data: tierData, error: tierError } = await supabase
         .from('ticket_tiers')
         .select('*, events(title, location_name, event_date, event_time, organizer_profile_id)')
@@ -104,80 +103,67 @@ export async function POST(req) {
       const platformFee = actualBasePrice * 0.05;
       const organizerAmount = actualBasePrice * 0.95;
       
-      // Calculate reseller commission (anything above the base price due to 10% markup)
+      // Calculate reseller commission (anything above the base price)
       const resellerCommission = (amountPaid > actualBasePrice) 
         ? (amountPaid - actualBasePrice) 
         : 0;
 
-      // 3. Ticket Identity
-      const ticketNumber = `OUST-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+      // 3. QR Generation & Storage
+      // Using 'ticket_number' to match your schema's column
+      const ticketNumber = `OUST-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
+      
+      const qrDataUrl = await QRCode.toDataURL(`TICKET:${ticketNumber}|REF:${reference}`, {
+        width: 400,
+        margin: 2,
+        color: { dark: '#000000', light: '#ffffff' }
+      });
 
-      // 4. Atomic Ticket Creation (Mapped to your public.tickets schema)
+      const qrBuffer = Buffer.from(qrDataUrl.split(',')[1], 'base64');
+      const { error: uploadError } = await supabase.storage
+        .from('media')
+        .upload(`qrs/${ticketNumber}.png`, qrBuffer, {
+          contentType: 'image/png',
+          upsert: true,
+        });
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl: qrUrl } } = supabase.storage
+        .from('media')
+        .getPublicUrl(`qrs/${ticketNumber}.png`);
+
+      // 4. Atomic Ticket Creation (Mapped exactly to your provided CREATE TABLE schema)
       const { error: dbError } = await supabase.from('tickets').insert({
         event_id: event_id,
         tier_id: tier_id,
-        tier_name: tierData.name,
-        ticket_number: ticketNumber, // Schema: ticket_number
-        user_email: email,           // Schema: user_email
+        tier_name: tierData.name,    // Mapped to tier_name
+        ticket_number: ticketNumber, // Mapped to ticket_number
+        qr_code_url: qrUrl,          // Mapped to qr_code_url
+        user_email: email,           // Mapped to user_email
         guest_email: guest_email || email,
         guest_name: finalGuestName,
         reference: reference,
         amount: amountPaid,
         status: 'valid',
-        is_scanned: false
+        is_scanned: false,
+        // user_id is left null unless passed in metadata for authenticated users
       });
 
       if (dbError) throw dbError;
 
-      // 5. QR Generation & Storage
-      let qrUrl = null;
-      try {
-        const qrDataUrl = await QRCode.toDataURL(`TICKET:${ticketNumber}|REF:${reference}`, {
-          width: 400,
-          margin: 2,
-          color: { dark: '#000000', light: '#ffffff' }
+      // 5. Handle Reseller Commissions & Auto-Payouts
+      if (reseller_code && reseller_code !== 'DIRECT') {
+        await supabase.rpc('record_reseller_sale', {
+          target_unique_code: reseller_code,
+          t_ref: reference,
+          t_amount: amountPaid,
+          t_commission: resellerCommission,
         });
 
-        const qrBuffer = Buffer.from(qrDataUrl.split(',')[1], 'base64');
-        const { error: uploadError } = await supabase.storage
-          .from('media')
-          .upload(`qrs/${ticketNumber}.png`, qrBuffer, {
-            contentType: 'image/png',
-            upsert: true,
-          });
-
-        if (!uploadError) {
-          const { data: { publicUrl } } = supabase.storage
-            .from('media')
-            .getPublicUrl(`qrs/${ticketNumber}.png`);
-          qrUrl = publicUrl;
-          
-          // Update qr_code_url in DB
-          await supabase.from('tickets')
-            .update({ qr_code_url: qrUrl })
-            .eq('ticket_number', ticketNumber);
-        }
-      } catch (qrErr) {
-        console.error('QR Storage Error (Non-fatal):', qrErr.message);
+        await attemptAutoResellerPayout(supabase, reseller_code);
       }
 
-      // 6. Handle Reseller Commissions & Auto-Payouts
-      if (reseller_code && reseller_code !== 'DIRECT') {
-        try {
-          await supabase.rpc('record_reseller_sale', {
-            target_unique_code: reseller_code,
-            t_ref: reference,
-            t_amount: amountPaid,
-            t_commission: resellerCommission,
-          });
-
-          await attemptAutoResellerPayout(supabase, reseller_code);
-        } catch (resellerErr) {
-          console.error('Reseller RPC Error:', resellerErr.message);
-        }
-      }
-
-      // 7. Record Platform/Organizer Payout Split
+      // 6. Record Platform/Organizer Payout Split
       await supabase.from('payouts').insert({
         organizer_id: tierData.events.organizer_profile_id,
         amount_total: amountPaid,
@@ -187,7 +173,7 @@ export async function POST(req) {
         reference: reference,
       });
 
-      // 8. Send Luxury Confirmation Email
+      // 7. Send Luxury Confirmation Email
       await resend.emails.send({
         from: 'OUSTED Concierge <tickets@ousted.com>',
         to: email,
@@ -216,8 +202,8 @@ function generateLuxuryEmail(tierData, qrUrl, ticketNumber, name) {
         <p style="margin: 0; font-size: 10px; font-weight: 800; opacity: 0.6; text-transform: uppercase;">Experience</p>
         <h2 style="margin: 0 0 15px 0; font-size: 20px;">${event.title}</h2>
         
-        <div style="display: flex; gap: 20px;">
-          <div style="margin-right: 30px;">
+        <div style="display: flex;">
+          <div style="margin-right: 40px;">
             <p style="margin: 0; font-size: 10px; opacity: 0.6;">TIER</p>
             <p style="margin: 0; font-weight: 700;">${tierData.name}</p>
           </div>
@@ -229,8 +215,8 @@ function generateLuxuryEmail(tierData, qrUrl, ticketNumber, name) {
       </div>
 
       <div style="text-align: center; padding: 20px;">
-        ${qrUrl ? `<img src="${qrUrl}" width="280" style="border-radius: 15px; border: 1px solid #eee;" />` : ''}
-        <p style="font-family: monospace; font-size: 12px; color: #999; margin-top: 15px;">TICKET ID: ${ticketNumber}</p>
+        <img src="${qrUrl}" width="280" style="border-radius: 15px; border: 1px solid #eee;" />
+        <p style="font-family: monospace; font-size: 12px; color: #999; margin-top: 15px;">SECURE ID: ${ticketNumber}</p>
       </div>
 
       <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #eee; font-size: 12px; color: #999;">
