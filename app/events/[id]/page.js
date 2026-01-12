@@ -256,14 +256,17 @@ const loadPaystackScript = () => {
 const recordPayment = async (response, tier) => {
   const basePrice = tier?.price || 0;
   const finalAmountPaid = isResellerMode ? parseFloat(basePrice) * 1.10 : parseFloat(basePrice);
+  
+  // 1. Generate the ID locally so it matches the UI
+  const ticketNum = `OUST-${response.reference.slice(-6).toUpperCase()}`;
 
-  // FIXED: Using correct schema column names
+  // 2. FIXED: Insert using the CORRECT column names from your schema
   const { error } = await supabase.from('tickets').insert({
     event_id: id,
     tier_id: tier.id,
-    tier_name: tier.name, // Added to match schema
-    ticket_number: `OUST-${response.reference.slice(-6).toUpperCase()}`, // Changed from ticket_hash
-    user_email: guestEmail, // Changed from customer_email
+    tier_name: tier.name,        // Matches schema
+    ticket_number: ticketNum,    // Matches schema (was ticket_hash)
+    user_email: guestEmail,      // Matches schema (was customer_email)
     guest_name: guestName || "Valued Guest",
     reference: response.reference,
     amount: finalAmountPaid,
@@ -274,8 +277,11 @@ const recordPayment = async (response, tier) => {
 
   if (error) {
     console.error("Immediate Save Error:", error.message);
+  } else {
+    console.log("✅ Ticket saved immediately from Frontend");
   }
 
+  // 3. Trigger Success State
   setPaymentSuccess({
     reference: response.reference,
     tier: tier?.name || "Standard Access",
@@ -387,9 +393,7 @@ const handler = PaystackPop.setup({
   if (paymentSuccess) {
 // Inside the if (paymentSuccess) block
 const qrPayload = encodeURIComponent(paymentSuccess.reference);
-// Use a higher quality, reliable QR generator for the luxury look
 const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${qrPayload}&qzone=2&format=png`;
-
 return (
   <div style={styles.ticketWrapper}>
     <div style={styles.ticketCard} className="printable-ticket">
@@ -408,15 +412,18 @@ return (
             </div>
         
         <div style={styles.qrSection}>
-           {/* Ensure the image has a fixed height so it doesn't "jump" when loading */}
            <div style={{ minHeight: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-             <img 
-               src={qrUrl} 
-               alt="Digital Access Key" 
-               style={styles.qrImg} 
-               onLoad={() => console.log("QR Rendered")}
-             />
-           </div>
+  <img 
+    src={qrUrl} 
+    alt="Digital Access Key" 
+    style={styles.qrImg} 
+    // Add this error handler to see if the image is actually blocked
+    onError={(e) => {
+       e.target.style.display = 'none'; 
+       console.error("QR Failed to Load"); 
+    }}
+  />
+</div>
            <p style={styles.refText}>SECURE REF: {paymentSuccess.reference}</p>
         </div>
    
