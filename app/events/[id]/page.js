@@ -133,7 +133,22 @@ export default function EventPage() {
     }
     if (id) init();
   }, [id]);
+useEffect(() => {
+  if (!paymentSuccess?.reference) return;
 
+  const fetchTicket = async () => {
+    const { data } = await supabase
+      .from('tickets')
+      .select('*')
+      .eq('reference', paymentSuccess.reference)
+      .single();
+
+    if (data) setTicket(data);
+  };
+
+  const interval = setInterval(fetchTicket, 2000);
+  return () => clearInterval(interval);
+}, [paymentSuccess]);
   // --- RESELLER VALIDATION & ANALYTICS ---
 useEffect(() => {
     const validateReseller = async () => {
@@ -350,22 +365,7 @@ const handler = PaystackPop.setup({
     </div>
   );
 
-useEffect(() => {
-  if (!paymentSuccess?.reference) return;
 
-  const fetchTicket = async () => {
-    const { data } = await supabase
-      .from('tickets')
-      .select('*')
-      .eq('reference', paymentSuccess.reference)
-      .single();
-
-    if (data) setTicket(data);
-  };
-
-  const interval = setInterval(fetchTicket, 2000);
-  return () => clearInterval(interval);
-}, [paymentSuccess]);
 
   // --- 5. SUCCESS STATE (TICKET VIEW) ---
   if (paymentSuccess) {
