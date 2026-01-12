@@ -227,14 +227,17 @@ function generateLuxuryEmail(tierData, qrUrl, ticketNumber, name) {
   `;
 }
 
-/* --- HELPER: AUTOMATIC RESELLER PAYOUT --- */
 async function attemptAutoResellerPayout(supabase, resellerCode) {
-  const { data: reseller } = await supabase
-    .from('resellers')
-    .select('*')
+  // find the event_reseller row by unique_code and include reseller record (if needed)
+  const { data: eventReseller, error: erError } = await supabase
+    .from('event_resellers')
+    .select('id, reseller_id, commission_rate, resellers (id, payout_recipient_code, total_earned, payout_threshold)')
     .eq('unique_code', resellerCode)
-    .single();
+    .maybeSingle();
 
+  if (erError || !eventReseller) return;
+
+  const reseller = eventReseller.resellers || null;
   if (!reseller || !reseller.payout_recipient_code || reseller.total_earned < reseller.payout_threshold) {
     return;
   }
@@ -242,13 +245,14 @@ async function attemptAutoResellerPayout(supabase, resellerCode) {
   const { data: unpaidSales } = await supabase
     .from('reseller_sales')
     .select('*')
-    .eq('reseller_id', reseller.id)
+    .eq('event_reseller_id', eventReseller.id)
     .eq('paid', false);
 
   if (!unpaidSales?.length) return;
 
-  const payoutAmount = unpaidSales.reduce((sum, s) => sum + parseFloat(s.commission_amount), 0);
+  const payoutAmount = unpaidSales.reduce((sum, s) => sum + parseFloat(s.commission_earned || 0), 0);
 
+  // call paystack transfer
   const res = await fetch('https://api.paystack.co/transfer', {
     method: 'POST',
     headers: {
@@ -266,14 +270,17 @@ async function attemptAutoResellerPayout(supabase, resellerCode) {
   const data = await res.json();
   if (!data.status) return;
 
+  // mark sales as paid
   await supabase
     .from('reseller_sales')
     .update({ paid: true, payout_reference: data.data.reference })
-    .eq('reseller_id', reseller.id)
+    .eq('event_reseller_id', eventReseller.id)
     .eq('paid', false);
 
+  // reset reseller totals
   await supabase
     .from('resellers')
     .update({ total_earned: 0, last_payout_at: new Date() })
     .eq('id', reseller.id);
 }
+
