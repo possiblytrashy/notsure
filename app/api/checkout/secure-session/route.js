@@ -60,6 +60,7 @@ export async function POST(req) {
         event_id,
         tier_id,
         tier_name: tier.name,
+        guest_email: email,       
         guest_name,
         reseller_code: reseller_code || "DIRECT",
         // This metadata is CRITICAL for your webhook later
