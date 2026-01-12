@@ -257,21 +257,24 @@ const recordPayment = async (response, tier) => {
   const basePrice = tier?.price || 0;
   const finalAmountPaid = isResellerMode ? parseFloat(basePrice) * 1.10 : parseFloat(basePrice);
 
-  // --- ADD THIS DB SAVE ---
+  // FIXED: Using correct schema column names
   const { error } = await supabase.from('tickets').insert({
     event_id: id,
     tier_id: tier.id,
-    ticket_hash: `OUST-${response.reference.slice(-6).toUpperCase()}`,
-    customer_email: guestEmail,
+    tier_name: tier.name, // Added to match schema
+    ticket_number: `OUST-${response.reference.slice(-6).toUpperCase()}`, // Changed from ticket_hash
+    user_email: guestEmail, // Changed from customer_email
     guest_name: guestName || "Valued Guest",
     reference: response.reference,
     amount: finalAmountPaid,
     status: 'valid',
+    is_scanned: false,
     reseller_code: refCode !== 'DIRECT' ? refCode : null,
   });
 
-  if (error) console.error("Immediate Save Error:", error);
-  // -------------------------
+  if (error) {
+    console.error("Immediate Save Error:", error.message);
+  }
 
   setPaymentSuccess({
     reference: response.reference,
