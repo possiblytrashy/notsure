@@ -134,20 +134,19 @@ export async function POST(req) {
 
       // 4. Atomic Ticket Creation (Mapped exactly to your provided CREATE TABLE schema)
       const { error: dbError } = await supabase.from('tickets').insert({
-        event_id: event_id,
-        tier_id: tier_id,
-        tier_name: tierData.name,    // Mapped to tier_name
-        ticket_number: ticketNumber, // Mapped to ticket_number
-        qr_code_url: qrUrl,          // Mapped to qr_code_url
-        user_email: email,           // Mapped to user_email
-        guest_email: guest_email || email,
-        guest_name: finalGuestName,
-        reference: reference,
-        amount: amountPaid,
-        status: 'valid',
-        is_scanned: false,
-        // user_id is left null unless passed in metadata for authenticated users
-      });
+  event_id: event_id,
+  tier_id: tier_id,
+  tier_name: tierData.name,
+  ticket_number: ticketNumber,
+  qr_code_url: qrUrl,
+  user_email: email,
+  guest_email: guest_email || email,
+  guest_name: finalGuestName,
+  reference: reference,
+  amount: amountPaid,
+  status: 'valid',
+  is_scanned: false,
+});
 
       if (dbError) throw dbError;
 
