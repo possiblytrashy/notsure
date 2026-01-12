@@ -304,7 +304,7 @@ const handler = PaystackPop.setup({
   currency: "GHS",
   onSuccess: async (response) => {
   setPaymentSuccess({ reference: response.reference });
-}
+},
   onCancel: () => setIsProcessing(false)
 });
     
@@ -392,7 +392,7 @@ return (
         <div style={styles.qrSection}>
            <div style={{ minHeight: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
   <img 
-    src={tickets.qr_code_url} 
+    src={ticket.qr_code_url} 
     alt="Digital Access Key" 
     style={styles.qrImg} 
     // Add this error handler to see if the image is actually blocked
