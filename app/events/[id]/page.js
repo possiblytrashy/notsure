@@ -257,31 +257,30 @@ const recordPayment = async (response, tier) => {
   const basePrice = tier?.price || 0;
   const finalAmountPaid = isResellerMode ? parseFloat(basePrice) * 1.10 : parseFloat(basePrice);
   
-  // 1. Generate the ID locally so it matches the UI
-  const ticketNum = `OUST-${response.reference.slice(-6).toUpperCase()}`;
-
-  // 2. FIXED: Insert using the CORRECT column names from your schema
+  // MATCHING YOUR SCHEMA EXACTLY:
   const { error } = await supabase.from('tickets').insert({
     event_id: id,
     tier_id: tier.id,
-    tier_name: tier.name,        // Matches schema
-    ticket_number: ticketNum,    // Matches schema (was ticket_hash)
-    user_email: guestEmail,      // Matches schema (was customer_email)
+    tier_name: tier.name,         // Schema requires 'tier_name'
+    ticket_number: `OUST-${response.reference.slice(-6).toUpperCase()}`, // Schema requires 'ticket_number'
+    user_email: guestEmail,       // Schema requires 'user_email'
+    guest_email: guestEmail,      // Schema requires 'guest_email'
     guest_name: guestName || "Valued Guest",
     reference: response.reference,
     amount: finalAmountPaid,
     status: 'valid',
     is_scanned: false,
-    reseller_code: refCode !== 'DIRECT' ? refCode : null,
+    // Note: 'reseller_code' is not in your provided schema, so we omit it to prevent errors
   });
 
   if (error) {
-    console.error("Immediate Save Error:", error.message);
+    console.error("❌ DB SAVE FAILED:", error.message);
+    alert("Payment successful, but ticket save failed: " + error.message);
   } else {
-    console.log("✅ Ticket saved immediately from Frontend");
+    console.log("✅ Ticket saved to DB!");
   }
 
-  // 3. Trigger Success State
+  // FORCE UI UPDATE
   setPaymentSuccess({
     reference: response.reference,
     tier: tier?.name || "Standard Access",
