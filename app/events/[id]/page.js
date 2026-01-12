@@ -392,7 +392,7 @@ return (
         <div style={styles.qrSection}>
            <div style={{ minHeight: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
   <img 
-    src={ticket.qr_code_url} 
+    src={qrUrl} 
     alt="Digital Access Key" 
     style={styles.qrImg} 
     // Add this error handler to see if the image is actually blocked
