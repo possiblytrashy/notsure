@@ -253,44 +253,7 @@ const loadPaystackScript = () => {
   });
 };
 
-const recordPayment = async (response, tier) => {
-  const basePrice = tier?.price || 0;
-  const finalAmountPaid = isResellerMode ? parseFloat(basePrice) * 1.10 : parseFloat(basePrice);
-  
-  // MATCHING YOUR SCHEMA EXACTLY:
-  const { error } = await supabase.from('tickets').insert({
-    event_id: id,
-    tier_id: tier.id,
-    tier_name: tier.name,         // Schema requires 'tier_name'
-    ticket_number: `OUST-${response.reference.slice(-6).toUpperCase()}`, // Schema requires 'ticket_number'
-    user_email: guestEmail,       // Schema requires 'user_email'
-    guest_email: guestEmail,      // Schema requires 'guest_email'
-    guest_name: guestName || "Valued Guest",
-    reference: response.reference,
-    amount: finalAmountPaid,
-    status: 'valid',
-    is_scanned: false,
-    // Note: 'reseller_code' is not in your provided schema, so we omit it to prevent errors
-  });
 
-  if (error) {
-    console.error("❌ DB SAVE FAILED:", error.message);
-    alert("Payment successful, but ticket save failed: " + error.message);
-  } else {
-    console.log("✅ Ticket saved to DB!");
-  }
-
-  // FORCE UI UPDATE
-  setPaymentSuccess({
-    reference: response.reference,
-    tier: tier?.name || "Standard Access",
-    price: finalAmountPaid,
-    customer: guestName || "Valued Guest",
-    dbError: !!error
-  });
-  
-  setIsProcessing(false);
-};
   const handlePurchase = async (e) => {
   if (e && e.preventDefault) e.preventDefault();
   
@@ -339,10 +302,9 @@ const handler = PaystackPop.setup({
   email: guestEmail.trim(),
   amount: amountInPesewas,
   currency: "GHS",
-  onSuccess: (response) => {
-    // Pass the captured tier ref to ensure it's not null
-    recordPayment(response, currentTierRef);
-  },
+  onSuccess: async (response) => {
+  setPaymentSuccess({ reference: response.reference });
+}
   onCancel: () => setIsProcessing(false)
 });
     
@@ -388,6 +350,23 @@ const handler = PaystackPop.setup({
     </div>
   );
 
+useEffect(() => {
+  if (!paymentSuccess?.reference) return;
+
+  const fetchTicket = async () => {
+    const { data } = await supabase
+      .from('tickets')
+      .select('*')
+      .eq('reference', paymentSuccess.reference)
+      .single();
+
+    if (data) setTicket(data);
+  };
+
+  const interval = setInterval(fetchTicket, 2000);
+  return () => clearInterval(interval);
+}, [paymentSuccess]);
+
   // --- 5. SUCCESS STATE (TICKET VIEW) ---
   if (paymentSuccess) {
 // Inside the if (paymentSuccess) block
@@ -413,7 +392,7 @@ return (
         <div style={styles.qrSection}>
            <div style={{ minHeight: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
   <img 
-    src={qrUrl} 
+    src={tickets.qr_code_url} 
     alt="Digital Access Key" 
     style={styles.qrImg} 
     // Add this error handler to see if the image is actually blocked
