@@ -317,13 +317,28 @@ const handler = PaystackPop.setup({
   email: guestEmail.trim(),
   amount: amountInPesewas,
   currency: "GHS",
-  onSuccess: async (response) => {
-  setPaymentSuccess({ reference: response.reference });
-},
-  onCancel: () => setIsProcessing(false)
+
+  callback: function (response) {
+    console.log("✅ PAYSTACK CALLBACK FIRED:", response);
+
+    if (!response?.reference) {
+      alert("Payment succeeded but reference missing");
+      setIsProcessing(false);
+      return;
+    }
+
+    setPaymentSuccess({
+      reference: response.reference
+    });
+  },
+
+  onClose: function () {
+    console.log("❌ Paystack closed");
+    setIsProcessing(false);
+  }
 });
-    
-    handler.openIframe();
+
+handler.openIframe();
 
   } catch (err) {
     console.error("Initialization Error:", err);
