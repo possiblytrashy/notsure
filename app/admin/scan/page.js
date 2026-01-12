@@ -119,12 +119,32 @@ export default function AdvancedScanner() {
       }
 
       // Success Path
-      const { error: updateError } = await supabase
-        .from('tickets')
-        .update({ is_scanned: true, updated_at: new Date().toISOString() })
-        .eq('id', ticket.id);
+      const { data: updatedTicket, error: updateError } = await supabase
+  .from('tickets')
+  .update({
+    is_scanned: true,
+    updated_at: new Date().toISOString()
+  })
+  .eq('id', ticket.id)
+  .eq('is_scanned', false)   // 🔒 LOCK
+  .select()
+  .maybeSingle();
 
-      if (updateError) throw updateError;
+if (updateError) throw updateError;
+
+// If no row was updated → already scanned
+if (!updatedTicket) {
+  setStatus({ 
+    type: 'warning',
+    message: 'USED TICKET',
+    color: '#64748b',
+    details: 'This ticket was already scanned',
+    eventName: eventTitle,
+    tier: ticketTier
+  });
+  return;
+}
+
 
       setScanHistory(prev => [{
         name: ticket.guest_name, event: eventTitle, tier: ticketTier, time: new Date().toLocaleTimeString()
