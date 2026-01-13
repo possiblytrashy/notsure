@@ -1,5 +1,5 @@
-// FILE PATH: app/api/checkout/secure-session/route.js
-// This replaces your current secure-session route
+// FILE: app/api/checkout/secure-session/route.js
+// REPLACE your entire secure-session route with this
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
@@ -29,7 +29,7 @@ export async function POST(req) {
       process.env.SUPABASE_SERVICE_ROLE_KEY
     );
 
-    // 2. Fetch Tier with Event Details
+    // 2. Fetch Tier with Event and Organizer Details
     const { data: tier, error: tierError } = await supabase
       .from('ticket_tiers')
       .select(`
@@ -39,6 +39,7 @@ export async function POST(req) {
         events (
           id,
           title,
+          allows_resellers,
           organizer_profile_id,
           organizers:organizer_profile_id (
             paystack_subaccount_code
@@ -55,21 +56,51 @@ export async function POST(req) {
       }, { status: 404 });
     }
 
-    // 3. Calculate Final Price (with reseller markup if applicable)
-    let finalPrice = Number(tier.price);
-    //const isResellerPurchase = reseller_code && reseller_code !== "DIRECT";
-    
-    //if (isResellerPurchase) {
-     // finalPrice = finalPrice * 1.10; // 10% markup
-   // }
+    // 3. Check if this is a Reseller Purchase
+    let resellerData = null;
+    let isResellerPurchase = false;
+
+    if (reseller_code && reseller_code !== "DIRECT" && tier.events.allows_resellers) {
+      const { data: eventReseller, error: resellerError } = await supabase
+        .from('event_resellers')
+        .select(`
+          *,
+          resellers:reseller_id (
+            id,
+            paystack_subaccount_code
+          )
+        `)
+        .eq('unique_code', reseller_code)
+        .eq('event_id', event_id)
+        .single();
+
+      if (eventReseller && !resellerError) {
+        resellerData = eventReseller;
+        isResellerPurchase = true;
+        console.log("✅ Valid reseller link detected:", reseller_code);
+      } else {
+        console.log("⚠️ Invalid reseller code, processing as direct purchase");
+      }
+    }
+
+    // 4. Calculate Price (with 10% markup if reseller purchase)
+    let basePrice = Number(tier.price);
+    let finalPrice = basePrice;
+    let resellerCommission = 0;
+
+    if (isResellerPurchase) {
+      finalPrice = basePrice * 1.10; // 10% markup
+      resellerCommission = basePrice * 0.10; // Reseller gets the markup
+    }
 
     const amountInPesewas = Math.round(finalPrice * 100);
-    const commissionInPesewas = Math.round(amountInPesewas * 0.05); // 5% commission
+    const platformCommission = Math.round(basePrice * 100 * 0.05); // 5% platform fee on base price
+    const resellerCommissionPesewas = Math.round(resellerCommission * 100);
 
-    // 4. Normalize Email
+    // 5. Normalize Email
     const normalizedEmail = email.trim().toLowerCase();
 
-    // 5. Build Paystack Payload
+    // 6. Build Paystack Payload with Multi-Split
     const paystackPayload = {
       email: normalizedEmail,
       amount: amountInPesewas,
@@ -80,7 +111,11 @@ export async function POST(req) {
         tier_id: tier_id,
         guest_email: normalizedEmail,
         guest_name: guest_name || 'Guest',
-        //reseller_code: reseller_code || "DIRECT",
+        reseller_code: reseller_code || "DIRECT",
+        event_reseller_id: resellerData?.id || null,
+        is_reseller_purchase: isResellerPurchase,
+        base_price: basePrice,
+        reseller_commission: resellerCommission,
         custom_fields: [
           {
             display_name: "Event",
@@ -101,23 +136,48 @@ export async function POST(req) {
       }
     };
 
-    // 6. Add Subaccount if Organizer has one
-    const subaccount = tier.events?.organizers?.paystack_subaccount_code;
-    
-    if (subaccount) {
-      paystackPayload.subaccount = subaccount;
-      paystackPayload.transaction_charge = commissionInPesewas;
+    // 7. Setup Multi-Split Payment
+    const organizerSubaccount = tier.events?.organizers?.paystack_subaccount_code;
+    const resellerSubaccount = resellerData?.resellers?.paystack_subaccount_code;
+
+    // Case 1: Reseller Purchase (3-way split: Platform, Organizer, Reseller)
+    if (isResellerPurchase && resellerSubaccount && organizerSubaccount) {
+      paystackPayload.split_code = await createSplitCode(
+        tier.events.title,
+        amountInPesewas,
+        platformCommission,
+        resellerCommissionPesewas,
+        organizerSubaccount,
+        resellerSubaccount
+      );
+      console.log("💰 3-way split configured:", {
+        total: amountInPesewas,
+        platform: platformCommission,
+        reseller: resellerCommissionPesewas,
+        organizer: amountInPesewas - platformCommission - resellerCommissionPesewas
+      });
+    } 
+    // Case 2: Direct Purchase with Organizer Subaccount (2-way split)
+    else if (organizerSubaccount) {
+      paystackPayload.subaccount = organizerSubaccount;
+      paystackPayload.transaction_charge = platformCommission;
       paystackPayload.bearer = "subaccount";
+      console.log("💰 2-way split configured:", {
+        total: amountInPesewas,
+        platform: platformCommission,
+        organizer: amountInPesewas - platformCommission
+      });
     }
 
     console.log("Initializing Paystack Transaction:", {
       email: normalizedEmail,
       amount: amountInPesewas,
       tier: tier.name,
-      hasSubaccount: !!subaccount
+      isResellerPurchase,
+      resellerCode: reseller_code
     });
 
-    // 7. Initialize Transaction with Paystack
+    // 8. Initialize Transaction with Paystack
     const paystackRes = await fetch('https://api.paystack.co/transaction/initialize', {
       method: 'POST',
       headers: {
@@ -138,7 +198,6 @@ export async function POST(req) {
 
     console.log("✅ Paystack session created:", result.data.reference);
 
-    // 8. Return Authorization URL for redirect
     return NextResponse.json({ 
       authorization_url: result.data.authorization_url,
       reference: result.data.reference
@@ -150,5 +209,52 @@ export async function POST(req) {
       error: "Internal Server Error",
       details: err.message 
     }, { status: 500 });
+  }
+}
+
+// Helper function to create Paystack split configuration
+async function createSplitCode(eventTitle, totalAmount, platformFee, resellerFee, organizerSubaccount, resellerSubaccount) {
+  try {
+    const organizerAmount = totalAmount - platformFee - resellerFee;
+
+    const splitPayload = {
+      name: `Split for ${eventTitle}`,
+      type: "flat",
+      currency: "GHS",
+      subaccounts: [
+        {
+          subaccount: organizerSubaccount,
+          share: organizerAmount
+        },
+        {
+          subaccount: resellerSubaccount,
+          share: resellerFee
+        }
+      ],
+      bearer_type: "all-proportional",
+      bearer_subaccount: organizerSubaccount
+    };
+
+    const response = await fetch('https://api.paystack.co/split', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(splitPayload),
+    });
+
+    const result = await response.json();
+    
+    if (result.status && result.data.split_code) {
+      return result.data.split_code;
+    }
+
+    console.error("Split creation failed:", result);
+    return null;
+
+  } catch (err) {
+    console.error("Error creating split:", err);
+    return null;
   }
 }
