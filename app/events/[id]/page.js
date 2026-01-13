@@ -20,13 +20,7 @@ import {
   Navigation,
   Car
 } from 'lucide-react';
-// Add this to your state declarations at the top
-const [ticket, setTicket] = useState(null);
-/**
- * LUXURY MAP COMPONENT
- * Dynamically imported to prevent Hydration errors (Error #321)
- * and to ensure Leaflet/Mapbox only loads on the client side.
- */
+
 const LuxuryMap = dynamic(() => import('../../../components/LuxuryMap'), { 
   ssr: false,
   loading: () => (
@@ -73,7 +67,8 @@ export default function EventPage() {
   const [soldCounts, setSoldCounts] = useState({});
   const [reseller, setReseller] = useState(null);
   const [isResellerMode, setIsResellerMode] = useState(false);
-
+// Add this to your state declarations at the top
+const [ticket, setTicket] = useState(null);
   // --- 2. DATA INITIALIZATION ---
   const activeTier = useMemo(() => {
     return event?.ticket_tiers?.find(t => t.id === selectedTier);
