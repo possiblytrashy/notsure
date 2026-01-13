@@ -59,31 +59,28 @@ export async function POST(req) {
     // 5. Initialize Paystack Payload
     const subaccount = tier.events?.organizers?.paystack_subaccount_code;
 
-    const paystackPayload = {
-      email: email.trim(),
-      amount: amountInPesewas,
-      currency: "GHS",
-      // Important: Ensure the access_code locks these details
-      metadata: {
-        type: 'TICKET_PURCHASE', 
-        event_id: event_id,
-        tier_id: tier_id,
-        reseller_code: reseller_code || "DIRECT",
-        guest_name: guest_name || "Valued Guest",
-        custom_fields: [
-          { display_name: "Event", variable_name: "event_title", value: tier.events?.title },
-          { display_name: "Tier", variable_name: "tier_name", value: tier.name },
-          { display_name: "Guest", variable_name: "guest_name", value: guest_name }
-        ]
-      }
-    };
+// route.js - inside the POST function
+const paystackPayload = {
+  email: email.trim().toLowerCase(), // Normalize email
+  amount: amountInPesewas,           // Must be an integer
+  currency: "GHS",
+  metadata: {
+    event_id: event_id,
+    tier_id: tier_id,
+    reseller_code: reseller_code || "DIRECT",
+    custom_fields: [
+      { display_name: "Event", variable_name: "event_title", value: tier.events.title },
+      { display_name: "Guest", variable_name: "guest_name", value: guest_name }
+    ]
+  }
+};
 
-    // 6. Apply Split Logic
-    if (subaccount) {
-      paystackPayload.subaccount = subaccount;
-      paystackPayload.transaction_charge = commissionInPesewas; 
-      paystackPayload.bearer = "subaccount"; 
-    }
+// If using subaccounts, ensure transaction_charge is also an integer
+if (subaccount) {
+  paystackPayload.subaccount = subaccount;
+  paystackPayload.transaction_charge = Math.floor(commissionInPesewas); 
+  paystackPayload.bearer = "subaccount";
+}
 
     // 7. Initialize Transaction
     const paystackRes = await fetch('https://api.paystack.co/transaction/initialize', {
