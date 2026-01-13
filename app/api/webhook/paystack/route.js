@@ -218,17 +218,23 @@ export async function POST(req) {
       }
 
       // 8. Send Luxury Confirmation Email (SAFE BLOCK)
-      try {
-        await resend.emails.send({
-          from: 'OUSTED Concierge <onboarding@resend.com>',
-          to: email,
-          subject: `Access Confirmed: ${tierData.events.title}`,
-          html: generateLuxuryEmail(tierData, qrUrl, ticketNumber, finalGuestName)
-        });
-      } catch (emailErr) {
-        console.error("Email Failed (Ticket Saved):", emailErr.message);
-      }
-    }
+     // ... inside your webhook POST function ...
+
+// 8. SEND EMAIL (Free Tier Compatible)
+try {
+  // logic: If on localhost/testing, send to YOUR admin email only
+  const adminEmail = 'YOUR_RESEND_SIGNUP_EMAIL@gmail.com'; // <--- PUT YOUR EMAIL HERE
+  
+  await resend.emails.send({
+    from: 'onboarding@resend.dev', // <--- MUST USE THIS FOR FREE TIER
+    to: adminEmail,                // <--- MUST SEND TO YOURSELF FOR FREE TIER
+    subject: `[TEST MODE] Access Confirmed: ${tierData.events.title}`,
+    html: generateLuxuryEmail(tierData, qrUrl, ticketNumber, finalGuestName) + 
+          `<p style="color:red; text-align:center;">Sent to admin because domain is not verified.</p>`
+  });
+} catch (emailErr) {
+  console.error("Email Failed (Ticket Saved):", emailErr.message);
+}
 
     return new Response('Webhook Handled Successfully', { status: 200 });
 
