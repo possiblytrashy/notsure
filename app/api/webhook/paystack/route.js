@@ -220,7 +220,7 @@ export async function POST(req) {
       // 8. Send Luxury Confirmation Email (SAFE BLOCK)
       try {
         await resend.emails.send({
-          from: 'OUSTED Concierge <tickets@ousted.com>',
+          from: 'OUSTED Concierge <onboarding@resend.com>',
           to: email,
           subject: `Access Confirmed: ${tierData.events.title}`,
           html: generateLuxuryEmail(tierData, qrUrl, ticketNumber, finalGuestName)
