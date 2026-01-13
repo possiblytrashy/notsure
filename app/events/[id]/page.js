@@ -317,7 +317,7 @@ const handlePurchase = async (e) => {
         tier_id: selectedTier,
         email: guestEmail.trim().toLowerCase(),
         guest_name: guestName.trim() || 'Guest',
-        reseller_code: refCode || "DIRECT"
+       // reseller_code: refCode || "DIRECT"
       })
     });
 
