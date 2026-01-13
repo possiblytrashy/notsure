@@ -1,15 +1,14 @@
 "use client";
-import { useState, useEffect, useMemo } from 'react';
-import { Html5QrcodeScanner } from 'html5-qrcode';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { Html5Qrcode } from 'html5-qrcode'; // Switched to the core logic for better control
 import { supabase } from '../../../lib/supabase';
 import { 
   CheckCircle2, XCircle, AlertCircle, RefreshCw, 
   Lock, Camera, History as HistoryIcon, UserCheck, 
-  MapPin, Search, Filter, Tag, Info
+  MapPin, Search, Filter, Tag, Power
 } from 'lucide-react';
 
 export default function AdvancedScanner() {
-  // --- 1. STATE MANAGEMENT ---
   const [isLocked, setIsLocked] = useState(true);
   const [pin, setPin] = useState('');
   const [events, setEvents] = useState([]);
@@ -17,14 +16,15 @@ export default function AdvancedScanner() {
   const [eventSearch, setEventSearch] = useState('');
   const [manualTicketSearch, setManualTicketSearch] = useState('');
   const [scanHistory, setScanHistory] = useState([]);
-  const [isScanning, setIsScanning] = useState(true);
+  const [isScanning, setIsScanning] = useState(false);
   const [status, setStatus] = useState({ 
-    type: 'ready', message: 'Ready to Scan', color: '#1e293b', details: 'Position QR code in frame', eventName: '', tier: '' 
+    type: 'ready', message: 'Ready to Scan', color: '#1e293b', details: 'Camera inactive', tier: '' 
   });
 
+  const scannerRef = useRef(null);
   const STAFF_PIN = "1234"; 
 
-  // --- 2. INITIALIZATION ---
+  // --- 1. LOAD EVENTS ---
   useEffect(() => {
     async function loadEvents() {
       const { data } = await supabase.from('events').select('id, title').order('created_at', { ascending: false });
@@ -37,173 +37,112 @@ export default function AdvancedScanner() {
     return events.filter(e => e.title.toLowerCase().includes(eventSearch.toLowerCase()));
   }, [events, eventSearch]);
 
-  const handlePinInput = (value) => {
-    const newPin = pin + value;
-    if (newPin.length <= 4) setPin(newPin);
-    if (newPin === STAFF_PIN) {
-        setTimeout(() => setIsLocked(false), 300);
-    } else if (newPin.length === 4) {
-        setPin('');
-        alert("Invalid PIN");
+  // --- 2. CAMERA ENGINE ---
+  const startScanner = async () => {
+    try {
+      if (scannerRef.current) {
+        await scannerRef.current.stop();
+      }
+
+      const html5QrCode = new Html5Qrcode("reader");
+      scannerRef.current = html5QrCode;
+
+      const config = { fps: 20, qrbox: { width: 250, height: 250 } };
+
+      await html5QrCode.start(
+        { facingMode: "environment" }, // Forces back camera
+        config,
+        (decodedText) => verifyTicket(decodedText)
+      );
+
+      setIsScanning(true);
+      setStatus({ type: 'ready', message: 'SCANNING LIVE', color: '#1e293b', details: 'Point at QR Code', tier: '' });
+    } catch (err) {
+      console.error("Camera Error:", err);
+      setStatus({ type: 'error', message: 'CAMERA ERROR', color: '#7f1d1d', details: 'Ensure camera permissions are on.', tier: '' });
     }
   };
 
-  // --- 3. UPDATED VERIFICATION LOGIC ---
-  const verifyTicket = async (decodedText, isManual = false) => {
-    if (!isScanning && !isManual) return;
-    if (isLocked) return;
+  const stopScanner = async () => {
+    if (scannerRef.current && scannerRef.current.isScanning) {
+      await scannerRef.current.stop();
+      setIsScanning(false);
+    }
+  };
 
-    setIsScanning(false);
+  // --- 3. VERIFICATION LOGIC ---
+  const verifyTicket = async (decodedText) => {
+    // Immediately stop scanning to prevent double-reads
+    await stopScanner();
     
-    // Clean the reference (handling potential URL parameters if the user scans the browser URL)
     let ticketRef = decodedText.trim();
+    // Handle cases where the QR might be the full URL
     if (ticketRef.includes('reference=')) {
         ticketRef = new URLSearchParams(ticketRef.split('?')[1]).get('reference');
     }
 
-    setStatus({ type: 'loading', message: 'Verifying...', color: '#0ea5e9', details: `Ref: ${ticketRef}`, tier: '' });
+    setStatus({ type: 'loading', message: 'VERIFYING', color: '#0ea5e9', details: `REF: ${ticketRef}`, tier: '' });
 
     try {
-      // 1. Fetch ticket with tier and event info
       const { data: ticket, error: fetchError } = await supabase
         .from('tickets')
-        .select(`
-            id, 
-            guest_name, 
-            tier_name, 
-            is_scanned, 
-            status, 
-            event_id, 
-            updated_at, 
-            events(title)
-        `)
+        .select(`id, guest_name, tier_name, is_scanned, status, event_id, updated_at, events(title)`)
         .eq('reference', ticketRef)
         .maybeSingle();
 
-      if (fetchError) throw fetchError;
-
-      // 2. ERROR: Ticket Not Found
-      if (!ticket) {
-        setStatus({ 
-            type: 'error', 
-            message: 'TICKET NOT FOUND', 
-            color: '#ef4444', 
-            details: 'This reference does not exist in the database.', 
-            tier: '' 
-        });
+      if (fetchError || !ticket) {
+        setStatus({ type: 'error', message: 'NOT FOUND', color: '#ef4444', details: 'Invalid Reference', tier: '' });
         return;
       }
 
-      const eventTitle = ticket.events?.title || 'Luxury Event';
       const ticketTier = ticket.tier_name || 'Standard';
 
-      // 3. ERROR: Wrong Event (Security)
+      // Event Match Check
       if (selectedEvent && ticket.event_id !== selectedEvent.id) {
-        setStatus({ 
-            type: 'error', 
-            message: 'WRONG GATE', 
-            color: '#000', 
-            details: `Valid for: ${eventTitle}`,
-            eventName: 'ACCESS DENIED',
-            tier: ticketTier
-        });
+        setStatus({ type: 'error', message: 'WRONG EVENT', color: '#000', details: `Valid for: ${ticket.events?.title}`, tier: ticketTier });
         return;
       }
 
-      // 4. ERROR: Payment Status check (Important for Luxury splits)
-      if (ticket.status !== 'valid' && ticket.status !== 'success') {
-        setStatus({ 
-            type: 'error', 
-            message: 'INVALID TICKET', 
-            color: '#f59e0b', 
-            details: `Status: ${ticket.status.toUpperCase()}`, 
-            tier: ticketTier 
-        });
-        return;
-      }
-
-      // 5. ERROR: Already Scanned
+      // Security: Is Scanned Check
       if (ticket.is_scanned) {
-        const scanTime = new Date(ticket.updated_at).toLocaleTimeString();
         setStatus({ 
-          type: 'warning', 
-          message: 'ALREADY USED', 
-          color: '#64748b', 
-          details: `First scanned at: ${scanTime}`, 
-          eventName: eventTitle,
-          tier: ticketTier
+          type: 'warning', message: 'ALREADY USED', color: '#64748b', 
+          details: `In: ${new Date(ticket.updated_at).toLocaleTimeString()}`, 
+          tier: ticketTier 
         });
         return;
       }
 
-      // 6. SUCCESS: Update the ticket as scanned (Atomic update)
-      const { data: updatedTicket, error: updateError } = await supabase
+      // Final Check: Payment Success
+      if (ticket.status !== 'success' && ticket.status !== 'valid') {
+        setStatus({ type: 'error', message: 'UNPAID', color: '#f59e0b', details: `Status: ${ticket.status}`, tier: ticketTier });
+        return;
+      }
+
+      // Update Database
+      const { error: updateError } = await supabase
         .from('tickets')
-        .update({
-          is_scanned: true,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', ticket.id)
-        .eq('is_scanned', false) // Ensures no race conditions
-        .select()
-        .maybeSingle();
+        .update({ is_scanned: true, updated_at: new Date().toISOString() })
+        .eq('id', ticket.id);
 
       if (updateError) throw updateError;
 
-      if (!updatedTicket) {
-        setStatus({ type: 'warning', message: 'DOUBLE SCAN', color: '#64748b', details: 'Scan collision detected.', tier: ticketTier });
-        return;
-      }
-
-      // 7. Update History & Final Status
-      setScanHistory(prev => [{
-        name: ticket.guest_name, 
-        event: eventTitle, 
-        tier: ticketTier, 
-        time: new Date().toLocaleTimeString()
-      }, ...prev].slice(0, 5));
-
-      setStatus({ 
-        type: 'success', 
-        message: 'ENTRY GRANTED', 
-        color: '#22c55e', 
-        details: ticket.guest_name.toUpperCase(), 
-        eventName: eventTitle,
-        tier: ticketTier 
-      });
+      setScanHistory(prev => [{ name: ticket.guest_name, tier: ticketTier, time: new Date().toLocaleTimeString() }, ...prev].slice(0, 5));
+      setStatus({ type: 'success', message: 'ACCESS GRANTED', color: '#22c55e', details: ticket.guest_name, tier: ticketTier });
 
     } catch (err) {
-      console.error("Scanner Error:", err);
-      setStatus({ 
-        type: 'error', 
-        message: 'SYSTEM ERROR', 
-        color: '#7f1d1d', 
-        details: 'Database timeout or network error.', 
-        tier: '' 
-      });
+      setStatus({ type: 'error', message: 'SYSTEM ERROR', color: '#000', details: 'Check Connection', tier: '' });
     }
   };
 
-  useEffect(() => {
-    if (isLocked || !isScanning) return;
-    const scanner = new Html5QrcodeScanner('reader', { 
-        fps: 20, 
-        qrbox: { width: 250, height: 250 },
-        aspectRatio: 1.0 
-    });
-    scanner.render(verifyTicket, (error) => {
-        // Suppress noise errors from scanner
-    });
-    return () => scanner.clear().catch(() => {});
-  }, [isScanning, isLocked, selectedEvent]);
-
-  // --- RENDERING LOGIC (Styles from your luxury theme) ---
+  // --- UI COMPONENTS ---
   if (isLocked) {
     return (
       <div style={styles.lockContainer}>
         <div style={styles.lockCard}>
-          <div style={styles.lockIconBox}><Lock size={40} color="#64748b" /></div>
-          <h2 style={{fontWeight: 900, color: '#fff', marginBottom: '30px'}}>Scanner Locked</h2>
+          <div style={styles.lockIconBox}><Lock size={40} color="#38bdf8" /></div>
+          <h2 style={{fontWeight: 900, color: '#fff'}}>Gate Authorization</h2>
+          <p style={{color: '#64748b', fontSize: '13px', marginBottom: '30px'}}>Enter Staff PIN to access camera</p>
           <div style={styles.pinDisplay}>
             {[...Array(4)].map((_, i) => <div key={i} style={styles.pinDot(pin.length > i)}></div>)}
           </div>
@@ -212,7 +151,11 @@ export default function AdvancedScanner() {
               <button key={btn} style={styles.keyBtn} onClick={() => {
                 if (btn === 'C') setPin('');
                 else if (btn === '←') setPin(pin.slice(0, -1));
-                else handlePinInput(btn.toString());
+                else {
+                    const p = pin + btn;
+                    if (p.length <= 4) setPin(p);
+                    if (p === STAFF_PIN) setTimeout(() => setIsLocked(false), 300);
+                }
               }}>{btn}</button>
             ))}
           </div>
@@ -223,103 +166,68 @@ export default function AdvancedScanner() {
 
   return (
     <div style={styles.container}>
-      {/* TOP NAV */}
-      <div style={styles.topSection}>
-        <div style={styles.headerRow}>
-          <h2 style={{fontWeight: 950, margin: 0, fontSize: '20px', letterSpacing: '-1px'}}>GATE CONTROL</h2>
-          <button onClick={() => setIsLocked(true)} style={styles.lockCircle}><Lock size={16}/></button>
+      <div style={styles.headerRow}>
+        <div>
+            <h2 style={{fontWeight: 950, margin: 0, fontSize: '22px'}}>GATE PORTAL</h2>
+            <p style={{fontSize: '11px', color: '#64748b', fontWeight: 800}}>{isScanning ? '● CAMERA ACTIVE' : '○ CAMERA IDLE'}</p>
         </div>
+        <button onClick={() => setIsLocked(true)} style={styles.lockCircle}><Power size={18} color="#ef4444" /></button>
+      </div>
 
-        {!selectedEvent ? (
-          <div style={styles.eventPicker}>
-            <p style={styles.label}>Select Gate Event:</p>
-            <div style={styles.searchBox}>
-              <Search size={16} color="#94a3b8" />
-              <input 
-                style={styles.input} 
-                placeholder="Search events..." 
-                value={eventSearch}
-                onChange={(e) => setEventSearch(e.target.value)}
-              />
-            </div>
-            <div style={styles.eventList}>
-              {filteredEvents.map(e => (
-                <div key={e.id} style={styles.eventItem} onClick={() => setSelectedEvent(e)}>
-                  <span>{e.title}</span>
-                  <Filter size={14} color="#38bdf8" />
-                </div>
-              ))}
-            </div>
+      {!selectedEvent ? (
+        <div style={styles.eventPicker}>
+          <div style={styles.searchBox}>
+            <Search size={16} color="#94a3b8" />
+            <input style={styles.input} placeholder="Select event to start..." value={eventSearch} onChange={(e) => setEventSearch(e.target.value)} />
           </div>
-        ) : (
-          <div style={styles.activeEventCard}>
-            <div style={styles.activeEventInfo}>
-              <MapPin size={16} color="#38bdf8" />
-              <span style={{fontWeight: 800, fontSize: '14px'}}>{selectedEvent.title}</span>
-            </div>
-            <button style={styles.changeBtn} onClick={() => setSelectedEvent(null)}>Switch</button>
-          </div>
-        )}
-      </div>
-
-      {/* MANUAL OVERRIDE */}
-      <div style={styles.searchWrapper}>
-        <Search size={18} style={styles.searchIcon} />
-        <input 
-          style={styles.searchInput} 
-          placeholder="Enter Ticket Reference Manually" 
-          value={manualTicketSearch}
-          onChange={(e) => setManualTicketSearch(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && verifyTicket(manualTicketSearch, true)}
-        />
-        {manualTicketSearch && (
-          <button style={styles.searchGo} onClick={() => verifyTicket(manualTicketSearch, true)}>CHECK</button>
-        )}
-      </div>
-
-      {/* DYNAMIC RESULT CARD */}
-      <div style={{...styles.statusCard, background: status.color}}>
-        {status.tier && (
-          <div style={styles.tierContainer}>
-            <Tag size={12} />
-            <span style={styles.tierText}>{status.tier.toUpperCase()}</span>
-          </div>
-        )}
-        
-        <div style={styles.statusIconBox}>
-          {status.type === 'ready' && <Camera size={48} />}
-          {status.type === 'loading' && <RefreshCw size={48} className="animate-spin" />}
-          {status.type === 'success' && <CheckCircle2 size={48} />}
-          {status.type === 'warning' && <AlertCircle size={48} />}
-          {status.type === 'error' && <XCircle size={48} />}
-        </div>
-        <h1 style={styles.statusTitle}>{status.message}</h1>
-        <p style={styles.statusDetails}>{status.details}</p>
-        
-        {!isScanning && (
-          <button onClick={() => {setIsScanning(true); setManualTicketSearch('');}} style={styles.nextBtn}>
-            SCAN NEXT GUEST
-          </button>
-        )}
-      </div>
-
-      {/* SCANNER VIEWPORT */}
-      <div style={styles.scannerContainer}>
-        <div id="reader"></div>
-      </div>
-
-      {/* LOG HISTORY */}
-      <div style={styles.historySection}>
-        <div style={styles.historyHeader}><HistoryIcon size={14} /> <span>LAST 5 CHECK-INS</span></div>
-        {scanHistory.length === 0 && <p style={{textAlign: 'center', color: '#94a3b8', fontSize: '13px', padding: '10px'}}>Waiting for scans...</p>}
-        {scanHistory.map((item, idx) => (
-          <div key={idx} style={styles.historyItem}>
-            <div style={{flex: 1}}>
-              <p style={styles.historyName}>{item.name}</p>
-              <div style={styles.historyMetaRow}>
-                 <span style={styles.historyTier}>{item.tier}</span>
-                 <span>• {item.time}</span>
+          <div style={styles.eventList}>
+            {filteredEvents.map(e => (
+              <div key={e.id} style={styles.eventItem} onClick={() => { setSelectedEvent(e); setTimeout(startScanner, 100); }}>
+                <span>{e.title}</span>
+                <Filter size={14} color="#38bdf8" />
               </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div style={styles.activeEventCard}>
+          <div style={styles.activeEventInfo}><MapPin size={16} color="#38bdf8" /> <span>{selectedEvent.title}</span></div>
+          <button style={styles.changeBtn} onClick={() => { stopScanner(); setSelectedEvent(null); }}>Change</button>
+        </div>
+      )}
+
+      {/* STATUS DISPLAY */}
+      <div style={{...styles.statusCard, background: status.color}}>
+        {status.tier && <div style={styles.tierTag}><Tag size={10} /> {status.tier}</div>}
+        <div style={styles.statusIcon}>
+            {status.type === 'ready' && <Camera size={40} />}
+            {status.type === 'loading' && <RefreshCw size={40} className="animate-spin" />}
+            {status.type === 'success' && <CheckCircle2 size={40} />}
+            {status.type === 'error' && <XCircle size={40} />}
+            {status.type === 'warning' && <AlertCircle size={40} />}
+        </div>
+        <h2 style={styles.statusMsg}>{status.message}</h2>
+        <p style={styles.statusDet}>{status.details}</p>
+        
+        {!isScanning && selectedEvent && (
+            <button onClick={startScanner} style={styles.actionBtn}>ACTIVATE CAMERA</button>
+        )}
+      </div>
+
+      {/* CAMERA VIEWPORT - No Image Upload UI */}
+      <div style={styles.scannerBox}>
+        <div id="reader" style={{ width: '100%' }}></div>
+        {!isScanning && <div style={styles.scannerOverlay}>Camera Paused</div>}
+      </div>
+
+      {/* RECENT GUESTS */}
+      <div style={styles.historySection}>
+        <div style={styles.historyHeader}><HistoryIcon size={14} /> RECENT CHECK-INS</div>
+        {scanHistory.map((item, i) => (
+          <div key={i} style={styles.historyItem}>
+            <div>
+                <p style={{margin: 0, fontWeight: 800, fontSize: '14px'}}>{item.name}</p>
+                <p style={{margin: 0, fontSize: '11px', color: '#64748b'}}>{item.tier} • {item.time}</p>
             </div>
             <UserCheck size={18} color="#22c55e" />
           </div>
@@ -329,50 +237,40 @@ export default function AdvancedScanner() {
   );
 }
 
-// Ensure styles match your luxury aesthetic
 const styles = {
-  container: { maxWidth: '480px', margin: '0 auto', padding: '15px', fontFamily: 'Inter, sans-serif' },
-  lockContainer: { height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#020617' },
-  lockCard: { width: '100%', maxWidth: '320px', textAlign: 'center' },
-  lockIconBox: { width: '70px', height: '70px', background: '#0f172a', borderRadius: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px', border: '1px solid #1e293b' },
-  pinDisplay: { display: 'flex', justifyContent: 'center', gap: '12px', margin: '30px 0' },
-  pinDot: (filled) => ({ width: '14px', height: '14px', borderRadius: '50%', background: filled ? '#38bdf8' : '#1e293b', transition: '0.2s' }),
-  keypad: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' },
-  keyBtn: { padding: '20px', borderRadius: '18px', border: 'none', background: '#0f172a', color: '#fff', fontSize: '18px', fontWeight: 'bold', cursor: 'pointer' },
+  container: { maxWidth: '440px', margin: '0 auto', padding: '20px', fontFamily: 'Inter, sans-serif' },
+  lockContainer: { height: '100vh', background: '#020617', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' },
+  lockCard: { width: '100%', textAlign: 'center' },
+  lockIconBox: { width: '64px', height: '64px', background: '#0f172a', borderRadius: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 15px', border: '1px solid #1e293b' },
+  pinDisplay: { display: 'flex', justifyContent: 'center', gap: '15px', margin: '20px 0' },
+  pinDot: (filled) => ({ width: '15px', height: '15px', borderRadius: '50%', background: filled ? '#38bdf8' : '#1e293b' }),
+  keypad: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '15px' },
+  keyBtn: { padding: '20px', background: '#0f172a', border: 'none', color: '#fff', borderRadius: '15px', fontSize: '20px', fontWeight: 'bold' },
   
-  topSection: { marginBottom: '20px' },
-  headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' },
-  lockCircle: { background: '#f1f5f9', border: 'none', width: '40px', height: '40px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' },
+  headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' },
+  lockCircle: { width: '45px', height: '45px', borderRadius: '50%', background: '#f1f5f9', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center' },
   
-  eventPicker: { background: '#f8fafc', padding: '15px', borderRadius: '24px', border: '1px solid #e2e8f0' },
-  label: { margin: '0 0 10px', fontSize: '11px', fontWeight: '900', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px' },
-  searchBox: { display: 'flex', alignItems: 'center', background: '#fff', padding: '0 12px', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '10px' },
-  input: { flex: 1, border: 'none', padding: '10px', outline: 'none', fontSize: '14px' },
-  eventList: { maxHeight: '120px', overflowY: 'auto' },
-  eventItem: { padding: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f1f5f9', fontSize: '13px', cursor: 'pointer', fontWeight: '700' },
+  eventPicker: { background: '#f8fafc', padding: '15px', borderRadius: '24px', border: '1px solid #e2e8f0', marginBottom: '15px' },
+  searchBox: { display: 'flex', alignItems: 'center', background: '#fff', padding: '10px 15px', borderRadius: '14px', border: '1px solid #e2e8f0', marginBottom: '10px' },
+  input: { flex: 1, border: 'none', outline: 'none', fontSize: '14px', marginLeft: '10px' },
+  eventList: { maxHeight: '150px', overflowY: 'auto' },
+  eventItem: { padding: '12px', display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #f1f5f9', fontWeight: 700, fontSize: '13px' },
   
-  activeEventCard: { background: '#0f172a', color: '#fff', padding: '15px', borderRadius: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 10px 20px rgba(0,0,0,0.1)' },
-  activeEventInfo: { display: 'flex', alignItems: 'center', gap: '8px' },
-  changeBtn: { background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', padding: '6px 12px', borderRadius: '10px', fontSize: '11px', fontWeight: '800' },
+  activeEventCard: { background: '#0f172a', color: '#fff', padding: '15px', borderRadius: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' },
+  activeEventInfo: { display: 'flex', alignItems: 'center', gap: '10px', fontSize: '14px', fontWeight: 800 },
+  changeBtn: { background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', padding: '5px 12px', borderRadius: '10px', fontSize: '11px' },
 
-  searchWrapper: { position: 'relative', display: 'flex', alignItems: 'center', marginBottom: '15px' },
-  searchIcon: { position: 'absolute', left: '15px', color: '#94a3b8' },
-  searchInput: { width: '100%', padding: '16px 16px 16px 45px', borderRadius: '18px', border: '1px solid #e2e8f0', fontSize: '14px', outline: 'none', background: '#f8fafc' },
-  searchGo: { position: 'absolute', right: '10px', background: '#000', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '10px', fontSize: '11px', fontWeight: '900' },
+  statusCard: { padding: '30px 20px', borderRadius: '30px', color: '#fff', textAlign: 'center', position: 'relative', overflow: 'hidden', marginBottom: '20px' },
+  tierTag: { position: 'absolute', top: '15px', left: '50%', transform: 'translateX(-50%)', background: 'rgba(0,0,0,0.2)', padding: '4px 10px', borderRadius: '20px', fontSize: '10px', fontWeight: 900, letterSpacing: '1px', display: 'flex', alignItems: 'center', gap: '5px' },
+  statusIcon: { marginBottom: '10px' },
+  statusMsg: { margin: '0', fontSize: '24px', fontWeight: 900 },
+  statusDet: { margin: '5px 0 0', opacity: 0.8, fontSize: '14px', fontWeight: 600 },
+  actionBtn: { marginTop: '15px', width: '100%', padding: '12px', borderRadius: '12px', border: 'none', background: '#fff', color: '#000', fontWeight: 900, fontSize: '13px' },
 
-  statusCard: { position: 'relative', padding: '45px 20px', borderRadius: '35px', color: '#fff', textAlign: 'center', marginBottom: '20px', overflow: 'hidden', boxShadow: '0 20px 40px rgba(0,0,0,0.1)' },
-  tierContainer: { position: 'absolute', top: '20px', left: '0', right: '0', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '6px', opacity: 0.8 },
-  tierText: { fontSize: '10px', fontWeight: '900', letterSpacing: '2px' },
-  statusIconBox: { marginBottom: '15px' },
-  statusTitle: { margin: '0 0 5px', fontSize: '32px', fontWeight: '950', letterSpacing: '-1.5px' },
-  statusDetails: { margin: 0, opacity: 0.9, fontSize: '15px', fontWeight: '700', textTransform: 'uppercase' },
-  nextBtn: { marginTop: '25px', width: '100%', padding: '16px', background: '#fff', color: '#000', border: 'none', borderRadius: '18px', fontWeight: '900', fontSize: '13px', cursor: 'pointer', letterSpacing: '1px' },
-  
-  scannerContainer: { borderRadius: '30px', overflow: 'hidden', border: '8px solid #000', marginBottom: '25px', background: '#000' },
-  historySection: { background: '#f8fafc', padding: '20px', borderRadius: '28px', border: '1px solid #e2e8f0' },
-  historyHeader: { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '10px', fontWeight: '900', color: '#94a3b8', marginBottom: '15px', letterSpacing: '1px' },
-  historyItem: { background: '#fff', padding: '14px', borderRadius: '16px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid #f1f5f9' },
-  historyName: { margin: 0, fontSize: '14px', fontWeight: '800', color: '#0f172a' },
-  historyMetaRow: { fontSize: '11px', color: '#64748b', display: 'flex', gap: '4px', marginTop: '2px' },
-  historyTier: { color: '#0ea5e9', fontWeight: '800' }
+  scannerBox: { borderRadius: '30px', overflow: 'hidden', background: '#000', border: '6px solid #000', position: 'relative', minHeight: '300px' },
+  scannerOverlay: { position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 800 },
+
+  historySection: { marginTop: '20px' },
+  historyHeader: { fontSize: '11px', fontWeight: 900, color: '#94a3b8', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '5px' },
+  historyItem: { background: '#f8fafc', padding: '12px 15px', borderRadius: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }
 };
