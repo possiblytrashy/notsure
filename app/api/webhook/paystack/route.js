@@ -6,7 +6,7 @@ import crypto from 'crypto';
 export const dynamic = 'force-dynamic';
 
 /**
- * LUXURY WEBHOOK CONCIERGE
+ * LUXURY WEBHOOK CONCIERGE (ROBUST VERSION)
  * Handles: Signature Security, Tiered Ticketing, 5% Splits, 10% Markups,
  * QR Storage, Voting, and Automated Reseller Payouts.
  */
@@ -64,22 +64,29 @@ export async function POST(req) {
       const netRevenue = amountPaid * 0.95;
       const votesToAdd = parseInt(vote_count) || 1;
 
-      const { error: rpcError } = await supabase.rpc('increment_vote', {
-        candidate_id: candidate_id,
-        row_count: votesToAdd,
-      });
+      // Wrap Voting in Try/Catch to log errors but attempt to succeed
+      try {
+        const { error: rpcError } = await supabase.rpc('increment_vote', {
+          candidate_id: candidate_id,
+          row_count: votesToAdd,
+        });
 
-      if (rpcError) throw new Error(`Vote RPC Error: ${rpcError.message}`);
+        if (rpcError) throw new Error(`Vote RPC Error: ${rpcError.message}`);
 
-      await supabase.from('payouts').insert({
-        organizer_id,
-        amount_total: amountPaid,
-        platform_fee: platformFee,
-        organizer_amount: netRevenue,
-        type: 'VOTE',
-        reference: reference,
-        candidate_id: candidate_id,
-      });
+        await supabase.from('payouts').insert({
+          organizer_id,
+          amount_total: amountPaid,
+          platform_fee: platformFee,
+          organizer_amount: netRevenue,
+          type: 'VOTE',
+          reference: reference,
+          candidate_id: candidate_id,
+        });
+      } catch (voteErr) {
+        console.error("Voting Logic Failed:", voteErr);
+        // Even if local DB fails, return 200 to Paystack so they don't retry forever
+        return new Response('Vote Error Logged', { status: 200 });
+      }
       
       return new Response('Vote Processed', { status: 200 });
     }
@@ -89,6 +96,18 @@ export async function POST(req) {
     ====================================================== */
     else if (type === 'TICKET_PURCHASE' || tier_id) {
       
+      // 0. IDEMPOTENCY CHECK (Prevent "Loop of Death")
+      // If we already saved this ticket, stop here.
+      const { data: existingTicket } = await supabase
+        .from('tickets')
+        .select('id')
+        .eq('reference', reference)
+        .maybeSingle();
+
+      if (existingTicket) {
+        return new Response('Ticket already processed', { status: 200 });
+      }
+
       // 1. Fetch Source of Truth from DB (Prevents price tampering)
       const { data: tierData, error: tierError } = await supabase
         .from('ticket_tiers')
@@ -96,7 +115,11 @@ export async function POST(req) {
         .eq('id', tier_id)
         .single();
 
-      if (tierError || !tierData) throw new Error("Tier verification failed.");
+      if (tierError || !tierData) {
+        console.error("Tier Verification Failed:", tierError);
+        // We throw here because we literally cannot create a ticket without tier data
+        throw new Error("Tier verification failed.");
+      }
 
       // 2. Financial Engineering
       const actualBasePrice = parseFloat(tierData.price);
@@ -108,77 +131,103 @@ export async function POST(req) {
         ? (amountPaid - actualBasePrice) 
         : 0;
 
-      // 3. QR Generation & Storage
-      // Using 'ticket_number' to match your schema's column
+      // 3. Generate Ticket Number
       const ticketNumber = `OUST-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
       
-      const qrDataUrl = await QRCode.toDataURL(`TICKET:${ticketNumber}|REF:${reference}`, {
-        width: 400,
-        margin: 2,
-        color: { dark: '#000000', light: '#ffffff' }
-      });
-
-      const qrBuffer = Buffer.from(qrDataUrl.split(',')[1], 'base64');
-      const { error: uploadError } = await supabase.storage
-        .from('media')
-        .upload(`qrs/${ticketNumber}.png`, qrBuffer, {
-          contentType: 'image/png',
-          upsert: true,
+      // 4. QR Generation & Storage (SAFE BLOCK)
+      // If this fails, qrUrl will be null, but the ticket WILL still be created.
+      let qrUrl = null;
+      try {
+        const qrDataUrl = await QRCode.toDataURL(`TICKET:${ticketNumber}|REF:${reference}`, {
+          width: 400,
+          margin: 2,
+          color: { dark: '#000000', light: '#ffffff' }
         });
 
-      if (uploadError) throw uploadError;
+        const qrBuffer = Buffer.from(qrDataUrl.split(',')[1], 'base64');
+        const { error: uploadError } = await supabase.storage
+          .from('media')
+          .upload(`qrs/${ticketNumber}.png`, qrBuffer, {
+            contentType: 'image/png',
+            upsert: true,
+          });
 
-      const { data: { publicUrl: qrUrl } } = supabase.storage
-        .from('media')
-        .getPublicUrl(`qrs/${ticketNumber}.png`);
-
-      // 4. Atomic Ticket Creation (Mapped exactly to your provided CREATE TABLE schema)
-      const { error: dbError } = await supabase.from('tickets').insert({
-  event_id: event_id,
-  tier_id: tier_id,
-  tier_name: tierData.name,
-  ticket_number: ticketNumber,
-  qr_code_url: qrUrl,
-  user_email: email,
-  guest_email: guest_email || email,
-  guest_name: finalGuestName,
-  reference: reference,
-  amount: amountPaid,
-  status: 'valid',
-  is_scanned: false,
-});
-
-      if (dbError) throw dbError;
-
-      // 5. Handle Reseller Commissions & Auto-Payouts
-      if (reseller_code && reseller_code !== 'DIRECT') {
-        await supabase.rpc('record_reseller_sale', {
-          target_unique_code: reseller_code,
-          t_ref: reference,
-          t_amount: amountPaid,
-          t_commission: resellerCommission,
-        });
-
-        await attemptAutoResellerPayout(supabase, reseller_code);
+        if (!uploadError) {
+          const { data: publicData } = supabase.storage
+            .from('media')
+            .getPublicUrl(`qrs/${ticketNumber}.png`);
+          qrUrl = publicData.publicUrl;
+        } else {
+          console.error("QR Upload Error (Non-Fatal):", uploadError.message);
+        }
+      } catch (qrErr) {
+        console.error("QR Generation Error (Non-Fatal):", qrErr.message);
       }
 
-      // 6. Record Platform/Organizer Payout Split
-      await supabase.from('payouts').insert({
-        organizer_id: tierData.events.organizer_profile_id,
-        amount_total: amountPaid,
-        platform_fee: platformFee,
-        organizer_amount: organizerAmount,
-        type: 'TICKET',
+      // 5. Atomic Ticket Creation (CRITICAL BLOCK)
+      // This is the most important step. If this fails, we throw to let Paystack retry.
+      const { error: dbError } = await supabase.from('tickets').insert({
+        event_id: event_id,
+        tier_id: tier_id,
+        tier_name: tierData.name,    
+        ticket_number: ticketNumber, 
+        qr_code_url: qrUrl,          
+        user_email: email,           
+        guest_email: guest_email || email,
+        guest_name: finalGuestName,
         reference: reference,
+        amount: amountPaid,
+        status: 'valid',
+        is_scanned: false,
       });
 
-      // 7. Send Luxury Confirmation Email
-      await resend.emails.send({
-        from: 'OUSTED Concierge <tickets@ousted.com>',
-        to: email,
-        subject: `Access Confirmed: ${tierData.events.title}`,
-        html: generateLuxuryEmail(tierData, qrUrl, ticketNumber, finalGuestName)
-      });
+      if (dbError) {
+        console.error("DB INSERT ERROR:", dbError);
+        throw dbError; // Retry trigger
+      }
+
+      // 6. Handle Reseller Commissions & Auto-Payouts (SAFE BLOCK)
+      if (reseller_code && reseller_code !== 'DIRECT') {
+        try {
+          // Check if RPC exists before calling, or just call inside try/catch
+          await supabase.rpc('record_reseller_sale', {
+            target_unique_code: reseller_code,
+            t_ref: reference,
+            t_amount: amountPaid,
+            t_commission: resellerCommission,
+          });
+
+          await attemptAutoResellerPayout(supabase, reseller_code);
+        } catch (resellerErr) {
+          console.error("Reseller Logic Failed (Ticket Saved):", resellerErr.message);
+        }
+      }
+
+      // 7. Record Platform/Organizer Payout Split (SAFE BLOCK)
+      try {
+        await supabase.from('payouts').insert({
+          organizer_id: tierData.events.organizer_profile_id,
+          amount_total: amountPaid,
+          platform_fee: platformFee,
+          organizer_amount: organizerAmount,
+          type: 'TICKET',
+          reference: reference,
+        });
+      } catch (payoutErr) {
+        console.error("Payout Log Failed (Ticket Saved):", payoutErr.message);
+      }
+
+      // 8. Send Luxury Confirmation Email (SAFE BLOCK)
+      try {
+        await resend.emails.send({
+          from: 'OUSTED Concierge <tickets@ousted.com>',
+          to: email,
+          subject: `Access Confirmed: ${tierData.events.title}`,
+          html: generateLuxuryEmail(tierData, qrUrl, ticketNumber, finalGuestName)
+        });
+      } catch (emailErr) {
+        console.error("Email Failed (Ticket Saved):", emailErr.message);
+      }
     }
 
     return new Response('Webhook Handled Successfully', { status: 200 });
@@ -192,6 +241,10 @@ export async function POST(req) {
 /* --- HELPER: LUXURY EMAIL GENERATOR --- */
 function generateLuxuryEmail(tierData, qrUrl, ticketNumber, name) {
   const event = tierData.events;
+  const qrDisplay = qrUrl 
+    ? `<img src="${qrUrl}" width="280" style="border-radius: 15px; border: 1px solid #eee;" />`
+    : `<div style="width:280px; height:280px; background:#f0f0f0; display:flex; align-items:center; justify-content:center;">QR Loading...</div>`;
+
   return `
     <div style="font-family: 'Helvetica', sans-serif; max-width: 600px; margin: auto; padding: 40px; border: 1px solid #f0f0f0; border-radius: 30px;">
       <h1 style="font-size: 24px; font-weight: 900; letter-spacing: -1px; text-transform: uppercase;">Access Granted</h1>
@@ -214,7 +267,7 @@ function generateLuxuryEmail(tierData, qrUrl, ticketNumber, name) {
       </div>
 
       <div style="text-align: center; padding: 20px;">
-        <img src="${qrUrl}" width="280" style="border-radius: 15px; border: 1px solid #eee;" />
+        ${qrDisplay}
         <p style="font-family: monospace; font-size: 12px; color: #999; margin-top: 15px;">SECURE ID: ${ticketNumber}</p>
       </div>
 
@@ -226,8 +279,8 @@ function generateLuxuryEmail(tierData, qrUrl, ticketNumber, name) {
   `;
 }
 
+/* --- HELPER: AUTOMATIC RESELLER PAYOUT --- */
 async function attemptAutoResellerPayout(supabase, resellerCode) {
-  // find the event_reseller row by unique_code and include reseller record (if needed)
   const { data: eventReseller, error: erError } = await supabase
     .from('event_resellers')
     .select('id, reseller_id, commission_rate, resellers (id, payout_recipient_code, total_earned, payout_threshold)')
@@ -251,7 +304,6 @@ async function attemptAutoResellerPayout(supabase, resellerCode) {
 
   const payoutAmount = unpaidSales.reduce((sum, s) => sum + parseFloat(s.commission_earned || 0), 0);
 
-  // call paystack transfer
   const res = await fetch('https://api.paystack.co/transfer', {
     method: 'POST',
     headers: {
@@ -269,17 +321,14 @@ async function attemptAutoResellerPayout(supabase, resellerCode) {
   const data = await res.json();
   if (!data.status) return;
 
-  // mark sales as paid
   await supabase
     .from('reseller_sales')
     .update({ paid: true, payout_reference: data.data.reference })
     .eq('event_reseller_id', eventReseller.id)
     .eq('paid', false);
 
-  // reset reseller totals
   await supabase
     .from('resellers')
     .update({ total_earned: 0, last_payout_at: new Date() })
     .eq('id', reseller.id);
 }
-
