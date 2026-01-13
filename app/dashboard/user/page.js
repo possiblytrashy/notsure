@@ -4,7 +4,7 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { supabase } from '../../lib/supabase';
+import { supabase } from '../../../lib/supabase';
 import { useRouter } from 'next/navigation';
 import { 
   Calendar, MapPin, LogOut, Loader2, 
