@@ -38,60 +38,54 @@ export async function POST(req) {
       .single();
 
     if (tierError || !tier) {
-      console.error("Database Error:", tierError);
-      return NextResponse.json({ error: "Ticket luxury tier not found." }, { status: 404 });
+      return NextResponse.json({ error: "Ticket tier not found." }, { status: 404 });
     }
 
-    const subaccount = tier.events?.organizers?.paystack_subaccount_code;
-    const amountInPesewas = Math.round(tier.price * 100);
+    // 3. CALCULATE CORRECT PRICE (Base vs Reseller Markup)
+    // Match the frontend: 10% markup if a reseller code exists and isn't "DIRECT"
+    let finalPrice = Number(tier.price);
+    const isResellerPurchase = reseller_code && reseller_code !== "DIRECT";
     
-    // 3. Calculate 5% Commission (Transaction Fee)
+    if (isResellerPurchase) {
+      finalPrice = finalPrice * 1.10;
+    }
+
+    const amountInPesewas = Math.round(finalPrice * 100);
+    
+    // 4. Calculate 5% Commission (Based on original tier price or final price? 
+    // Usually based on final price to cover processing)
     const commissionInPesewas = Math.round(amountInPesewas * 0.05);
 
-    // 4. Initialize Paystack Payload
-    // CRITICAL: metadata must be a flat object with custom_fields as an array inside it
+    // 5. Initialize Paystack Payload
+    const subaccount = tier.events?.organizers?.paystack_subaccount_code;
+
     const paystackPayload = {
       email: email.trim(),
       amount: amountInPesewas,
       currency: "GHS",
-      callback_url: `${process.env.NEXT_PUBLIC_SITE_URL}/verify-payment`,
+      // Important: Ensure the access_code locks these details
       metadata: {
         type: 'TICKET_PURCHASE', 
         event_id: event_id,
         tier_id: tier_id,
-        tier_name: tier.name,
-        guest_email: email,       
-        guest_name: guest_name || "Valued Guest",
         reseller_code: reseller_code || "DIRECT",
-        // Redundant storage for the webhook's "Smart Extraction" logic
+        guest_name: guest_name || "Valued Guest",
         custom_fields: [
-          {
-            display_name: "Tier ID",
-            variable_name: "tier_id",
-            value: tier_id
-          },
-          {
-            display_name: "Ticket Type",
-            variable_name: "type",
-            value: "TICKET_PURCHASE"
-          },
-          {
-            display_name: "Event Title",
-            variable_name: "event_title",
-            value: tier.events?.title
-          }
+          { display_name: "Event", variable_name: "event_title", value: tier.events?.title },
+          { display_name: "Tier", variable_name: "tier_name", value: tier.name },
+          { display_name: "Guest", variable_name: "guest_name", value: guest_name }
         ]
       }
     };
 
-    // 5. Apply Split Logic
+    // 6. Apply Split Logic
     if (subaccount) {
       paystackPayload.subaccount = subaccount;
       paystackPayload.transaction_charge = commissionInPesewas; 
-      paystackPayload.bearer = "subaccount"; // Organizer pays the Paystack fee
+      paystackPayload.bearer = "subaccount"; 
     }
 
-    // 6. Initialize Transaction
+    // 7. Initialize Transaction
     const paystackRes = await fetch('https://api.paystack.co/transaction/initialize', {
       method: 'POST',
       headers: {
@@ -104,19 +98,19 @@ export async function POST(req) {
     const result = await paystackRes.json();
 
     if (!paystackRes.ok || !result.status) {
-      console.error("Paystack Error:", result.message);
+      console.error("Paystack API Error:", result.message);
       return NextResponse.json({ error: result.message }, { status: 400 });
     }
 
-    // 7. Return to Frontend
+    // 8. RETURN ONLY THE ACCESS_CODE
+    // By returning only this, you force the frontend to rely on the server-side 
+    // configuration we just created, preventing "Amount/Email missing" errors.
     return NextResponse.json({ 
-      access_code: result.data.access_code,
-      amount: amountInPesewas,
-      email: email.trim()
+      access_code: result.data.access_code
     });
 
   } catch (err) {
-    console.error("Server Crash:", err);
-    return NextResponse.json({ error: "Internal Concierge Error" }, { status: 500 });
+    console.error("Server Error:", err);
+    return NextResponse.json({ error: "Internal Server Error" }, { status: 500 });
   }
 }
