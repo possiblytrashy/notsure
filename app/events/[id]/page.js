@@ -185,7 +185,55 @@ useEffect(() => {
       validateReseller();
     }
   }, [refCode, id]); // Added proper dependency array
+useEffect(() => {
+  const verifyPayment = async () => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const reference = urlParams.get('reference');
+    const paymentStatus = urlParams.get('payment');
 
+    // If user just returned from Paystack
+    if (reference && paymentStatus === 'success') {
+      console.log("User returned from Paystack, verifying:", reference);
+      setIsProcessing(true);
+
+      try {
+        const res = await fetch('/api/checkout/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reference })
+        });
+
+        const data = await res.json();
+
+        if (data.success) {
+          console.log("Payment verified successfully!");
+          
+          // Show success screen
+          setPaymentSuccess({
+            reference: reference,
+            customer: data.guest_name || guestEmail,
+            tier: data.tier_name || 'Ticket'
+          });
+
+          // Clean up URL (remove query params)
+          window.history.replaceState({}, '', `/events/${id}`);
+        } else {
+          alert('Payment verification failed. Please contact support with reference: ' + reference);
+        }
+      } catch (err) {
+        console.error('Verification error:', err);
+        alert('Unable to verify payment. Please contact support with reference: ' + reference);
+      } finally {
+        setIsProcessing(false);
+      }
+    }
+  };
+
+  // Only run this check if we have an event loaded
+  if (event && event !== 'DELETED') {
+    verifyPayment();
+  }
+}, [id, event]); // Run when page loads or event changes
   // --- REAL-TIME TICKET UPDATES ---
   useEffect(() => {
     const channel = supabase
@@ -241,29 +289,6 @@ useEffect(() => {
   };
 
   // --- 4. SECURE PAYSTACK TRANSACTION LOGIC ---
-const loadPaystackScript = () => {
-  return new Promise((resolve, reject) => {
-    if (typeof window === 'undefined') return;
-
-    if (window.PaystackPop) {
-      return resolve(window.PaystackPop);
-    }
-
-    const existing = document.querySelector('script[src="https://js.paystack.co/v1/inline.js"]');
-    if (existing) {
-      existing.onload = () => resolve(window.PaystackPop);
-      return;
-    }
-
-    const script = document.createElement('script');
-    script.src = 'https://js.paystack.co/v1/inline.js';
-    script.async = true;
-    script.onload = () => resolve(window.PaystackPop);
-    script.onerror = reject;
-    document.body.appendChild(script);
-  });
-};
-
 
 // Replace your handlePurchase function with this fixed version
 
@@ -272,7 +297,7 @@ const handlePurchase = async (e) => {
   
   // Validation
   if (!guestEmail || !guestEmail.includes('@')) {
-    alert("Luxury Access requires a valid email.");
+    alert("Please enter a valid email address.");
     return;
   }
 
@@ -284,14 +309,13 @@ const handlePurchase = async (e) => {
   setIsProcessing(true);
 
   try {
-    // 1. Initialize secure session on backend
     const res = await fetch('/api/checkout/secure-session', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         event_id: id,
         tier_id: selectedTier,
-        email: guestEmail.trim().toLowerCase(), // Normalize
+        email: guestEmail.trim().toLowerCase(),
         guest_name: guestName.trim() || 'Guest',
         reseller_code: refCode || "DIRECT"
       })
@@ -299,54 +323,19 @@ const handlePurchase = async (e) => {
 
     const data = await res.json();
 
-    if (!res.ok || !data.access_code) {
-      alert(`Payment Error: ${data.error || "Session initialization failed"}`);
+    if (!res.ok || !data.authorization_url) {
+      alert(`Error: ${data.error || "Payment initialization failed"}`);
       setIsProcessing(false);
       return;
     }
 
-    console.log("Paystack session initialized:", data.reference);
+    console.log("Redirecting to Paystack:", data.reference);
 
-    // 2. Load Paystack script
-    const PaystackPop = await loadPaystackScript();
-
-    // 3. CRITICAL: Use ONLY access_code
-    // Do NOT pass email, amount, or other parameters
-    // They are already set server-side
-    const handler = PaystackPop.setup({
-      key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
-      access_code: data.access_code,
-      
-      onSuccess: function (response) {
-        console.log("Payment successful:", response.reference);
-        setPaymentSuccess({ 
-          reference: response.reference,
-          customer: guestName || guestEmail,
-          tier: activeTier?.name || 'Ticket'
-        });
-      },
-      
-      callback: function (response) {
-        // This is called after successful payment
-        console.log("Payment callback:", response.reference);
-        setPaymentSuccess({ 
-          reference: response.reference,
-          customer: guestName || guestEmail,
-          tier: activeTier?.name || 'Ticket'
-        });
-      },
-      
-      onClose: function () {
-        console.log("Payment window closed");
-        setIsProcessing(false);
-      }
-    });
-
-    // 4. Open payment modal
-    handler.openIframe();
+    // Simply redirect to Paystack's hosted checkout page
+    window.location.href = data.authorization_url;
 
   } catch (err) {
-    console.error("Payment initialization error:", err);
+    console.error("Payment error:", err);
     alert("An error occurred. Please try again.");
     setIsProcessing(false);
   }
