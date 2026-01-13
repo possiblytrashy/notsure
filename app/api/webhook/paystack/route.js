@@ -6,7 +6,6 @@ import crypto from 'crypto';
 export const dynamic = 'force-dynamic';
 
 export async function POST(req) {
-  // 1. IMMEDIATE LOGGING (Proof of life)
   console.log('--- WEBHOOK ATTEMPT START ---');
 
   const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -21,40 +20,50 @@ export async function POST(req) {
   try {
     const bodyText = await req.text();
     
-    // 2. SIGNATURE VERIFICATION
+    // 1. SIGNATURE VERIFICATION
     const hash = crypto.createHmac('sha512', PAYSTACK_SECRET_KEY).update(bodyText).digest('hex');
     const signature = req.headers.get('x-paystack-signature');
 
     if (hash !== signature) {
-      console.error('WEBHOOK ERROR: Signature Mismatch. Check PAYSTACK_SECRET_KEY.');
+      console.error('WEBHOOK ERROR: Signature Mismatch.');
       return new Response('Unauthorized', { status: 401 });
     }
 
     const body = JSON.parse(bodyText);
     if (body.event !== 'charge.success') {
-      console.log('WEBHOOK: Event is not charge.success, ignoring.');
       return new Response('OK', { status: 200 });
     }
 
     const { reference, metadata, customer, amount } = body.data;
     console.log(`WEBHOOK: Processing Ref ${reference} for ${customer?.email}`);
-    console.log('WEBHOOK: Metadata Received:', JSON.stringify(metadata));
 
-    // 3. IDEMPOTENCY CHECK
-    const { data: existing } = await supabase.from('tickets').select('id').eq('reference', reference).maybeSingle();
+    // 2. IDEMPOTENCY CHECK
+    const { data: existing } = await supabase
+      .from('tickets')
+      .select('id')
+      .eq('reference', reference)
+      .maybeSingle();
+
     if (existing) {
-      console.log('WEBHOOK: Ticket already exists for this reference. Exiting.');
+      console.log('WEBHOOK: Ticket already exists. Skipping.');
       return new Response('Already Processed', { status: 200 });
     }
 
-    // 4. DATA PREP (Using tier_id from your secure-session route)
-    const tier_id = metadata?.tier_id;
+    // 3. SMART METADATA EXTRACTION
+    // We check root, then custom_fields to ensure we get the tier_id
+    let tier_id = metadata?.tier_id;
+    
+    if (!tier_id && metadata?.custom_fields) {
+      const foundField = metadata.custom_fields.find(f => f.variable_name === 'tier_id');
+      if (foundField) tier_id = foundField.value;
+    }
+
     if (!tier_id) {
-      console.error('WEBHOOK ERROR: No tier_id found in metadata. Check your checkout route.');
+      console.error('WEBHOOK ERROR: No tier_id found in metadata. Body:', JSON.stringify(metadata));
       return new Response('Missing Metadata', { status: 400 });
     }
 
-    // 5. FETCH DATA FROM DB
+    // 4. FETCH AUTHORITATIVE DATA
     const { data: tier, error: tierErr } = await supabase
       .from('ticket_tiers')
       .select('*, events(*)')
@@ -62,11 +71,11 @@ export async function POST(req) {
       .single();
 
     if (tierErr || !tier) {
-      console.error('WEBHOOK ERROR: Tier ID does not exist in Database:', tier_id);
+      console.error('WEBHOOK ERROR: Tier ID not in DB:', tier_id);
       return new Response('Tier Not Found', { status: 400 });
     }
 
-    // 6. QR & STORAGE
+    // 5. QR GENERATION & STORAGE
     const ticketNumber = `OUST-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
     let qrUrl = null;
 
@@ -76,19 +85,21 @@ export async function POST(req) {
       
       const { error: uploadErr } = await supabase.storage
         .from('media')
-        .upload(`qrs/${ticketNumber}.png`, qrBuffer, { contentType: 'image/png', upsert: true });
+        .upload(`qrs/${ticketNumber}.png`, qrBuffer, { 
+          contentType: 'image/png', 
+          upsert: true 
+        });
 
-      if (uploadErr) {
-        console.error('WEBHOOK: Storage upload failed, but continuing...', uploadErr.message);
-      } else {
-        qrUrl = `${SUPABASE_URL}/storage/v1/object/public/media/qrs/${ticketNumber}.png`;
+      if (!uploadErr) {
+        const { data: publicUrl } = supabase.storage.from('media').getPublicUrl(`qrs/${ticketNumber}.png`);
+        qrUrl = publicUrl.publicUrl;
       }
     } catch (e) {
-      console.error('WEBHOOK: QR Logic failed:', e.message);
+      console.error('WEBHOOK: QR Process failed:', e.message);
     }
 
-    // 7. THE INSERT (The moment of truth)
-    console.log('WEBHOOK: Attempting Database Insert...');
+    // 6. DATABASE INSERT
+    console.log('WEBHOOK: Inserting ticket...');
     const { data: inserted, error: insertErr } = await supabase
       .from('tickets')
       .insert({
@@ -108,21 +119,46 @@ export async function POST(req) {
       .single();
 
     if (insertErr) {
-      console.error('WEBHOOK INSERT FAILED:', JSON.stringify(insertErr, null, 2));
+      console.error('WEBHOOK INSERT FAILED:', insertErr);
       return new Response('Database Error', { status: 500 });
     }
 
-    console.log('WEBHOOK SUCCESS: Ticket ID', inserted.id);
+    // 7. PAYOUT TRACKING (Calculates your 5% commission)
+    const amountGHS = amount / 100;
+    const platformFee = amountGHS * 0.05;
+    const organizerAmount = amountGHS - platformFee;
 
-    // 8. EMAIL (Non-blocking)
+    await supabase.from('payouts').insert({
+      organizer_id: tier.events?.organizer_profile_id,
+      amount_total: amountGHS,
+      platform_fee: platformFee,
+      organizer_amount: organizerAmount,
+      type: 'TICKET',
+      reference: reference
+    });
+
+    console.log('WEBHOOK SUCCESS: Ticket Created', inserted.id);
+
+    // 8. EMAIL DELIVERY
     if (RESEND_API_KEY) {
-        const resend = new Resend(RESEND_API_KEY);
-        await resend.emails.send({
-            from: 'Ousted <onboarding@resend.dev>',
-            to: metadata.guest_email || customer.email,
-            subject: `Confirmed: ${tier.events.title}`,
-            html: `<h1>Your Ticket: ${ticketNumber}</h1><img src="${qrUrl}" />`
-        }).catch(e => console.error('Email failed:', e.message));
+      const resend = new Resend(RESEND_API_KEY);
+      await resend.emails.send({
+        from: 'Ousted <onboarding@resend.dev>',
+        to: metadata.guest_email || customer.email,
+        subject: `Your Ticket: ${tier.events?.title}`,
+        html: `
+          <div style="font-family: sans-serif; max-width: 600px; margin: auto; border: 1px solid #eee; padding: 20px; border-radius: 10px;">
+            <h2 style="color: #000;">Access Confirmed!</h2>
+            <p>Hi ${metadata.guest_name || 'Guest'},</p>
+            <p>Your ticket for <strong>${tier.events?.title}</strong> is ready.</p>
+            <div style="text-align: center; margin: 30px 0;">
+              <img src="${qrUrl}" width="200" style="border: 10px solid #fff; box-shadow: 0 4px 10px rgba(0,0,0,0.1);" />
+              <p style="font-weight: bold; font-size: 18px; margin-top: 10px;">${ticketNumber}</p>
+            </div>
+            <p style="font-size: 12px; color: #666;">Tier: ${tier.name}</p>
+          </div>
+        `
+      }).catch(e => console.error('Email Error:', e.message));
     }
 
     return new Response('Success', { status: 200 });
