@@ -48,128 +48,156 @@ export default function AdvancedScanner() {
     }
   };
 
-  // --- 3. VERIFICATION LOGIC ---
+  // --- 3. UPDATED VERIFICATION LOGIC ---
   const verifyTicket = async (decodedText, isManual = false) => {
     if (!isScanning && !isManual) return;
     if (isLocked) return;
 
     setIsScanning(false);
-    let ticketRef = "";
-    let qrEventId = "";
-
-    if (decodedText.includes('REF:') && decodedText.includes('|')) {
-      const segments = decodedText.split('|');
-      ticketRef = segments[0].replace('REF:', '').trim();
-      qrEventId = segments[1].replace('EVT:', '').trim();
-    } else {
-      ticketRef = decodedText.trim();
+    
+    // Clean the reference (handling potential URL parameters if the user scans the browser URL)
+    let ticketRef = decodedText.trim();
+    if (ticketRef.includes('reference=')) {
+        ticketRef = new URLSearchParams(ticketRef.split('?')[1]).get('reference');
     }
 
     setStatus({ type: 'loading', message: 'Verifying...', color: '#0ea5e9', details: `Ref: ${ticketRef}`, tier: '' });
 
     try {
+      // 1. Fetch ticket with tier and event info
       const { data: ticket, error: fetchError } = await supabase
         .from('tickets')
-        .select(`id, guest_name, tier_name, is_scanned, status, event_id, updated_at, events(title)`)
+        .select(`
+            id, 
+            guest_name, 
+            tier_name, 
+            is_scanned, 
+            status, 
+            event_id, 
+            updated_at, 
+            events(title)
+        `)
         .eq('reference', ticketRef)
         .maybeSingle();
 
       if (fetchError) throw fetchError;
 
+      // 2. ERROR: Ticket Not Found
       if (!ticket) {
-        setStatus({ type: 'error', message: 'NOT FOUND', color: '#ef4444', details: 'No record matches this reference.', tier: '' });
+        setStatus({ 
+            type: 'error', 
+            message: 'TICKET NOT FOUND', 
+            color: '#ef4444', 
+            details: 'This reference does not exist in the database.', 
+            tier: '' 
+        });
         return;
       }
 
-      const eventTitle = ticket.events?.title || 'Event';
-      const ticketTier = ticket.tier_name || 'Standard Entry';
+      const eventTitle = ticket.events?.title || 'Luxury Event';
+      const ticketTier = ticket.tier_name || 'Standard';
 
-      // Security Check: Event Match
+      // 3. ERROR: Wrong Event (Security)
       if (selectedEvent && ticket.event_id !== selectedEvent.id) {
         setStatus({ 
-            type: 'error', message: 'WRONG EVENT', color: '#000', 
+            type: 'error', 
+            message: 'WRONG GATE', 
+            color: '#000', 
             details: `Valid for: ${eventTitle}`,
-            eventName: 'GATE DENIED',
+            eventName: 'ACCESS DENIED',
             tier: ticketTier
         });
         return;
       }
 
-      // Security Check: QR Data Integrity
-      if (qrEventId && ticket.event_id !== qrEventId) {
-        setStatus({ type: 'error', message: 'QR TAMPERED', color: '#7f1d1d', details: 'Event ID mismatch.', tier: ticketTier });
-        return;
-      }
-
-      // Payment Status Check
+      // 4. ERROR: Payment Status check (Important for Luxury splits)
       if (ticket.status !== 'valid' && ticket.status !== 'success') {
-        setStatus({ type: 'error', message: 'INVALID STATUS', color: '#f59e0b', details: `Ticket is ${ticket.status}`, tier: ticketTier });
+        setStatus({ 
+            type: 'error', 
+            message: 'INVALID TICKET', 
+            color: '#f59e0b', 
+            details: `Status: ${ticket.status.toUpperCase()}`, 
+            tier: ticketTier 
+        });
         return;
       }
 
-      // Already Scanned Check
+      // 5. ERROR: Already Scanned
       if (ticket.is_scanned) {
+        const scanTime = new Date(ticket.updated_at).toLocaleTimeString();
         setStatus({ 
-          type: 'warning', message: 'USED TICKET', color: '#64748b', 
-          details: `In: ${new Date(ticket.updated_at).toLocaleTimeString()}`, 
+          type: 'warning', 
+          message: 'ALREADY USED', 
+          color: '#64748b', 
+          details: `First scanned at: ${scanTime}`, 
           eventName: eventTitle,
           tier: ticketTier
         });
         return;
       }
 
-      // Success Path
+      // 6. SUCCESS: Update the ticket as scanned (Atomic update)
       const { data: updatedTicket, error: updateError } = await supabase
-  .from('tickets')
-  .update({
-    is_scanned: true,
-    updated_at: new Date().toISOString()
-  })
-  .eq('id', ticket.id)
-  .eq('is_scanned', false)   // 🔒 LOCK
-  .select()
-  .maybeSingle();
+        .from('tickets')
+        .update({
+          is_scanned: true,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', ticket.id)
+        .eq('is_scanned', false) // Ensures no race conditions
+        .select()
+        .maybeSingle();
 
-if (updateError) throw updateError;
+      if (updateError) throw updateError;
 
-// If no row was updated → already scanned
-if (!updatedTicket) {
-  setStatus({ 
-    type: 'warning',
-    message: 'USED TICKET',
-    color: '#64748b',
-    details: 'This ticket was already scanned',
-    eventName: eventTitle,
-    tier: ticketTier
-  });
-  return;
-}
+      if (!updatedTicket) {
+        setStatus({ type: 'warning', message: 'DOUBLE SCAN', color: '#64748b', details: 'Scan collision detected.', tier: ticketTier });
+        return;
+      }
 
-
+      // 7. Update History & Final Status
       setScanHistory(prev => [{
-        name: ticket.guest_name, event: eventTitle, tier: ticketTier, time: new Date().toLocaleTimeString()
+        name: ticket.guest_name, 
+        event: eventTitle, 
+        tier: ticketTier, 
+        time: new Date().toLocaleTimeString()
       }, ...prev].slice(0, 5));
 
       setStatus({ 
-        type: 'success', message: 'ACCESS GRANTED', color: '#22c55e', 
-        details: ticket.guest_name, 
+        type: 'success', 
+        message: 'ENTRY GRANTED', 
+        color: '#22c55e', 
+        details: ticket.guest_name.toUpperCase(), 
         eventName: eventTitle,
         tier: ticketTier 
       });
 
     } catch (err) {
-      console.error(err);
-      setStatus({ type: 'error', message: 'SYSTEM ERROR', color: '#000', details: 'Check internet connection.', tier: '' });
+      console.error("Scanner Error:", err);
+      setStatus({ 
+        type: 'error', 
+        message: 'SYSTEM ERROR', 
+        color: '#7f1d1d', 
+        details: 'Database timeout or network error.', 
+        tier: '' 
+      });
     }
   };
 
   useEffect(() => {
     if (isLocked || !isScanning) return;
-    const scanner = new Html5QrcodeScanner('reader', { fps: 15, qrbox: 250 });
-    scanner.render(verifyTicket, () => {});
+    const scanner = new Html5QrcodeScanner('reader', { 
+        fps: 20, 
+        qrbox: { width: 250, height: 250 },
+        aspectRatio: 1.0 
+    });
+    scanner.render(verifyTicket, (error) => {
+        // Suppress noise errors from scanner
+    });
     return () => scanner.clear().catch(() => {});
   }, [isScanning, isLocked, selectedEvent]);
 
+  // --- RENDERING LOGIC (Styles from your luxury theme) ---
   if (isLocked) {
     return (
       <div style={styles.lockContainer}>
@@ -195,10 +223,10 @@ if (!updatedTicket) {
 
   return (
     <div style={styles.container}>
-      {/* EVENT SELECTOR SECTION */}
+      {/* TOP NAV */}
       <div style={styles.topSection}>
         <div style={styles.headerRow}>
-          <h2 style={{fontWeight: 950, margin: 0, fontSize: '20px'}}>Gate Portal</h2>
+          <h2 style={{fontWeight: 950, margin: 0, fontSize: '20px', letterSpacing: '-1px'}}>GATE CONTROL</h2>
           <button onClick={() => setIsLocked(true)} style={styles.lockCircle}><Lock size={16}/></button>
         </div>
 
@@ -209,7 +237,7 @@ if (!updatedTicket) {
               <Search size={16} color="#94a3b8" />
               <input 
                 style={styles.input} 
-                placeholder="Search..." 
+                placeholder="Search events..." 
                 value={eventSearch}
                 onChange={(e) => setEventSearch(e.target.value)}
               />
@@ -227,19 +255,19 @@ if (!updatedTicket) {
           <div style={styles.activeEventCard}>
             <div style={styles.activeEventInfo}>
               <MapPin size={16} color="#38bdf8" />
-              <span style={{fontWeight: 800}}>{selectedEvent.title}</span>
+              <span style={{fontWeight: 800, fontSize: '14px'}}>{selectedEvent.title}</span>
             </div>
-            <button style={styles.changeBtn} onClick={() => setSelectedEvent(null)}>Change Event</button>
+            <button style={styles.changeBtn} onClick={() => setSelectedEvent(null)}>Switch</button>
           </div>
         )}
       </div>
 
-      {/* MANUAL SEARCH */}
+      {/* MANUAL OVERRIDE */}
       <div style={styles.searchWrapper}>
         <Search size={18} style={styles.searchIcon} />
         <input 
           style={styles.searchInput} 
-          placeholder="Manual Ticket ID Entry" 
+          placeholder="Enter Ticket Reference Manually" 
           value={manualTicketSearch}
           onChange={(e) => setManualTicketSearch(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && verifyTicket(manualTicketSearch, true)}
@@ -249,12 +277,11 @@ if (!updatedTicket) {
         )}
       </div>
 
-      {/* RESULT STATUS CARD */}
+      {/* DYNAMIC RESULT CARD */}
       <div style={{...styles.statusCard, background: status.color}}>
-        {/* TICKET TIER DISPLAY - HIGH VISIBILITY */}
         {status.tier && (
           <div style={styles.tierContainer}>
-            <Tag size={14} />
+            <Tag size={12} />
             <span style={styles.tierText}>{status.tier.toUpperCase()}</span>
           </div>
         )}
@@ -271,17 +298,20 @@ if (!updatedTicket) {
         
         {!isScanning && (
           <button onClick={() => {setIsScanning(true); setManualTicketSearch('');}} style={styles.nextBtn}>
-            READY FOR NEXT SCAN
+            SCAN NEXT GUEST
           </button>
         )}
       </div>
 
-      <div style={styles.scannerContainer}><div id="reader"></div></div>
+      {/* SCANNER VIEWPORT */}
+      <div style={styles.scannerContainer}>
+        <div id="reader"></div>
+      </div>
 
-      {/* CHECK-IN HISTORY */}
+      {/* LOG HISTORY */}
       <div style={styles.historySection}>
-        <div style={styles.historyHeader}><HistoryIcon size={16} /> <span>RECENT GUESTS</span></div>
-        {scanHistory.length === 0 && <p style={{textAlign: 'center', color: '#94a3b8', fontSize: '13px'}}>No recent check-ins.</p>}
+        <div style={styles.historyHeader}><HistoryIcon size={14} /> <span>LAST 5 CHECK-INS</span></div>
+        {scanHistory.length === 0 && <p style={{textAlign: 'center', color: '#94a3b8', fontSize: '13px', padding: '10px'}}>Waiting for scans...</p>}
         {scanHistory.map((item, idx) => (
           <div key={idx} style={styles.historyItem}>
             <div style={{flex: 1}}>
@@ -299,48 +329,50 @@ if (!updatedTicket) {
   );
 }
 
+// Ensure styles match your luxury aesthetic
 const styles = {
-  container: { maxWidth: '480px', margin: '0 auto', padding: '15px', fontFamily: 'system-ui, -apple-system, sans-serif' },
-  lockContainer: { height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0f172a' },
+  container: { maxWidth: '480px', margin: '0 auto', padding: '15px', fontFamily: 'Inter, sans-serif' },
+  lockContainer: { height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#020617' },
   lockCard: { width: '100%', maxWidth: '320px', textAlign: 'center' },
-  lockIconBox: { width: '70px', height: '70px', background: '#1e293b', borderRadius: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px' },
+  lockIconBox: { width: '70px', height: '70px', background: '#0f172a', borderRadius: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px', border: '1px solid #1e293b' },
   pinDisplay: { display: 'flex', justifyContent: 'center', gap: '12px', margin: '30px 0' },
-  pinDot: (filled) => ({ width: '14px', height: '14px', borderRadius: '50%', background: filled ? '#38bdf8' : '#334155', transition: '0.2s' }),
+  pinDot: (filled) => ({ width: '14px', height: '14px', borderRadius: '50%', background: filled ? '#38bdf8' : '#1e293b', transition: '0.2s' }),
   keypad: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' },
-  keyBtn: { padding: '18px', borderRadius: '18px', border: 'none', background: '#1e293b', color: '#fff', fontSize: '18px', fontWeight: 'bold' },
+  keyBtn: { padding: '20px', borderRadius: '18px', border: 'none', background: '#0f172a', color: '#fff', fontSize: '18px', fontWeight: 'bold', cursor: 'pointer' },
   
   topSection: { marginBottom: '20px' },
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' },
-  lockCircle: { background: '#f1f5f9', border: 'none', width: '40px', height: '40px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  lockCircle: { background: '#f1f5f9', border: 'none', width: '40px', height: '40px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' },
   
-  eventPicker: { background: '#f8fafc', padding: '15px', borderRadius: '20px', border: '1px solid #e2e8f0' },
-  label: { margin: '0 0 10px', fontSize: '12px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase' },
+  eventPicker: { background: '#f8fafc', padding: '15px', borderRadius: '24px', border: '1px solid #e2e8f0' },
+  label: { margin: '0 0 10px', fontSize: '11px', fontWeight: '900', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px' },
   searchBox: { display: 'flex', alignItems: 'center', background: '#fff', padding: '0 12px', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '10px' },
   input: { flex: 1, border: 'none', padding: '10px', outline: 'none', fontSize: '14px' },
   eventList: { maxHeight: '120px', overflowY: 'auto' },
-  eventItem: { padding: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f1f5f9', fontSize: '14px', cursor: 'pointer', fontWeight: '600' },
+  eventItem: { padding: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f1f5f9', fontSize: '13px', cursor: 'pointer', fontWeight: '700' },
   
-  activeEventCard: { background: '#1e293b', color: '#fff', padding: '15px', borderRadius: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
+  activeEventCard: { background: '#0f172a', color: '#fff', padding: '15px', borderRadius: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 10px 20px rgba(0,0,0,0.1)' },
   activeEventInfo: { display: 'flex', alignItems: 'center', gap: '8px' },
-  changeBtn: { background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', padding: '5px 10px', borderRadius: '10px', fontSize: '12px' },
+  changeBtn: { background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', padding: '6px 12px', borderRadius: '10px', fontSize: '11px', fontWeight: '800' },
 
   searchWrapper: { position: 'relative', display: 'flex', alignItems: 'center', marginBottom: '15px' },
   searchIcon: { position: 'absolute', left: '15px', color: '#94a3b8' },
-  searchInput: { width: '100%', padding: '15px 15px 15px 45px', borderRadius: '15px', border: '1px solid #e2e8f0', fontSize: '14px', outline: 'none', background: '#f8fafc' },
-  searchGo: { position: 'absolute', right: '10px', background: '#000', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '8px', fontSize: '12px', fontWeight: '900' },
+  searchInput: { width: '100%', padding: '16px 16px 16px 45px', borderRadius: '18px', border: '1px solid #e2e8f0', fontSize: '14px', outline: 'none', background: '#f8fafc' },
+  searchGo: { position: 'absolute', right: '10px', background: '#000', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '10px', fontSize: '11px', fontWeight: '900' },
 
-  statusCard: { position: 'relative', padding: '40px 20px', borderRadius: '30px', color: '#fff', textAlign: 'center', marginBottom: '15px', overflow: 'hidden' },
-  tierContainer: { position: 'absolute', top: '20px', left: '0', right: '0', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '6px' },
-  tierText: { fontSize: '12px', fontWeight: '900', letterSpacing: '1px' },
-  statusTitle: { margin: '10px 0 5px', fontSize: '26px', fontWeight: '900', letterSpacing: '-0.5px' },
-  statusDetails: { margin: 0, opacity: 0.9, fontSize: '16px', fontWeight: '600' },
-  nextBtn: { marginTop: '20px', width: '100%', padding: '14px', background: '#fff', color: '#000', border: 'none', borderRadius: '14px', fontWeight: '900', fontSize: '14px' },
+  statusCard: { position: 'relative', padding: '45px 20px', borderRadius: '35px', color: '#fff', textAlign: 'center', marginBottom: '20px', overflow: 'hidden', boxShadow: '0 20px 40px rgba(0,0,0,0.1)' },
+  tierContainer: { position: 'absolute', top: '20px', left: '0', right: '0', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '6px', opacity: 0.8 },
+  tierText: { fontSize: '10px', fontWeight: '900', letterSpacing: '2px' },
+  statusIconBox: { marginBottom: '15px' },
+  statusTitle: { margin: '0 0 5px', fontSize: '32px', fontWeight: '950', letterSpacing: '-1.5px' },
+  statusDetails: { margin: 0, opacity: 0.9, fontSize: '15px', fontWeight: '700', textTransform: 'uppercase' },
+  nextBtn: { marginTop: '25px', width: '100%', padding: '16px', background: '#fff', color: '#000', border: 'none', borderRadius: '18px', fontWeight: '900', fontSize: '13px', cursor: 'pointer', letterSpacing: '1px' },
   
-  scannerContainer: { borderRadius: '25px', overflow: 'hidden', border: '5px solid #000', marginBottom: '20px' },
-  historySection: { background: '#f8fafc', padding: '15px', borderRadius: '20px', border: '1px solid #e2e8f0' },
-  historyHeader: { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', fontWeight: '900', color: '#94a3b8', marginBottom: '10px' },
-  historyItem: { background: '#fff', padding: '12px', borderRadius: '12px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid #f1f5f9' },
+  scannerContainer: { borderRadius: '30px', overflow: 'hidden', border: '8px solid #000', marginBottom: '25px', background: '#000' },
+  historySection: { background: '#f8fafc', padding: '20px', borderRadius: '28px', border: '1px solid #e2e8f0' },
+  historyHeader: { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '10px', fontWeight: '900', color: '#94a3b8', marginBottom: '15px', letterSpacing: '1px' },
+  historyItem: { background: '#fff', padding: '14px', borderRadius: '16px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid #f1f5f9' },
   historyName: { margin: 0, fontSize: '14px', fontWeight: '800', color: '#0f172a' },
-  historyMetaRow: { fontSize: '11px', color: '#64748b', display: 'flex', gap: '4px' },
+  historyMetaRow: { fontSize: '11px', color: '#64748b', display: 'flex', gap: '4px', marginTop: '2px' },
   historyTier: { color: '#0ea5e9', fontWeight: '800' }
 };
