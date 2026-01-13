@@ -66,10 +66,17 @@ metadata: {
         reseller_code: reseller_code || "DIRECT",
         // This metadata is CRITICAL for your webhook later
         custom_fields: [
-          { display_name: "Event", variable_name: "event_title", value: tier.events.title },
-          { display_name: "Ticket Tier", variable_name: "tier_name", value: tier.name },
-          { display_name: "Guest Name", variable_name: "guest_name", value: guest_name }
-        ]
+      {
+        display_name: "Tier ID",
+        variable_name: "tier_id",
+        value: tier_id
+      },
+      {
+        display_name: "Ticket Type",
+        variable_name: "type",
+        value: "TICKET_PURCHASE"
+      }
+    ]
       }
     };
 
