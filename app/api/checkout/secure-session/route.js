@@ -1,3 +1,6 @@
+// FILE PATH: app/api/checkout/secure-session/route.js
+// This replaces your current secure-session route
+
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
@@ -8,16 +11,16 @@ export async function POST(req) {
     const body = await req.json();
     const { event_id, tier_id, email, guest_name, reseller_code } = body;
 
-    // 1. Strict Validation
+    // 1. Validation
     if (!email || !email.includes('@')) {
       return NextResponse.json({ 
-        error: "A valid email is required for ticket delivery." 
+        error: "A valid email is required." 
       }, { status: 400 });
     }
 
     if (!tier_id || !event_id) {
       return NextResponse.json({ 
-        error: "Missing required fields: tier_id or event_id" 
+        error: "Missing required fields." 
       }, { status: 400 });
     }
 
@@ -26,7 +29,7 @@ export async function POST(req) {
       process.env.SUPABASE_SERVICE_ROLE_KEY
     );
 
-    // 2. Fetch Tier details with Organizer's Paystack Subaccount
+    // 2. Fetch Tier with Event Details
     const { data: tier, error: tierError } = await supabase
       .from('ticket_tiers')
       .select(`
@@ -52,34 +55,32 @@ export async function POST(req) {
       }, { status: 404 });
     }
 
-    // 3. Calculate Price (with 10% reseller markup if applicable)
+    // 3. Calculate Final Price (with reseller markup if applicable)
     let finalPrice = Number(tier.price);
     const isResellerPurchase = reseller_code && reseller_code !== "DIRECT";
     
     if (isResellerPurchase) {
-      finalPrice = finalPrice * 1.10;
+      finalPrice = finalPrice * 1.10; // 10% markup
     }
 
     const amountInPesewas = Math.round(finalPrice * 100);
-    const commissionInPesewas = Math.round(amountInPesewas * 0.05);
+    const commissionInPesewas = Math.round(amountInPesewas * 0.05); // 5% commission
 
-    // 4. Normalize email
+    // 4. Normalize Email
     const normalizedEmail = email.trim().toLowerCase();
 
     // 5. Build Paystack Payload
-    // CRITICAL: Include tier_id in BOTH metadata root AND custom_fields
     const paystackPayload = {
       email: normalizedEmail,
       amount: amountInPesewas,
       currency: "GHS",
+      callback_url: `${process.env.NEXT_PUBLIC_BASE_URL}/events/${event_id}?payment=success`,
       metadata: {
-        // These fields are needed by your webhook
         event_id: event_id,
-        tier_id: tier_id,  // CRITICAL: Must be here for webhook
+        tier_id: tier_id,
         guest_email: normalizedEmail,
         guest_name: guest_name || 'Guest',
         reseller_code: reseller_code || "DIRECT",
-        // Also include in custom_fields for display purposes
         custom_fields: [
           {
             display_name: "Event",
@@ -100,7 +101,7 @@ export async function POST(req) {
       }
     };
 
-    // 6. Add Subaccount Split if organizer has one
+    // 6. Add Subaccount if Organizer has one
     const subaccount = tier.events?.organizers?.paystack_subaccount_code;
     
     if (subaccount) {
@@ -109,10 +110,10 @@ export async function POST(req) {
       paystackPayload.bearer = "subaccount";
     }
 
-    console.log("Initializing Paystack with:", {
+    console.log("Initializing Paystack Transaction:", {
       email: normalizedEmail,
       amount: amountInPesewas,
-      tier_id: tier_id,
+      tier: tier.name,
       hasSubaccount: !!subaccount
     });
 
@@ -135,15 +136,16 @@ export async function POST(req) {
       }, { status: 400 });
     }
 
-    // 8. Return ONLY access_code
-    // The frontend should ONLY use this - no need to pass email/amount again
+    console.log("✅ Paystack session created:", result.data.reference);
+
+    // 8. Return Authorization URL for redirect
     return NextResponse.json({ 
-      access_code: result.data.access_code,
-      reference: result.data.reference // Useful for debugging
+      authorization_url: result.data.authorization_url,
+      reference: result.data.reference
     });
 
   } catch (err) {
-    console.error("Server Error in secure-session:", err);
+    console.error("Server Error:", err);
     return NextResponse.json({ 
       error: "Internal Server Error",
       details: err.message 
