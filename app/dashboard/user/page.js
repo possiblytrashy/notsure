@@ -1,17 +1,22 @@
+// FILE: app/dashboard/page.js
+// REPLACE your existing dashboard with this version
+
 "use client";
 
 import { useState, useEffect } from 'react';
-import { supabase } from '../../../lib/supabase';
+import { supabase } from '../../lib/supabase';
 import { useRouter } from 'next/navigation';
 import { 
   Calendar, MapPin, LogOut, Loader2, 
-  Navigation, ChevronRight, ShieldCheck
+  Navigation, ChevronRight, ShieldCheck, DollarSign, TrendingUp
 } from 'lucide-react';
 
 export default function UserDashboard() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
+  const [isReseller, setIsReseller] = useState(false);
+  const [resellerStats, setResellerStats] = useState(null);
   
   // Data States
   const [tickets, setTickets] = useState([]);
@@ -29,6 +34,7 @@ export default function UserDashboard() {
       } else {
         setUser(user);
         await fetchVaultData(user);
+        await checkResellerStatus(user.id);
       }
     };
     checkUser();
@@ -61,6 +67,30 @@ export default function UserDashboard() {
     }
   };
 
+  const checkResellerStatus = async (userId) => {
+    try {
+      const { data: reseller } = await supabase
+        .from('resellers')
+        .select('id, is_active, total_earned')
+        .eq('user_id', userId)
+        .maybeSingle();
+
+      if (reseller?.is_active) {
+        setIsReseller(true);
+        
+        // Get quick stats
+        const { data: stats } = await supabase
+          .rpc('get_reseller_stats', { p_reseller_id: reseller.id });
+        
+        if (stats && stats.length > 0) {
+          setResellerStats(stats[0]);
+        }
+      }
+    } catch (err) {
+      console.error('Reseller check error:', err);
+    }
+  };
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     router.push('/login');
@@ -76,7 +106,7 @@ export default function UserDashboard() {
       case 'uber': url = `uber://?action=setPickup&dropoff[latitude]=${lat}&dropoff[longitude]=${lng}`; break;
       case 'bolt': url = `bolt://explore?dropoff_lat=${lat}&dropoff_lng=${lng}`; break;
       case 'yango': url = `yango://?finish_lat=${lat}&finish_lng=${lng}`; break;
-      case 'google': url = `https://www.google.com/maps/search/?api=1&query=$${lat},${lng}`; break;
+      case 'google': url = `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`; break;
     }
     window.location.href = url;
     setTimeout(() => {
@@ -128,6 +158,70 @@ export default function UserDashboard() {
 
       <div style={{ maxWidth: '500px', margin: '0 auto' }}>
         
+        {/* Reseller Quick Access */}
+        {isReseller ? (
+          <div style={{ 
+            background: 'linear-gradient(135deg, #CDa434 0%, #b8912d 100%)', 
+            borderRadius: '20px', 
+            padding: '24px', 
+            marginBottom: '30px',
+            cursor: 'pointer'
+          }}
+          onClick={() => router.push('/reseller/dashboard')}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ width: '40px', height: '40px', background: 'rgba(0,0,0,0.2)', borderRadius: '12px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <DollarSign size={20} color="#000" />
+                </div>
+                <div>
+                  <p style={{ margin: 0, fontSize: '12px', color: 'rgba(0,0,0,0.7)', fontWeight: '700' }}>RESELLER</p>
+                  <p style={{ margin: 0, fontSize: '20px', fontWeight: '900', color: '#000' }}>
+                    GHS {resellerStats?.total_earned?.toFixed(2) || '0.00'}
+                  </p>
+                </div>
+              </div>
+              <ChevronRight size={24} color="#000" />
+            </div>
+            <div style={{ display: 'flex', gap: '16px', fontSize: '13px', color: 'rgba(0,0,0,0.8)', fontWeight: '600' }}>
+              <span>📊 {resellerStats?.total_sales || 0} sales</span>
+              <span>👆 {resellerStats?.total_clicks || 0} clicks</span>
+            </div>
+          </div>
+        ) : (
+          <div style={{
+            background: '#111',
+            border: '1px solid #222',
+            borderRadius: '20px',
+            padding: '20px',
+            marginBottom: '30px',
+            textAlign: 'center'
+          }}>
+            <TrendingUp size={32} color="#CDa434" style={{ marginBottom: '12px' }} />
+            <h3 style={{ fontSize: '16px', fontWeight: '800', margin: '0 0 8px' }}>
+              Become a Reseller
+            </h3>
+            <p style={{ fontSize: '13px', color: '#666', margin: '0 0 16px' }}>
+              Earn 10% commission by promoting events
+            </p>
+            <button
+              onClick={() => router.push('/reseller/onboard')}
+              style={{
+                background: '#CDa434',
+                color: '#000',
+                border: 'none',
+                padding: '12px 24px',
+                borderRadius: '12px',
+                fontWeight: '800',
+                fontSize: '14px',
+                cursor: 'pointer'
+              }}
+            >
+              Get Started
+            </button>
+          </div>
+        )}
+
         <h2 style={{ fontSize: '14px', fontWeight: '700', color: '#666', letterSpacing: '1px', marginBottom: '15px' }}>MY TICKETS</h2>
         
         {tickets.length === 0 ? (
