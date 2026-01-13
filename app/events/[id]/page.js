@@ -20,7 +20,8 @@ import {
   Navigation,
   Car
 } from 'lucide-react';
-
+// Add this to your state declarations at the top
+const [ticket, setTicket] = useState(null);
 /**
  * LUXURY MAP COMPONENT
  * Dynamically imported to prevent Hydration errors (Error #321)
