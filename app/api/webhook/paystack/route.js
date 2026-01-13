@@ -1,3 +1,6 @@
+// FILE: app/api/webhooks/paystack/route.js
+// REPLACE your webhook with this version that tracks reseller sales
+
 import { createClient } from '@supabase/supabase-js';
 import QRCode from 'qrcode';
 import { Resend } from 'resend';
@@ -6,7 +9,7 @@ import crypto from 'crypto';
 export const dynamic = 'force-dynamic';
 
 export async function POST(req) {
-  console.log('--- WEBHOOK ATTEMPT START ---');
+  console.log('--- WEBHOOK RECEIVED ---');
 
   const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
   const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -25,17 +28,19 @@ export async function POST(req) {
     const signature = req.headers.get('x-paystack-signature');
 
     if (hash !== signature) {
-      console.error('WEBHOOK ERROR: Signature Mismatch.');
+      console.error('❌ WEBHOOK: Invalid signature');
       return new Response('Unauthorized', { status: 401 });
     }
 
     const body = JSON.parse(bodyText);
+    
     if (body.event !== 'charge.success') {
+      console.log('Ignoring event:', body.event);
       return new Response('OK', { status: 200 });
     }
 
     const { reference, metadata, customer, amount } = body.data;
-    console.log(`WEBHOOK: Processing Ref ${reference} for ${customer?.email}`);
+    console.log(`Processing payment: ${reference} for ${customer?.email}`);
 
     // 2. IDEMPOTENCY CHECK
     const { data: existing } = await supabase
@@ -45,12 +50,11 @@ export async function POST(req) {
       .maybeSingle();
 
     if (existing) {
-      console.log('WEBHOOK: Ticket already exists. Skipping.');
+      console.log('✅ Ticket already exists, skipping');
       return new Response('Already Processed', { status: 200 });
     }
 
-    // 3. SMART METADATA EXTRACTION
-    // We check root, then custom_fields to ensure we get the tier_id
+    // 3. EXTRACT tier_id
     let tier_id = metadata?.tier_id;
     
     if (!tier_id && metadata?.custom_fields) {
@@ -59,11 +63,11 @@ export async function POST(req) {
     }
 
     if (!tier_id) {
-      console.error('WEBHOOK ERROR: No tier_id found in metadata. Body:', JSON.stringify(metadata));
-      return new Response('Missing Metadata', { status: 400 });
+      console.error('❌ WEBHOOK: No tier_id in metadata');
+      return new Response('Missing tier_id', { status: 400 });
     }
 
-    // 4. FETCH AUTHORITATIVE DATA
+    // 4. FETCH TIER DATA
     const { data: tier, error: tierErr } = await supabase
       .from('ticket_tiers')
       .select('*, events(*)')
@@ -71,11 +75,11 @@ export async function POST(req) {
       .single();
 
     if (tierErr || !tier) {
-      console.error('WEBHOOK ERROR: Tier ID not in DB:', tier_id);
+      console.error('❌ WEBHOOK: Tier not found:', tier_id);
       return new Response('Tier Not Found', { status: 400 });
     }
 
-    // 5. QR GENERATION & STORAGE
+    // 5. GENERATE QR CODE
     const ticketNumber = `OUST-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
     let qrUrl = null;
 
@@ -95,11 +99,11 @@ export async function POST(req) {
         qrUrl = publicUrl.publicUrl;
       }
     } catch (e) {
-      console.error('WEBHOOK: QR Process failed:', e.message);
+      console.error('QR generation failed:', e.message);
     }
 
-    // 6. DATABASE INSERT
-    console.log('WEBHOOK: Inserting ticket...');
+    // 6. CREATE TICKET
+    console.log('Creating ticket...');
     const { data: inserted, error: insertErr } = await supabase
       .from('tickets')
       .insert({
@@ -119,14 +123,48 @@ export async function POST(req) {
       .single();
 
     if (insertErr) {
-      console.error('WEBHOOK INSERT FAILED:', insertErr);
+      console.error('❌ Database insert failed:', insertErr);
       return new Response('Database Error', { status: 500 });
     }
 
-    // 7. PAYOUT TRACKING (Calculates your 5% commission)
+    console.log('✅ Ticket created:', inserted.id);
+
+    // 7. PROCESS RESELLER SALE (if applicable)
+    const isResellerPurchase = metadata?.is_reseller_purchase;
+    const eventResellerId = metadata?.event_reseller_id;
+    const resellerCommission = metadata?.reseller_commission;
+
+    if (isResellerPurchase && eventResellerId && resellerCommission) {
+      console.log('💰 Processing reseller sale...');
+
+      // Record the sale
+      await supabase.from('reseller_sales').insert({
+        event_reseller_id: eventResellerId,
+        ticket_ref: reference,
+        amount: amount / 100,
+        commission_earned: Number(resellerCommission),
+        paid: false // Will be paid out later
+      });
+
+      // Update reseller stats
+      await supabase.rpc('increment_reseller_sale', {
+        link_id: eventResellerId,
+        commission_amt: Number(resellerCommission)
+      });
+
+      console.log('✅ Reseller sale recorded:', resellerCommission);
+    }
+
+    // 8. ORGANIZER PAYOUT TRACKING
     const amountGHS = amount / 100;
-    const platformFee = amountGHS * 0.05;
-    const organizerAmount = amountGHS - platformFee;
+    const basePrice = metadata?.base_price || amountGHS;
+    const platformFee = basePrice * 0.05;
+    
+    // Organizer gets: base price - platform fee (if reseller purchase)
+    // or total - platform fee (if direct purchase)
+    const organizerAmount = isResellerPurchase 
+      ? basePrice - platformFee 
+      : amountGHS - platformFee;
 
     await supabase.from('payouts').insert({
       organizer_id: tier.events?.organizer_profile_id,
@@ -137,9 +175,7 @@ export async function POST(req) {
       reference: reference
     });
 
-    console.log('WEBHOOK SUCCESS: Ticket Created', inserted.id);
-
-    // 8. EMAIL DELIVERY
+    // 9. SEND EMAIL
     if (RESEND_API_KEY) {
       const resend = new Resend(RESEND_API_KEY);
       await resend.emails.send({
@@ -156,15 +192,16 @@ export async function POST(req) {
               <p style="font-weight: bold; font-size: 18px; margin-top: 10px;">${ticketNumber}</p>
             </div>
             <p style="font-size: 12px; color: #666;">Tier: ${tier.name}</p>
+            ${isResellerPurchase ? '<p style="font-size: 11px; color: #999;">Purchased via affiliate partner</p>' : ''}
           </div>
         `
-      }).catch(e => console.error('Email Error:', e.message));
+      }).catch(e => console.error('Email error:', e.message));
     }
 
     return new Response('Success', { status: 200 });
 
   } catch (err) {
-    console.error('WEBHOOK CRITICAL SYSTEM ERROR:', err.message);
+    console.error('❌ WEBHOOK ERROR:', err.message);
     return new Response('Internal Error', { status: 500 });
   }
 }
