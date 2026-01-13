@@ -21,13 +21,11 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-geosearch/dist/geosearch.css';
 import dynamic from "next/dynamic";
-
+import { useMap, useMapEvents } from 'react-leaflet';
 // --- DYNAMIC LEAFLET COMPONENTS ---
 const MapContainer = dynamic(() => import('react-leaflet').then(mod => mod.MapContainer), { ssr: false });
 const TileLayer = dynamic(() => import('react-leaflet').then(mod => mod.TileLayer), { ssr: false });
 const Marker = dynamic(() => import('react-leaflet').then(mod => mod.Marker), { ssr: false });
-const useMapEvents = dynamic(() => import('react-leaflet').then(mod => mod.useMapEvents), { ssr: false });
-const useMap = dynamic(() => import('react-leaflet').then(mod => mod.useMap), { ssr: false });
 
 // Safely import GeoSearch for client-side only
 let GeoSearchControl, OpenStreetMapProvider;
@@ -55,47 +53,71 @@ const getLuxuryIcon = () => {
 };
 
 // Location Picker Logic
+// Location Picker Logic
 const MapLogic = ({ lat, lng, setEventData }) => {
-  const map = useMap();
+  const map = useMap(); // Now correctly uses the hook from the import
 
   // 1. Click to Place Pin
   useMapEvents({
     click(e) {
       setEventData(prev => ({ ...prev, lat: e.latlng.lat, lng: e.latlng.lng }));
+      map.flyTo(e.latlng, map.getZoom()); // Smooth animation to click
     },
   });
 
   // 2. Search Bar Integration
   useEffect(() => {
-    if (!GeoSearchControl || !OpenStreetMapProvider) return;
-    
-    const provider = new OpenStreetMapProvider();
-    const searchControl = new GeoSearchControl({
-      provider,
-      style: 'bar',
-      showMarker: false,
-      retainZoomLevel: false,
-      animateZoom: true,
-      searchLabel: 'Search venue in Ghana...',
-      classNames: { container: 'luxury-search-container' }
-    });
+    // Dynamically require GeoSearch to avoid SSR issues
+    const setupSearch = async () => {
+      if (typeof window === 'undefined') return;
 
-    map.addControl(searchControl);
-    map.on('geosearch/showlocation', (result) => {
-      setEventData(prev => ({
-        ...prev,
-        location: result.location.label,
-        lat: result.location.y,
-        lng: result.location.x
-      }));
-    });
+      try {
+        // Load the library dynamically
+        const { GeoSearchControl, OpenStreetMapProvider } = await import('leaflet-geosearch');
+        
+        const provider = new OpenStreetMapProvider();
+        const searchControl = new GeoSearchControl({
+          provider,
+          style: 'bar',
+          showMarker: false,
+          retainZoomLevel: false,
+          animateZoom: true,
+          searchLabel: 'Search venue in Ghana...',
+          classNames: { 
+            container: 'luxury-search-container',
+            button: 'luxury-search-btn',
+            input: 'luxury-search-input'
+          }
+        });
 
-    return () => map.removeControl(searchControl);
+        map.addControl(searchControl);
+        
+        const handleSearch = (result) => {
+           setEventData(prev => ({
+            ...prev,
+            location: result.location.label,
+            lat: result.location.y,
+            lng: result.location.x
+          }));
+        };
+
+        map.on('geosearch/showlocation', handleSearch);
+
+        // Cleanup
+        return () => {
+          map.removeControl(searchControl);
+          map.off('geosearch/showlocation', handleSearch);
+        };
+      } catch (error) {
+        console.error("Search module failed to load", error);
+      }
+    };
+
+    setupSearch();
   }, [map, setEventData]);
 
   return null;
 };
-
 /**
  * CREATE EVENT COMPONENT
  * Features:
