@@ -46,51 +46,56 @@ export async function POST(req) {
     const amountInPesewas = Math.round(tier.price * 100);
     
     // 3. Calculate 5% Commission (Transaction Fee)
-    // If ticket is 100 GHS, commission is 5 GHS (500 Pesewas)
     const commissionInPesewas = Math.round(amountInPesewas * 0.05);
 
-    // 4. Initialize Paystack with Logic for Splitting
+    // 4. Initialize Paystack Payload
+    // CRITICAL: metadata must be a flat object with custom_fields as an array inside it
     const paystackPayload = {
       email: email.trim(),
       amount: amountInPesewas,
       currency: "GHS",
-      callback_url: `${process.env.NEXT_PUBLIC_SITE_URL}/verify-payment`, // Redirect after popup closes
-      // In app/api/checkout/secure-session/route.js
-metadata: {
+      callback_url: `${process.env.NEXT_PUBLIC_SITE_URL}/verify-payment`,
+      metadata: {
         type: 'TICKET_PURCHASE', 
-        event_id,
-        tier_id,
+        event_id: event_id,
+        tier_id: tier_id,
         tier_name: tier.name,
         guest_email: email,       
-        guest_name,
+        guest_name: guest_name || "Valued Guest",
         reseller_code: reseller_code || "DIRECT",
-        // This metadata is CRITICAL for your webhook later
+        // Redundant storage for the webhook's "Smart Extraction" logic
         custom_fields: [
-      {
-        display_name: "Tier ID",
-        variable_name: "tier_id",
-        value: tier_id
-      },
-      {
-        display_name: "Ticket Type",
-        variable_name: "type",
-        value: "TICKET_PURCHASE"
-      }
-    ]
+          {
+            display_name: "Tier ID",
+            variable_name: "tier_id",
+            value: tier_id
+          },
+          {
+            display_name: "Ticket Type",
+            variable_name: "type",
+            value: "TICKET_PURCHASE"
+          },
+          {
+            display_name: "Event Title",
+            variable_name: "event_title",
+            value: tier.events?.title
+          }
+        ]
       }
     };
 
-    // If a subaccount exists, we apply the split
+    // 5. Apply Split Logic
     if (subaccount) {
       paystackPayload.subaccount = subaccount;
       paystackPayload.transaction_charge = commissionInPesewas; 
-      paystackPayload.bearer = "subaccount"; // Organizer pays the Paystack fee from their share
+      paystackPayload.bearer = "subaccount"; // Organizer pays the Paystack fee
     }
 
+    // 6. Initialize Transaction
     const paystackRes = await fetch('https://api.paystack.co/transaction/initialize', {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
+        'Authorization': `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(paystackPayload),
@@ -103,7 +108,7 @@ metadata: {
       return NextResponse.json({ error: result.message }, { status: 400 });
     }
 
-    // Return everything needed for the frontend "setup" object
+    // 7. Return to Frontend
     return NextResponse.json({ 
       access_code: result.data.access_code,
       amount: amountInPesewas,
