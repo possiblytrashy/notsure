@@ -269,66 +269,62 @@ const loadPaystackScript = () => {
 };
 
 
+// page.js
 const handlePurchase = async (e) => {
-    if (e && e.preventDefault) e.preventDefault();
-    
-    if (!guestEmail || !guestEmail.includes('@')) {
-      alert("Luxury Access requires a valid email.");
+  if (e && e.preventDefault) e.preventDefault();
+  
+  if (!guestEmail || !guestEmail.includes('@')) {
+    alert("Luxury Access requires a valid email.");
+    return;
+  }
+
+  setIsProcessing(true);
+
+  try {
+    // 1. Initialize the session on your backend
+    const res = await fetch('/api/checkout/secure-session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        event_id: id,
+        tier_id: selectedTier,
+        email: guestEmail.trim(), // Trimming here for safety
+        guest_name: guestName,
+        reseller_code: refCode || "DIRECT"
+      })
+    });
+
+    const data = await res.json();
+
+    if (!data.access_code) {
+      alert(`Concierge Error: ${data.error || "Secure session failed"}`);
+      setIsProcessing(false);
       return;
     }
 
-    setIsProcessing(true);
+    const PaystackPop = await loadPaystackScript();
 
-    try {
-      // 1. Fetch the Secure Session
-      const res = await fetch('/api/checkout/secure-session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          event_id: id,
-          tier_id: selectedTier,
-          email: guestEmail.trim(),
-          guest_name: guestName,
-          reseller_code: refCode || "DIRECT"
-        })
-      });
-
-      const data = await res.json();
+    // 2. Setup with ONLY the access_code
+    // Passing email/amount again here often causes the "missing email" error
+    const handler = PaystackPop.setup({
+      key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
+      access_code: data.access_code, 
       
-      // DEBUG: If this is undefined, the backend failed
-      console.log("RECEIVED ACCESS CODE:", data.access_code);
-
-      if (!data.access_code) {
-        throw new Error(data.error || "Failed to generate access code");
+      callback: function (response) {
+        setPaymentSuccess({ reference: response.reference });
+      },
+      onClose: function () {
+        setIsProcessing(false);
       }
+    });
 
-      const PaystackPop = await loadPaystackScript();
-      
-      // 2. THE CORRECT SETUP
-      // When using an access_code, do NOT pass email, amount, or currency here.
-      // Those are already locked into the access_code on Paystack's servers.
-      const handler = PaystackPop.setup({
-        key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
-        access_code: data.access_code,
-        callback: function (response) {
-          console.log("✅ PAYMENT SUCCESS:", response);
-          setPaymentSuccess({
-            reference: response.reference
-          });
-        },
-        onClose: function () {
-          setIsProcessing(false);
-        }
-      });
+    handler.openIframe();
 
-      handler.openIframe();
-
-    } catch (err) {
-      console.error("Initialization Error:", err);
-      alert(`Concierge Error: ${err.message}`);
-      setIsProcessing(false);
-    }
-  };
+  } catch (err) {
+    console.error("Initialization Error:", err);
+    setIsProcessing(false);
+  }
+};
   const handleShare = async () => {
     const shareUrl = window.location.href;
     if (navigator.share) {
