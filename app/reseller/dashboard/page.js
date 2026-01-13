@@ -91,6 +91,10 @@ export default function ResellerDashboard() {
     router.push('/login');
   };
 
+  const navigateToEvents = () => {
+    router.push('/reseller/events');
+  };
+
   if (loading) {
     return (
       <div style={styles.loadingScreen}>
@@ -166,7 +170,12 @@ export default function ResellerDashboard() {
 
       {/* Affiliate Links */}
       <div style={styles.section}>
-        <h2 style={styles.sectionTitle}>Your Affiliate Links</h2>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+          <h2 style={styles.sectionTitle}>Your Affiliate Links</h2>
+          <button onClick={navigateToEvents} style={styles.addEventBtn}>
+            + Browse Events
+          </button>
+        </div>
         
         {links.length === 0 ? (
           <p style={styles.emptyState}>No affiliate links yet. Contact organizers to get links for their events.</p>
@@ -458,6 +467,16 @@ const styles = {
     border: 'none',
     padding: '14px 30px',
     borderRadius: '12px',
+    fontWeight: '800',
+    cursor: 'pointer'
+  },
+  addEventBtn: {
+    background: '#CDa434',
+    color: '#000',
+    border: 'none',
+    padding: '10px 20px',
+    borderRadius: '12px',
+    fontSize: '14px',
     fontWeight: '800',
     cursor: 'pointer'
   }
