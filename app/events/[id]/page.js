@@ -269,59 +269,89 @@ const loadPaystackScript = () => {
 };
 
 
-// page.js
+// Replace your handlePurchase function with this fixed version
+
 const handlePurchase = async (e) => {
   if (e && e.preventDefault) e.preventDefault();
   
+  // Validation
   if (!guestEmail || !guestEmail.includes('@')) {
     alert("Luxury Access requires a valid email.");
+    return;
+  }
+
+  if (!selectedTier) {
+    alert("Please select a ticket tier.");
     return;
   }
 
   setIsProcessing(true);
 
   try {
-    // 1. Initialize the session on your backend
+    // 1. Initialize secure session on backend
     const res = await fetch('/api/checkout/secure-session', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         event_id: id,
         tier_id: selectedTier,
-        email: guestEmail.trim(), // Trimming here for safety
-        guest_name: guestName,
+        email: guestEmail.trim().toLowerCase(), // Normalize
+        guest_name: guestName.trim() || 'Guest',
         reseller_code: refCode || "DIRECT"
       })
     });
 
     const data = await res.json();
 
-    if (!data.access_code) {
-      alert(`Concierge Error: ${data.error || "Secure session failed"}`);
+    if (!res.ok || !data.access_code) {
+      alert(`Payment Error: ${data.error || "Session initialization failed"}`);
       setIsProcessing(false);
       return;
     }
 
+    console.log("Paystack session initialized:", data.reference);
+
+    // 2. Load Paystack script
     const PaystackPop = await loadPaystackScript();
 
-    // 2. Setup with ONLY the access_code
-    // Passing email/amount again here often causes the "missing email" error
+    // 3. CRITICAL: Use ONLY access_code
+    // Do NOT pass email, amount, or other parameters
+    // They are already set server-side
     const handler = PaystackPop.setup({
       key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
-      access_code: data.access_code, 
+      access_code: data.access_code,
+      
+      onSuccess: function (response) {
+        console.log("Payment successful:", response.reference);
+        setPaymentSuccess({ 
+          reference: response.reference,
+          customer: guestName || guestEmail,
+          tier: activeTier?.name || 'Ticket'
+        });
+      },
       
       callback: function (response) {
-        setPaymentSuccess({ reference: response.reference });
+        // This is called after successful payment
+        console.log("Payment callback:", response.reference);
+        setPaymentSuccess({ 
+          reference: response.reference,
+          customer: guestName || guestEmail,
+          tier: activeTier?.name || 'Ticket'
+        });
       },
+      
       onClose: function () {
+        console.log("Payment window closed");
         setIsProcessing(false);
       }
     });
 
+    // 4. Open payment modal
     handler.openIframe();
 
   } catch (err) {
-    console.error("Initialization Error:", err);
+    console.error("Payment initialization error:", err);
+    alert("An error occurred. Please try again.");
     setIsProcessing(false);
   }
 };
