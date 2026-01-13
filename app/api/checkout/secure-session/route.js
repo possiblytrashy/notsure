@@ -57,11 +57,11 @@ export async function POST(req) {
 
     // 3. Calculate Final Price (with reseller markup if applicable)
     let finalPrice = Number(tier.price);
-    const isResellerPurchase = reseller_code && reseller_code !== "DIRECT";
+    //const isResellerPurchase = reseller_code && reseller_code !== "DIRECT";
     
-    if (isResellerPurchase) {
-      finalPrice = finalPrice * 1.10; // 10% markup
-    }
+    //if (isResellerPurchase) {
+     // finalPrice = finalPrice * 1.10; // 10% markup
+   // }
 
     const amountInPesewas = Math.round(finalPrice * 100);
     const commissionInPesewas = Math.round(amountInPesewas * 0.05); // 5% commission
@@ -80,7 +80,7 @@ export async function POST(req) {
         tier_id: tier_id,
         guest_email: normalizedEmail,
         guest_name: guest_name || 'Guest',
-        reseller_code: reseller_code || "DIRECT",
+        //reseller_code: reseller_code || "DIRECT",
         custom_fields: [
           {
             display_name: "Event",
