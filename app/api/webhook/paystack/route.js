@@ -6,7 +6,6 @@ import crypto from 'crypto';
 export const dynamic = 'force-dynamic';
 
 function safeLog(...args) {
-  // small helper to keep logs unified
   console.log('[WEBHOOK]', ...args);
 }
 
@@ -22,7 +21,7 @@ function formatSupabaseError(err) {
 }
 
 export async function POST(req) {
-  // Validate ENV early (fail fast).
+  // Validate ENV
   const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
   const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
   const PAYSTACK_SECRET_KEY = process.env.PAYSTACK_SECRET_KEY;
@@ -30,7 +29,7 @@ export async function POST(req) {
   const RESEND_ADMIN_EMAIL = process.env.RESEND_ADMIN_EMAIL || null;
 
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-    safeLog('Missing Supabase server env vars (SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY).');
+    safeLog('Missing Supabase server env vars.');
     return new Response(JSON.stringify({ error: 'Server misconfiguration: missing Supabase env vars' }), { status: 500 });
   }
   if (!PAYSTACK_SECRET_KEY) {
@@ -38,7 +37,6 @@ export async function POST(req) {
     return new Response(JSON.stringify({ error: 'Server misconfiguration: missing PAYSTACK_SECRET_KEY' }), { status: 500 });
   }
 
-  // create supabase with server key (service role)
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, { auth: { persistSession: false } });
   const resend = RESEND_API_KEY ? new Resend(RESEND_API_KEY) : null;
 
@@ -46,7 +44,7 @@ export async function POST(req) {
     const bodyText = await req.text();
     safeLog('Incoming webhook body len:', bodyText?.length ?? 0);
 
-    // verify signature
+    // Verify signature
     const hash = crypto.createHmac('sha512', PAYSTACK_SECRET_KEY).update(bodyText).digest('hex');
     const signature = req.headers.get('x-paystack-signature') || req.headers.get('X-Paystack-Signature');
     safeLog('Computed sig:', hash, 'Incoming sig:', signature);
@@ -66,31 +64,27 @@ export async function POST(req) {
 
     safeLog('Event type:', body.event);
 
-    // only process charge.success
+    // Only process charge.success
     if (body.event !== 'charge.success') {
       safeLog('Ignored event:', body.event);
       return new Response(JSON.stringify({ ok: true, message: 'Ignored event' }), { status: 200 });
     }
 
-    // read core fields
     const reference = body.data?.reference;
-    const amountPaid = (typeof body.data?.amount === 'number') ? body.data.amount / 100 : null;
+    const amountPaid = typeof body.data?.amount === 'number' ? body.data.amount / 100 : null;
     const email = body.data?.customer?.email;
     const metadata = body.data?.metadata || {};
 
     safeLog('reference:', reference, 'amountPaid:', amountPaid, 'email:', email, 'metadata:', metadata);
 
-    // minimal validation
     if (!reference) {
       safeLog('Missing reference in payload');
       return new Response(JSON.stringify({ error: 'Missing reference' }), { status: 400 });
     }
 
-    // parse metadata (we'll NOT trust FKs from metadata)
     const {
       type,
       tier_id: meta_tier_id,
-      event_id: meta_event_id,
       guest_name,
       guest_email,
       reseller_code,
@@ -99,7 +93,7 @@ export async function POST(req) {
       candidate_id
     } = metadata;
 
-    // CASE A: VOTING
+    // -------- CASE A: VOTE --------
     if (type === 'VOTE' || candidate_id) {
       safeLog('Processing VOTE type');
       try {
@@ -110,7 +104,6 @@ export async function POST(req) {
         });
         if (rpcError) {
           safeLog('RPC increment_vote error:', formatSupabaseError(rpcError));
-          // return 200 so Paystack doesn't retry endlessly — we logged error
           return new Response(JSON.stringify({ ok: true, message: 'Vote RPC error logged' }), { status: 200 });
         }
 
@@ -134,11 +127,11 @@ export async function POST(req) {
       }
     }
 
-    // CASE B: TICKET PURCHASE
+    // -------- CASE B: TICKET PURCHASE --------
     if (type === 'TICKET_PURCHASE' || meta_tier_id) {
       safeLog('Processing TICKET_PURCHASE');
 
-      // idempotency: check existing by reference
+      // Idempotency
       const { data: existingTicket, error: existingErr } = await supabase
         .from('tickets')
         .select('id, reference')
@@ -154,13 +147,12 @@ export async function POST(req) {
         return new Response(JSON.stringify({ ok: true, message: 'Already processed' }), { status: 200 });
       }
 
-      // Must have a tier_id in metadata (from your frontend init). If missing, fail.
       if (!meta_tier_id) {
         safeLog('No tier_id in metadata — cannot continue');
         return new Response(JSON.stringify({ error: 'Missing tier_id in metadata' }), { status: 400 });
       }
 
-      // Fetch authoritative tier info (derive event_id from DB)
+      // Fetch authoritative tier info
       const { data: tierData, error: tierError } = await supabase
         .from('ticket_tiers')
         .select(`
@@ -204,10 +196,10 @@ export async function POST(req) {
       const organizerAmount = basePrice * 0.95;
       const resellerCommission = amountPaid > basePrice ? amountPaid - basePrice : 0;
 
-      // Generate ticket number and QR (QR errors are non-fatal)
+      // Generate ticket number & QR
       const ticketNumber = `OUST-${crypto.randomBytes(4).toString('hex').toUpperCase()}`;
-
       let qrUrl = null;
+
       try {
         const qrDataUrl = await QRCode.toDataURL(`TICKET:${ticketNumber}|REF:${reference}`, { width: 400, margin: 2 });
         const qrBuffer = Buffer.from(qrDataUrl.split(',')[1], 'base64');
@@ -227,7 +219,6 @@ export async function POST(req) {
         safeLog('QR generation/upload failed (non-fatal):', err.message || err);
       }
 
-      // Insert ticket — return the inserted row so we can log it
       const insertPayload = {
         event_id: realEventId,
         tier_id: realTierId,
@@ -253,13 +244,12 @@ export async function POST(req) {
 
       if (insertErr) {
         safeLog('Ticket insert error:', formatSupabaseError(insertErr));
-        // If a foreign key or unique violation occurs, this will surface here.
         return new Response(JSON.stringify({ error: 'Ticket insert failed', details: formatSupabaseError(insertErr) }), { status: 500 });
       }
 
       safeLog('Ticket inserted:', inserted?.id || inserted);
 
-      // Reseller: record sale (non-fatal)
+      // Reseller logic (non-fatal)
       if (reseller_code && reseller_code !== 'DIRECT') {
         try {
           const { error: rpcErr } = await supabase.rpc('record_reseller_sale', {
@@ -273,7 +263,6 @@ export async function POST(req) {
           safeLog('record_reseller_sale threw (non-fatal):', err);
         }
 
-        // attempt immediate payout (safe)
         try {
           await attemptAutoResellerPayout(supabase, reseller_code);
         } catch (err) {
@@ -281,7 +270,7 @@ export async function POST(req) {
         }
       }
 
-      // Log payout entry (non-fatal)
+      // Payout log (non-fatal)
       try {
         const { error: payoutsErr } = await supabase.from('payouts').insert({
           organizer_id: tierData.events?.organizer_profile_id,
@@ -312,15 +301,13 @@ export async function POST(req) {
         safeLog('Skipping send email - resend not configured or admin email missing.');
       }
 
-      // success
       return new Response(JSON.stringify({ ok: true, inserted_id: inserted?.id || null }), { status: 200 });
     }
 
-    // unhandled
     return new Response(JSON.stringify({ ok: false, message: 'Unhandled event type' }), { status: 400 });
+
   } catch (err) {
     safeLog('CRITICAL WEBHOOK ERROR (catch-all):', err);
-    // include stack in logs only — avoid returning stack to external services
     return new Response(JSON.stringify({ error: 'Webhook server error', details: err?.message || String(err) }), { status: 500 });
   }
 }
@@ -349,59 +336,4 @@ async function attemptAutoResellerPayout(supabase, resellerCode) {
       .eq('unique_code', resellerCode)
       .maybeSingle();
 
-    if (erError || !eventReseller) {
-      safeLog('attemptAutoResellerPayout: no eventReseller or error:', formatSupabaseError(erError));
-      return;
-    }
-
-    const reseller = eventReseller.resellers;
-    if (!reseller || !reseller.payout_recipient_code) return;
-    if (reseller.total_earned < reseller.payout_threshold) return;
-
-    const { data: unpaidSales } = await supabase
-      .from('reseller_sales')
-      .select('*')
-      .eq('event_reseller_id', eventReseller.id)
-      .eq('paid', false);
-
-    if (!unpaidSales?.length) return;
-
-    const payoutAmount = unpaidSales.reduce((sum, s) => sum + Number(s.commission_earned || 0), 0);
-    if (payoutAmount <= 0) return;
-
-    const transferRes = await fetch('https://api.paystack.co/transfer', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        source: 'balance',
-        amount: Math.round(payoutAmount * 100),
-        recipient: reseller.payout_recipient_code,
-        reason: 'Automatic reseller payout',
-      }),
-    });
-
-    const transferJson = await transferRes.json();
-    if (!transferJson.status) {
-      safeLog('Paystack transfer failed (attemptAutoResellerPayout):', transferJson);
-      return;
-    }
-
-    await supabase
-      .from('reseller_sales')
-      .update({ paid: true, payout_reference: transferJson.data.reference })
-      .eq('event_reseller_id', eventReseller.id)
-      .eq('paid', false);
-
-    await supabase
-      .from('resellers')
-      .update({ total_earned: 0, last_payout_at: new Date().toISOString() })
-      .eq('id', reseller.id);
-
-    safeLog('attemptAutoResellerPayout: success', transferJson.data.reference);
-  } catch (err) {
-    safeLog('attemptAutoResellerPayout: error', err);
-  }
-}
+    if (erError || !eve
