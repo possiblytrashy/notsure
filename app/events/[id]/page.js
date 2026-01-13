@@ -269,84 +269,66 @@ const loadPaystackScript = () => {
 };
 
 
-  const handlePurchase = async (e) => {
-  if (e && e.preventDefault) e.preventDefault();
-  
-  if (!guestEmail || !guestEmail.includes('@')) {
-    alert("Luxury Access requires a valid email.");
-    return;
-  }
-
-  setIsProcessing(true);
-
-  try {
-    // 1. Get the secure session from your backend
-    const res = await fetch('/api/checkout/secure-session', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        event_id: id,
-        tier_id: selectedTier,
-        email: guestEmail.trim(),
-        guest_name: guestName,
-        reseller_code: refCode || "DIRECT"
-      })
-    });
-
-    const data = await res.json();
-    console.log("FRONTEND_RECEIVE_CHECK:", data.access_code);
-
-    if (!data.access_code) {
-      alert(`Concierge Error: ${data.error || "Secure session failed"}`);
-      setIsProcessing(false);
+const handlePurchase = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    
+    if (!guestEmail || !guestEmail.includes('@')) {
+      alert("Luxury Access requires a valid email.");
       return;
     }
 
-    // 2. Calculate amount for the frontend setup (Must match backend exactly)
-    // If your price is 50 GHS, this becomes 5000
-    const displayPrice = getDisplayPrice(activeTier.price);
-    const amountInPesewas = Math.round(parseFloat(displayPrice) * 100);
+    setIsProcessing(true);
 
-    const PaystackPop = await loadPaystackScript();
-    // Inside handlePurchase, right before handler.openIframe()
-const currentTierRef = activeTier; // Capture the current tier object
+    try {
+      // 1. Fetch the Secure Session
+      const res = await fetch('/api/checkout/secure-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          event_id: id,
+          tier_id: selectedTier,
+          email: guestEmail.trim(),
+          guest_name: guestName,
+          reseller_code: refCode || "DIRECT"
+        })
+      });
 
-const handler = PaystackPop.setup({
-  key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
-  access_code: data.access_code,
-  email: guestEmail.trim(),
-  amount: amountInPesewas,
-  currency: "GHS",
+      const data = await res.json();
+      
+      // DEBUG: If this is undefined, the backend failed
+      console.log("RECEIVED ACCESS CODE:", data.access_code);
 
-  callback: function (response) {
-    console.log("✅ PAYSTACK CALLBACK FIRED:", response);
+      if (!data.access_code) {
+        throw new Error(data.error || "Failed to generate access code");
+      }
 
-    if (!response?.reference) {
-      alert("Payment succeeded but reference missing");
+      const PaystackPop = await loadPaystackScript();
+      
+      // 2. THE CORRECT SETUP
+      // When using an access_code, do NOT pass email, amount, or currency here.
+      // Those are already locked into the access_code on Paystack's servers.
+      const handler = PaystackPop.setup({
+        key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
+        access_code: data.access_code,
+        callback: function (response) {
+          console.log("✅ PAYMENT SUCCESS:", response);
+          setPaymentSuccess({
+            reference: response.reference
+          });
+        },
+        onClose: function () {
+          setIsProcessing(false);
+        }
+      });
+
+      handler.openIframe();
+
+    } catch (err) {
+      console.error("Initialization Error:", err);
+      alert(`Concierge Error: ${err.message}`);
       setIsProcessing(false);
-      return;
     }
-
-    setPaymentSuccess({
-      reference: response.reference
-    });
-  },
-
-  onClose: function () {
-    console.log("❌ Paystack closed");
-    setIsProcessing(false);
-  }
-});
-
-handler.openIframe();
-
-  } catch (err) {
-    console.error("Initialization Error:", err);
-    alert(`Concierge Error: ${err.message}`);
-    setIsProcessing(false);
-  }
-};
-
+  };
   const handleShare = async () => {
     const shareUrl = window.location.href;
     if (navigator.share) {
