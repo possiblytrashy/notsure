@@ -57,13 +57,20 @@ export async function POST(req) {
       callback_url: `${process.env.NEXT_PUBLIC_SITE_URL}/verify-payment`, // Redirect after popup closes
       // In app/api/checkout/secure-session/route.js
 metadata: {
-  type: 'TICKET_PURCHASE', // Ensure this matches the IF statement in your webhook
-  event_id: event_id,
-  tier_id: tier_id,
-  guest_email: email,       
-  guest_name: guest_name,
-  reseller_code: reseller_code || "DIRECT"
-}
+        type: 'TICKET_PURCHASE', 
+        event_id,
+        tier_id,
+        tier_name: tier.name,
+        guest_email: email,       
+        guest_name,
+        reseller_code: reseller_code || "DIRECT",
+        // This metadata is CRITICAL for your webhook later
+        custom_fields: [
+          { display_name: "Event", variable_name: "event_title", value: tier.events.title },
+          { display_name: "Ticket Tier", variable_name: "tier_name", value: tier.name },
+          { display_name: "Guest Name", variable_name: "guest_name", value: guest_name }
+        ]
+      }
     };
 
     // If a subaccount exists, we apply the split
