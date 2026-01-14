@@ -1,12 +1,12 @@
 // FILE: app/reseller/onboard/page.js
-// NEW FILE - Reseller onboarding with Paystack subaccount creation
+// UPDATED - Reseller onboarding with Mobile Money & Bank options
 
 "use client";
 
 import { useState, useEffect } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { useRouter } from 'next/navigation';
-import { Loader2, DollarSign, Building, CreditCard, CheckCircle } from 'lucide-react';
+import { Loader2, DollarSign, Building, CreditCard, CheckCircle, Smartphone } from 'lucide-react';
 
 export default function ResellerOnboarding() {
   const router = useRouter();
@@ -14,18 +14,29 @@ export default function ResellerOnboarding() {
   const [user, setUser] = useState(null);
   const [step, setStep] = useState(1);
   const [submitting, setSubmitting] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState('mobile_money'); // 'mobile_money' or 'bank'
 
   // Form Data
   const [formData, setFormData] = useState({
     business_name: '',
+    phone: '',
+    // Mobile Money
+    mobile_money_provider: '',
+    mobile_money_number: '',
+    // Bank Account
     bank_code: '',
     account_number: '',
-    account_name: '',
-    phone: '',
-    settlement_bank: ''
+    account_name: ''
   });
 
-  // Ghana Banks (Common ones)
+  // Ghana Mobile Money Providers
+  const mobileMoneyProviders = [
+    { code: 'mtn', name: 'MTN Mobile Money' },
+    { code: 'vod', name: 'Vodafone Cash' },
+    { code: 'tgo', name: 'AirtelTigo Money' }
+  ];
+
+  // Ghana Banks
   const banks = [
     { code: '280100', name: 'Ecobank Ghana' },
     { code: '040101', name: 'GCB Bank Limited' },
@@ -47,6 +58,11 @@ export default function ResellerOnboarding() {
         return;
       }
       setUser(user);
+
+      // Pre-fill phone from user metadata if available
+      if (user.user_metadata?.phone) {
+        setFormData(prev => ({ ...prev, phone: user.user_metadata.phone }));
+      }
 
       // Check if already a reseller
       const { data: existing } = await supabase
@@ -74,11 +90,26 @@ export default function ResellerOnboarding() {
     setSubmitting(true);
 
     try {
+      // Prepare payload based on payment method
+      const payload = {
+        business_name: formData.business_name,
+        phone: formData.phone,
+        payment_method: paymentMethod
+      };
+
+      if (paymentMethod === 'mobile_money') {
+        payload.mobile_money_provider = formData.mobile_money_provider;
+        payload.mobile_money_number = formData.mobile_money_number;
+      } else {
+        payload.settlement_bank = formData.bank_code;
+        payload.account_number = formData.account_number;
+      }
+
       // Call API to create Paystack subaccount and reseller profile
       const res = await fetch('/api/reseller/onboard', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
+        body: JSON.stringify(payload)
       });
 
       const data = await res.json();
@@ -127,7 +158,9 @@ export default function ResellerOnboarding() {
             </div>
             <div style={styles.benefit}>
               <Building size={24} color="#CDa434" />
-              <p style={styles.benefitText}>Instant payouts to your bank</p>
+              <p style={styles.benefitText}>
+                {paymentMethod === 'mobile_money' ? 'Mobile Money payouts' : 'Bank transfer payouts'}
+              </p>
             </div>
             <div style={styles.benefit}>
               <CreditCard size={24} color="#CDa434" />
@@ -151,10 +184,11 @@ export default function ResellerOnboarding() {
       <div style={styles.card}>
         <h1 style={styles.title}>Become a Reseller</h1>
         <p style={styles.subtitle}>
-          Earn 10% commission on every ticket sale. Fill in your payment details to get started.
+          Earn 10% commission on every ticket sale. Choose your preferred payment method.
         </p>
 
         <form onSubmit={handleSubmit} style={styles.form}>
+          {/* Basic Info */}
           <div style={styles.formGroup}>
             <label style={styles.label}>Business Name *</label>
             <input
@@ -181,41 +215,110 @@ export default function ResellerOnboarding() {
             />
           </div>
 
+          {/* Payment Method Selection */}
           <div style={styles.formGroup}>
-            <label style={styles.label}>Bank *</label>
-            <select
-              name="settlement_bank"
-              value={formData.settlement_bank}
-              onChange={handleChange}
-              style={styles.input}
-              required
-            >
-              <option value="">Select your bank</option>
-              {banks.map(bank => (
-                <option key={bank.code} value={bank.code}>
-                  {bank.name}
-                </option>
-              ))}
-            </select>
+            <label style={styles.label}>Payment Method *</label>
+            <div style={styles.paymentMethodGrid}>
+              <div 
+                onClick={() => setPaymentMethod('mobile_money')}
+                style={styles.paymentMethodCard(paymentMethod === 'mobile_money')}
+              >
+                <Smartphone size={24} color={paymentMethod === 'mobile_money' ? '#CDa434' : '#666'} />
+                <p style={styles.paymentMethodText}>Mobile Money</p>
+                <p style={styles.paymentMethodDesc}>MTN, Vodafone, AirtelTigo</p>
+              </div>
+
+              <div 
+                onClick={() => setPaymentMethod('bank')}
+                style={styles.paymentMethodCard(paymentMethod === 'bank')}
+              >
+                <Building size={24} color={paymentMethod === 'bank' ? '#CDa434' : '#666'} />
+                <p style={styles.paymentMethodText}>Bank Account</p>
+                <p style={styles.paymentMethodDesc}>All Ghana banks</p>
+              </div>
+            </div>
           </div>
 
-          <div style={styles.formGroup}>
-            <label style={styles.label}>Account Number *</label>
-            <input
-              type="text"
-              name="account_number"
-              value={formData.account_number}
-              onChange={handleChange}
-              placeholder="1234567890"
-              style={styles.input}
-              maxLength={15}
-              required
-            />
-          </div>
+          {/* Mobile Money Fields */}
+          {paymentMethod === 'mobile_money' && (
+            <>
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Mobile Money Provider *</label>
+                <select
+                  name="mobile_money_provider"
+                  value={formData.mobile_money_provider}
+                  onChange={handleChange}
+                  style={styles.input}
+                  required
+                >
+                  <option value="">Select provider</option>
+                  {mobileMoneyProviders.map(provider => (
+                    <option key={provider.code} value={provider.code}>
+                      {provider.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Mobile Money Number *</label>
+                <input
+                  type="tel"
+                  name="mobile_money_number"
+                  value={formData.mobile_money_number}
+                  onChange={handleChange}
+                  placeholder="0244123456"
+                  style={styles.input}
+                  maxLength={10}
+                  required
+                />
+                <p style={styles.helpText}>
+                  Enter the number registered with your mobile money account
+                </p>
+              </div>
+            </>
+          )}
+
+          {/* Bank Account Fields */}
+          {paymentMethod === 'bank' && (
+            <>
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Bank *</label>
+                <select
+                  name="bank_code"
+                  value={formData.bank_code}
+                  onChange={handleChange}
+                  style={styles.input}
+                  required
+                >
+                  <option value="">Select your bank</option>
+                  {banks.map(bank => (
+                    <option key={bank.code} value={bank.code}>
+                      {bank.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Account Number *</label>
+                <input
+                  type="text"
+                  name="account_number"
+                  value={formData.account_number}
+                  onChange={handleChange}
+                  placeholder="1234567890"
+                  style={styles.input}
+                  maxLength={15}
+                  required
+                />
+              </div>
+            </>
+          )}
 
           <div style={styles.infoBox}>
             <p style={styles.infoText}>
-              💰 Your commissions will be automatically paid to this account within 24 hours of each sale.
+              💰 Your commissions will be automatically paid to this {paymentMethod === 'mobile_money' ? 'mobile money account' : 'bank account'} within 24 hours of each sale.
             </p>
           </div>
 
@@ -307,6 +410,37 @@ const styles = {
     color: '#fff',
     outline: 'none',
     fontFamily: 'inherit'
+  },
+  helpText: {
+    fontSize: '12px',
+    color: '#666',
+    margin: '4px 0 0',
+    fontStyle: 'italic'
+  },
+  paymentMethodGrid: {
+    display: 'grid',
+    gridTemplateColumns: '1fr 1fr',
+    gap: '12px'
+  },
+  paymentMethodCard: (active) => ({
+    background: active ? '#1a1a1a' : '#0a0a0a',
+    border: active ? '2px solid #CDa434' : '1px solid #222',
+    borderRadius: '16px',
+    padding: '20px',
+    cursor: 'pointer',
+    textAlign: 'center',
+    transition: 'all 0.2s'
+  }),
+  paymentMethodText: {
+    fontSize: '14px',
+    fontWeight: '700',
+    margin: '8px 0 4px',
+    color: '#fff'
+  },
+  paymentMethodDesc: {
+    fontSize: '11px',
+    color: '#666',
+    margin: 0
   },
   infoBox: {
     background: '#1a1a1a',
