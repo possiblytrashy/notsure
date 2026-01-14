@@ -3,7 +3,6 @@
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { cookies } from 'next/headers';
 import crypto from 'crypto';
 
 export async function POST(req) {
@@ -16,24 +15,31 @@ export async function POST(req) {
       }, { status: 400 });
     }
 
-    // Get cookies for authentication
-    const cookieStore = cookies();
-    
-    // Create Supabase client with cookies
+    // Get authorization token from headers
+    const authHeader = req.headers.get('authorization');
+    if (!authHeader) {
+      return NextResponse.json({ 
+        error: 'Authorization required' 
+      }, { status: 401 });
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+
+    // Create Supabase client with the user's token
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL,
       process.env.SUPABASE_SERVICE_ROLE_KEY,
       {
-        cookies: {
-          get(name) {
-            return cookieStore.get(name)?.value;
-          },
-        },
+        global: {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }
       }
     );
 
     // Get authenticated user
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    const { data: { user }, error: userError } = await supabase.auth.getUser(token);
     
     if (userError || !user) {
       console.error('Auth error:', userError);
