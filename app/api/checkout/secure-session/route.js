@@ -1,5 +1,5 @@
 // FILE: app/api/checkout/secure-session/route.js
-// REPLACE your entire secure-session route with this
+// FIXED - Proper Paystack split configuration
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
@@ -100,7 +100,7 @@ export async function POST(req) {
     // 5. Normalize Email
     const normalizedEmail = email.trim().toLowerCase();
 
-    // 6. Build Paystack Payload with Multi-Split
+    // 6. Build Paystack Payload
     const paystackPayload = {
       email: normalizedEmail,
       amount: amountInPesewas,
@@ -136,32 +136,52 @@ export async function POST(req) {
       }
     };
 
-    // 7. Setup Multi-Split Payment
+    // 7. Configure Payment Split
     const organizerSubaccount = tier.events?.organizers?.paystack_subaccount_code;
     const resellerSubaccount = resellerData?.resellers?.paystack_subaccount_code;
 
-    // Case 1: Reseller Purchase (3-way split: Platform, Organizer, Reseller)
-    if (isResellerPurchase && resellerSubaccount && organizerSubaccount) {
-      paystackPayload.split_code = await createSplitCode(
-        tier.events.title,
-        amountInPesewas,
-        platformCommission,
-        resellerCommissionPesewas,
-        organizerSubaccount,
-        resellerSubaccount
-      );
+    // IMPORTANT: Check if organizer has a subaccount
+    if (!organizerSubaccount) {
+      console.error("❌ Organizer has no Paystack subaccount!");
+      return NextResponse.json({ 
+        error: "Event organizer payment setup incomplete. Please contact support." 
+      }, { status: 400 });
+    }
+
+    // Case 1: Reseller Purchase (3-way split)
+    if (isResellerPurchase && resellerSubaccount) {
+      // Calculate what organizer gets
+      const organizerAmount = amountInPesewas - platformCommission - resellerCommissionPesewas;
+
+      paystackPayload.subaccount = organizerSubaccount;
+      paystackPayload.transaction_charge = platformCommission; // Platform gets this
+      paystackPayload.bearer = "account"; // Platform bears Paystack fees
+      
+      // Add split for reseller
+      paystackPayload.split = {
+        type: "flat",
+        bearer_type: "account",
+        subaccounts: [
+          {
+            subaccount: resellerSubaccount,
+            share: resellerCommissionPesewas
+          }
+        ]
+      };
+
       console.log("💰 3-way split configured:", {
         total: amountInPesewas,
         platform: platformCommission,
         reseller: resellerCommissionPesewas,
-        organizer: amountInPesewas - platformCommission - resellerCommissionPesewas
+        organizer: organizerAmount
       });
     } 
-    // Case 2: Direct Purchase with Organizer Subaccount (2-way split)
-    else if (organizerSubaccount) {
+    // Case 2: Direct Purchase (2-way split)
+    else {
       paystackPayload.subaccount = organizerSubaccount;
       paystackPayload.transaction_charge = platformCommission;
-      paystackPayload.bearer = "subaccount";
+      paystackPayload.bearer = "account"; // Platform bears Paystack fees
+      
       console.log("💰 2-way split configured:", {
         total: amountInPesewas,
         platform: platformCommission,
@@ -174,7 +194,9 @@ export async function POST(req) {
       amount: amountInPesewas,
       tier: tier.name,
       isResellerPurchase,
-      resellerCode: reseller_code
+      resellerCode: reseller_code,
+      hasOrganizerSubaccount: !!organizerSubaccount,
+      hasResellerSubaccount: !!resellerSubaccount
     });
 
     // 8. Initialize Transaction with Paystack
@@ -209,52 +231,5 @@ export async function POST(req) {
       error: "Internal Server Error",
       details: err.message 
     }, { status: 500 });
-  }
-}
-
-// Helper function to create Paystack split configuration
-async function createSplitCode(eventTitle, totalAmount, platformFee, resellerFee, organizerSubaccount, resellerSubaccount) {
-  try {
-    const organizerAmount = totalAmount - platformFee - resellerFee;
-
-    const splitPayload = {
-      name: `Split for ${eventTitle}`,
-      type: "flat",
-      currency: "GHS",
-      subaccounts: [
-        {
-          subaccount: organizerSubaccount,
-          share: organizerAmount
-        },
-        {
-          subaccount: resellerSubaccount,
-          share: resellerFee
-        }
-      ],
-      bearer_type: "all-proportional",
-      bearer_subaccount: organizerSubaccount
-    };
-
-    const response = await fetch('https://api.paystack.co/split', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(splitPayload),
-    });
-
-    const result = await response.json();
-    
-    if (result.status && result.data.split_code) {
-      return result.data.split_code;
-    }
-
-    console.error("Split creation failed:", result);
-    return null;
-
-  } catch (err) {
-    console.error("Error creating split:", err);
-    return null;
   }
 }
