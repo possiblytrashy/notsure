@@ -1,8 +1,9 @@
 // FILE: app/api/reseller/onboard/route.js
-// UPDATED - Creates Paystack subaccount with Mobile Money or Bank support
+// FIXED - Properly handles authentication in API routes
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { cookies } from 'next/headers';
 
 export async function POST(req) {
   try {
@@ -45,19 +46,33 @@ export async function POST(req) {
       }, { status: 400 });
     }
 
+    // Get cookies for authentication
+    const cookieStore = cookies();
+    
+    // Create Supabase client with cookies for authentication
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.SUPABASE_SERVICE_ROLE_KEY
+      process.env.SUPABASE_SERVICE_ROLE_KEY,
+      {
+        cookies: {
+          get(name) {
+            return cookieStore.get(name)?.value;
+          },
+        },
+      }
     );
 
-    // Get current user
+    // Get authenticated user from session
     const { data: { user }, error: userError } = await supabase.auth.getUser();
     
     if (userError || !user) {
+      console.error('Auth error:', userError);
       return NextResponse.json({ 
-        error: 'Unauthorized' 
+        error: 'Please log in to continue' 
       }, { status: 401 });
     }
+
+    console.log('User authenticated:', user.email);
 
     // Check if user is already a reseller
     const { data: existing } = await supabase
@@ -109,6 +124,11 @@ export async function POST(req) {
       paystackPayload.settlement_bank = settlement_bank;
       paystackPayload.account_number = account_number;
     }
+
+    console.log('Creating Paystack subaccount with:', {
+      settlement_bank: paystackPayload.settlement_bank,
+      account_number: paystackPayload.account_number
+    });
 
     // Create Paystack Subaccount
     const paystackRes = await fetch('https://api.paystack.co/subaccount', {
@@ -174,10 +194,10 @@ export async function POST(req) {
         headers: {
           'Authorization': `Bearer ${process.env.PAYSTACK_SECRET_KEY}`
         }
-      });
+      }).catch(e => console.error('Cleanup failed:', e));
       
       return NextResponse.json({ 
-        error: 'Failed to create reseller profile' 
+        error: 'Failed to create reseller profile. Please try again.' 
       }, { status: 500 });
     }
 
@@ -195,8 +215,8 @@ export async function POST(req) {
   } catch (err) {
     console.error('Onboarding error:', err);
     return NextResponse.json({ 
-      error: 'Internal server error',
-      details: err.message 
+      error: 'Internal server error. Please try again.',
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined
     }, { status: 500 });
   }
 }
