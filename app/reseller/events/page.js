@@ -83,9 +83,21 @@ export default function ResellerEventBrowse() {
   const createLink = async (eventId) => {
     setCreating(eventId);
     try {
+      // Get session token
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        alert('Please log in to continue');
+        setCreating(null);
+        return;
+      }
+
       const res = await fetch('/api/reseller/create-my-link', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        },
         body: JSON.stringify({ event_id: eventId })
       });
 
