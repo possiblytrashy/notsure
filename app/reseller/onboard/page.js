@@ -90,6 +90,15 @@ export default function ResellerOnboarding() {
     setSubmitting(true);
 
     try {
+      // Get the session token
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        alert('Please log in to continue');
+        setSubmitting(false);
+        return;
+      }
+
       // Prepare payload based on payment method
       const payload = {
         business_name: formData.business_name,
@@ -105,10 +114,13 @@ export default function ResellerOnboarding() {
         payload.account_number = formData.account_number;
       }
 
-      // Call API to create Paystack subaccount and reseller profile
+      // Call API with authorization header
       const res = await fetch('/api/reseller/onboard', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        },
         body: JSON.stringify(payload)
       });
 
