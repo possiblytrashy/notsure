@@ -1,9 +1,8 @@
 // FILE: app/api/reseller/onboard/route.js
-// FIXED - Properly handles authentication in API routes
+// FIXED - Proper authentication with token from headers
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { cookies } from 'next/headers';
 
 export async function POST(req) {
   try {
@@ -46,29 +45,36 @@ export async function POST(req) {
       }, { status: 400 });
     }
 
-    // Get cookies for authentication
-    const cookieStore = cookies();
-    
-    // Create Supabase client with cookies for authentication
+    // Get authorization token from headers
+    const authHeader = req.headers.get('authorization');
+    if (!authHeader) {
+      return NextResponse.json({ 
+        error: 'Authorization required' 
+      }, { status: 401 });
+    }
+
+    const token = authHeader.replace('Bearer ', '');
+
+    // Create Supabase client with the user's token
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL,
       process.env.SUPABASE_SERVICE_ROLE_KEY,
       {
-        cookies: {
-          get(name) {
-            return cookieStore.get(name)?.value;
-          },
-        },
+        global: {
+          headers: {
+            Authorization: `Bearer ${token}`
+          }
+        }
       }
     );
 
-    // Get authenticated user from session
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    // Get authenticated user
+    const { data: { user }, error: userError } = await supabase.auth.getUser(token);
     
     if (userError || !user) {
       console.error('Auth error:', userError);
       return NextResponse.json({ 
-        error: 'Please log in to continue' 
+        error: 'Invalid authentication. Please log in again.' 
       }, { status: 401 });
     }
 
@@ -92,7 +98,7 @@ export async function POST(req) {
     // Build Paystack payload based on payment method
     let paystackPayload = {
       business_name: business_name,
-      percentage_charge: 10, // Reseller gets 10% of marked-up price
+      percentage_charge: 10,
       description: `Reseller: ${user.email}`,
       primary_contact_email: user.email,
       primary_contact_name: business_name,
@@ -107,28 +113,19 @@ export async function POST(req) {
 
     // Add payment-specific fields
     if (payment_method === 'mobile_money') {
-      // Map provider codes to Paystack bank codes
       const mobileMoneyBankCodes = {
-        'mtn': 'MTN',  // MTN Mobile Money
-        'vod': 'VOD',  // Vodafone Cash
-        'tgo': 'ATL'   // AirtelTigo Money
+        'mtn': 'MTN',
+        'vod': 'VOD',
+        'tgo': 'ATL'
       };
 
       paystackPayload.settlement_bank = mobileMoneyBankCodes[mobile_money_provider];
       paystackPayload.account_number = mobile_money_number;
-      
-      // Store additional info in metadata
       paystackPayload.metadata.mobile_money_provider = mobile_money_provider;
     } else {
-      // Bank account
       paystackPayload.settlement_bank = settlement_bank;
       paystackPayload.account_number = account_number;
     }
-
-    console.log('Creating Paystack subaccount with:', {
-      settlement_bank: paystackPayload.settlement_bank,
-      account_number: paystackPayload.account_number
-    });
 
     // Create Paystack Subaccount
     const paystackRes = await fetch('https://api.paystack.co/subaccount', {
@@ -143,9 +140,8 @@ export async function POST(req) {
     const paystackResult = await paystackRes.json();
 
     if (!paystackRes.ok || !paystackResult.status) {
-      console.error('Paystack subaccount creation failed:', paystackResult);
+      console.error('Paystack error:', paystackResult);
       
-      // Provide helpful error messages
       let errorMsg = 'Failed to create payment account. ';
       if (payment_method === 'mobile_money') {
         errorMsg += 'Please verify your mobile money number is correct and active.';
@@ -161,7 +157,7 @@ export async function POST(req) {
     const subaccountCode = paystackResult.data.subaccount_code;
     console.log('✅ Paystack subaccount created:', subaccountCode);
 
-    // Create Reseller Profile in Database
+    // Create Reseller Profile
     const resellerData = {
       user_id: user.id,
       paystack_subaccount_code: subaccountCode,
@@ -170,7 +166,6 @@ export async function POST(req) {
       payment_method: payment_method
     };
 
-    // Add payment-specific data
     if (payment_method === 'mobile_money') {
       resellerData.mobile_money_provider = mobile_money_provider;
       resellerData.mobile_money_number = mobile_money_number;
@@ -188,13 +183,12 @@ export async function POST(req) {
     if (insertError) {
       console.error('Database insert failed:', insertError);
       
-      // Try to delete the Paystack subaccount to avoid orphans
       await fetch(`https://api.paystack.co/subaccount/${subaccountCode}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${process.env.PAYSTACK_SECRET_KEY}`
         }
-      }).catch(e => console.error('Cleanup failed:', e));
+      }).catch(() => {});
       
       return NextResponse.json({ 
         error: 'Failed to create reseller profile. Please try again.' 
