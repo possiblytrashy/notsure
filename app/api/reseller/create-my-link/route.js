@@ -105,8 +105,8 @@ export async function POST(req) {
       }, { status: 400 });
     }
 
-    // Generate unique code
-    const uniqueCode = `${event_id.split('-')[0]}-${crypto.randomBytes(4).toString('hex')}`;
+    // Generate unique code that includes the full event ID
+    const uniqueCode = `${crypto.randomBytes(6).toString('hex')}`;
 
     // Create event_reseller link
     const { data: link, error: linkError } = await supabase
@@ -134,6 +134,7 @@ export async function POST(req) {
       link: {
         id: link.id,
         unique_code: uniqueCode,
+        // IMPORTANT: Include full event_id in URL, not just part of the code
         url: `${process.env.NEXT_PUBLIC_BASE_URL}/events/${event_id}?ref=${uniqueCode}`
       }
     });
