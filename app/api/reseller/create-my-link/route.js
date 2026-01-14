@@ -1,8 +1,9 @@
 // FILE: app/api/reseller/create-my-link/route.js
-// NEW FILE - Allows resellers to create their own links
+// FIXED - Self-service link creation with proper auth
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { cookies } from 'next/headers';
 import crypto from 'crypto';
 
 export async function POST(req) {
@@ -15,15 +16,30 @@ export async function POST(req) {
       }, { status: 400 });
     }
 
+    // Get cookies for authentication
+    const cookieStore = cookies();
+    
+    // Create Supabase client with cookies
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.SUPABASE_SERVICE_ROLE_KEY
+      process.env.SUPABASE_SERVICE_ROLE_KEY,
+      {
+        cookies: {
+          get(name) {
+            return cookieStore.get(name)?.value;
+          },
+        },
+      }
     );
 
-    // Get current user
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    // Get authenticated user
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    
+    if (userError || !user) {
+      console.error('Auth error:', userError);
+      return NextResponse.json({ 
+        error: 'Please log in to continue' 
+      }, { status: 401 });
     }
 
     // Get reseller profile
@@ -75,7 +91,11 @@ export async function POST(req) {
     if (existing) {
       return NextResponse.json({ 
         error: 'You already have a link for this event',
-        link: existing 
+        link: {
+          id: existing.id,
+          unique_code: existing.unique_code,
+          url: `${process.env.NEXT_PUBLIC_BASE_URL}/events/${event_id}?ref=${existing.unique_code}`
+        }
       }, { status: 400 });
     }
 
@@ -115,7 +135,8 @@ export async function POST(req) {
   } catch (err) {
     console.error('Create link error:', err);
     return NextResponse.json({ 
-      error: 'Internal server error' 
+      error: 'Internal server error',
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined
     }, { status: 500 });
   }
 }
