@@ -59,22 +59,13 @@ async function handleVotePurchase(body) {
       id,
       name,
       contest_id,
-      contests!inner (
+      contests:contest_id (
         id,
         title,
         vote_price,
         is_active,
         organizer_id,
-        competition_id,
-        competitions!inner (
-          id,
-          title,
-          organizer_id,
-          organizers:organizer_id (
-            id,
-            paystack_subaccount_code
-          )
-        )
+        competition_id
       )
     `)
     .eq('id', candidate_id)
@@ -87,25 +78,49 @@ async function handleVotePurchase(body) {
     }, { status: 404 });
   }
 
-  // 3. Check if voting is active
+  // 3. Fetch Competition and Organizer Details
+  const { data: competition, error: compError } = await supabase
+    .from('competitions')
+    .select(`
+      id,
+      title,
+      organizer_id
+    `)
+    .eq('id', candidate.contests.competition_id)
+    .single();
+
+  if (compError || !competition) {
+    console.error("Competition fetch error:", compError);
+    return NextResponse.json({ 
+      error: "Competition not found." 
+    }, { status: 404 });
+  }
+
+  // 4. Fetch Organizer Subaccount
+  const { data: organizer, error: orgError } = await supabase
+    .from('organizers')
+    .select('paystack_subaccount_code')
+    .eq('user_id', competition.organizer_id)
+    .single();
+
+  if (orgError || !organizer?.paystack_subaccount_code) {
+    console.error("❌ Organizer has no Paystack subaccount!");
+    console.error("Organizer fetch error:", orgError);
+    return NextResponse.json({ 
+      error: "Competition organizer payment setup incomplete. Please contact support." 
+    }, { status: 400 });
+  }
+
+  // 5. Check if voting is active
   if (!candidate.contests?.is_active) {
     return NextResponse.json({ 
       error: "Voting is currently paused for this contest." 
     }, { status: 400 });
   }
 
-  // 4. Check Organizer has Subaccount
-  const organizerSubaccount = candidate.contests?.competitions?.organizers?.paystack_subaccount_code;
-  
-  if (!organizerSubaccount) {
-    console.error("❌ Organizer has no Paystack subaccount!");
-    console.error("Debug Candidate Data:", JSON.stringify(candidate, null, 2));
-    return NextResponse.json({ 
-      error: "Competition organizer payment setup incomplete. Please contact support." 
-    }, { status: 400 });
-  }
+  const organizerSubaccount = organizer.paystack_subaccount_code;
 
-  // 5. Calculate Amounts
+  // 6. Calculate Amounts
   const votePrice = Number(candidate.contests.vote_price);
   const totalAmount = votePrice * vote_count;
   
@@ -113,10 +128,10 @@ async function handleVotePurchase(body) {
   const platformFeeInPesewas = Math.round(amountInPesewas * 0.05); // 5% platform fee
   const organizerAmountInPesewas = amountInPesewas - platformFeeInPesewas;
 
-  // 6. Normalize Email
+  // 7. Normalize Email
   const normalizedEmail = email.trim().toLowerCase();
 
-  // 7. Build Paystack Payload
+  // 8. Build Paystack Payload
   const paystackPayload = {
     email: normalizedEmail,
     amount: amountInPesewas,
@@ -128,8 +143,8 @@ async function handleVotePurchase(body) {
       candidate_name: candidate.name,
       contest_id: candidate.contests.id,
       contest_title: candidate.contests.title,
-      competition_id: candidate.contests.competitions.id,
-      competition_title: candidate.contests.competitions.title,
+      competition_id: competition.id,
+      competition_title: competition.title,
       vote_count: vote_count,
       voter_email: normalizedEmail,
       vote_price: votePrice,
@@ -138,7 +153,7 @@ async function handleVotePurchase(body) {
         {
           display_name: "Competition",
           variable_name: "competition_title",
-          value: candidate.contests.competitions.title
+          value: competition.title
         },
         {
           display_name: "Contest",
@@ -159,7 +174,7 @@ async function handleVotePurchase(body) {
     }
   };
 
-  // 8. Configure 2-Way Split Payment (Platform + Organizer)
+  // 9. Configure 2-Way Split Payment (Platform + Organizer)
   paystackPayload.subaccount = organizerSubaccount;
   paystackPayload.transaction_charge = platformFeeInPesewas; // Platform's 5%
   paystackPayload.bearer = "account"; // Platform bears Paystack fees
@@ -171,7 +186,14 @@ async function handleVotePurchase(body) {
     votes: vote_count
   });
 
-  // 9. Initialize Transaction with Paystack
+  console.log("Initializing Paystack Vote Transaction:", {
+    email: normalizedEmail,
+    amount: amountInPesewas / 100,
+    candidate: candidate.name,
+    votes: vote_count
+  });
+
+  // 10. Initialize Transaction with Paystack
   const paystackRes = await fetch('https://api.paystack.co/transaction/initialize', {
     method: 'POST',
     headers: {
