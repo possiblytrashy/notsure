@@ -75,16 +75,16 @@ const handleVote = async (candidate, qty) => {
     
     try {
       // 2. Initialize payment on the BACKEND
-      const response = await fetch('/api/checkout/secure-session/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: 'VOTE',
-          candidate_id: candidate.id,
-          vote_count: qty,
-          email: "voter@ousted.com" // You can later replace this with a real user email input
-        }),
-      });
+      const response = await fetch('/api/checkout/secure-session', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    type: 'VOTE',           
+    candidate_id: candidate.id,
+    vote_count: qty,
+    email: "voter@example.com"
+  }),
+});
 
       const initData = await response.json();
 
