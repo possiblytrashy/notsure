@@ -318,14 +318,18 @@ async function handleTicketPurchase(body) {
   let resellerCommission = 0;
 
   if (isResellerPurchase) {
-    finalPrice = basePrice * 1.10; // 10% markup
-    resellerCommission = basePrice * 0.10;
+    resellerCommission = basePrice * 0.10; // Reseller gets 10% of base as markup
+    finalPrice = basePrice + resellerCommission; // Customer pays base + markup
   }
 
   const amountInPesewas = Math.round(finalPrice * 100);
   const basePriceInPesewas = Math.round(basePrice * 100);
-  const platformFeeInPesewas = Math.round(basePriceInPesewas * 0.05); // 5% of base
   const resellerCommissionInPesewas = Math.round(resellerCommission * 100);
+  
+  // Platform always gets 5% of base price
+  const platformFeeInPesewas = Math.round(basePriceInPesewas * 0.05);
+  
+  // Organizer always gets 95% of base price (regardless of reseller)
   const organizerAmountInPesewas = basePriceInPesewas - platformFeeInPesewas;
 
   // 6. Normalize Email
