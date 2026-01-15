@@ -72,14 +72,10 @@ const handleVote = async (candidate, qty) => {
       return;
     }
 
-    if (!window.PaystackPop) {
-      setToast({ type: 'ERROR', message: 'Payment provider not loaded. Please refresh.' });
-      return;
-    }
-
+    
     try {
       // 2. Initialize payment on the BACKEND
-      const response = await fetch('/api/paystack/initialize', {
+      const response = await fetch('/api/checkout/secure-session/', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
