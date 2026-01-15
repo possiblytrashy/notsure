@@ -48,7 +48,27 @@ export default function VotingPortal() {
   useEffect(() => {
     fetchLatestData();
   }, [fetchLatestData]);
-
+// In your voting portal component
+useEffect(() => {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('payment') === 'success') {
+    const candidateId = params.get('candidate_id');
+    
+    // Show success message
+    setToast({ 
+      type: 'SUCCESS', 
+      message: 'Payment successful! Votes will be added shortly.' 
+    });
+    
+    // Refresh data after a short delay to allow webhook to process
+    setTimeout(() => {
+      fetchLatestData(true);
+    }, 2000);
+    
+    // Clean URL
+    window.history.replaceState({}, '', '/voting');
+  }
+}, []);
   // DERIVED STATES
   const activeComp = competitions.find(c => c.id === activeCompId);
   const activeContest = activeComp?.contests?.find(ct => ct.id === activeCatId);
