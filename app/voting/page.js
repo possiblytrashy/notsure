@@ -96,22 +96,9 @@ const handleVote = async (candidate, qty) => {
         throw new Error(initData.error || 'Failed to initialize payment');
       }
 
-      // 3. Open Paystack Popup using the secure access_code
-      const handler = window.PaystackPop.setup({
-        key: process.env.NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY,
-        access_code: initData.access_code, // Use access_code instead of amount/email/metadata
-        callback: (res) => {
-          triggerConfetti();
-          setToast({ name: candidate.name, count: qty, type: 'SUCCESS' });
-          fetchLatestData(); // Refresh the leaderboard to show new votes
-          setTimeout(() => setToast(null), 5000);
-        },
-        onClose: () => {
-          console.log("Window closed");
-        }
-      });
-      
-      handler.openIframe();
+      // Redirect to Paystack checkout
+window.location.href = initData.authorization_url;
+
 
     } catch (err) {
       setToast({ type: 'ERROR', message: err.message });
