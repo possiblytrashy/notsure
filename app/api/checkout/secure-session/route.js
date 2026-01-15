@@ -53,21 +53,25 @@ export async function POST(req) {
 
       // Fetch candidate → contest → organizer
       const { data: candidate, error: candidateError } = await supabase
-        .from('candidates')
-        .select(`
-          id,
-          name,
-          contests!inner (
-            id,
-            title,
-            vote_price,
-            organizers:organizer_id (
-              paystack_subaccount_code
-            )
-          )
-        `)
-        .eq('id', candidate_id)
-        .single();
+  .from('candidates')
+  .select(`
+    id,
+    name,
+    contests!inner (
+      id,
+      title,
+      vote_price,
+      competitions!inner (
+        id,
+        organizers:organizer_id (
+          paystack_subaccount_code
+        )
+      )
+    )
+  `)
+  .eq('id', candidate_id)
+  .single();
+
 
       if (candidateError || !candidate) {
         console.error("Candidate fetch error:", candidateError);
@@ -78,7 +82,10 @@ export async function POST(req) {
       }
 
       const organizerSubaccount =
-        candidate.contests?.organizers?.paystack_subaccount_code;
+  candidate.contests
+    ?.competitions
+    ?.organizers
+    ?.paystack_subaccount_code;
 
       if (!organizerSubaccount) {
         console.error("Organizer missing Paystack subaccount for voting");
@@ -103,7 +110,7 @@ export async function POST(req) {
         email: normalizedEmail,
         amount: amountInPesewas,
         currency: "GHS",
-        callback_url: `${process.env.NEXT_PUBLIC_BASE_URL}?vote=success`,
+        callback_url: `${process.env.NEXT_PUBLIC_BASE_URL}/webhook/paystack`,
         metadata: {
           type: "VOTE",
           candidate_id,
