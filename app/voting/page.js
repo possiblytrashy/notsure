@@ -66,40 +66,44 @@ export default function VotingPortal() {
   };
 
 const handleVote = async (candidate, qty) => {
-    // 1. Initial Safety Check
-    if (!activeContest || !activeContest.is_active) {
-      setToast({ type: 'ERROR', message: 'Voting is currently paused for this category.' });
-      return;
-    }
+     if (!activeContest || !activeContest.is_active) {
+       setToast({ type: 'ERROR', message: 'Voting is currently paused.' });
+       return;
+     }
 
-    
-    try {
-      // 2. Initialize payment on the BACKEND
-      const response = await fetch('/api/checkout/secure-session', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    type: 'VOTE',           
-    candidate_id: candidate.id,
-    vote_count: qty,
-    email: "voter@example.com"
-  }),
-});
+     try {
+       console.log('Sending vote request:', {
+         type: 'VOTE',
+         candidate_id: candidate.id,
+         vote_count: qty,
+         email: "voter@ousted.com"
+       });
 
-      const initData = await response.json();
+       const response = await fetch('/api/checkout/secure-session', {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify({
+           type: 'VOTE',
+           candidate_id: candidate.id,
+           vote_count: qty,
+           email: "voter@ousted.com"
+         }),
+       });
 
-      if (!response.ok) {
-        throw new Error(initData.error || 'Failed to initialize payment');
-      }
+       const initData = await response.json();
+       console.log('Response:', initData);
 
-      // Redirect to Paystack checkout
-window.location.href = initData.authorization_url;
+       if (!response.ok) {
+         throw new Error(initData.error || 'Failed to initialize payment');
+       }
 
+       window.location.href = initData.authorization_url;
 
-    } catch (err) {
-      setToast({ type: 'ERROR', message: err.message });
-    }
-  };
+     } catch (err) {
+       console.error('Vote error:', err);
+       setToast({ type: 'ERROR', message: err.message });
+     }
+   };
 
   const handleShare = (candidate) => {
     const shareText = `Vote for ${candidate.name} in ${activeContest?.title}! Support here: ${window.location.href}`;
