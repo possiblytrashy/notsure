@@ -1,5 +1,6 @@
 // FILE: app/api/checkout/secure-session/route.js
 // FIXED - Proper 2-way and 3-way splits using Paystack Split Payments
+// Ensure Supabase joins use explicit relationship names
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
@@ -30,16 +31,19 @@ export async function POST(req) {
     );
 
     // 2. Fetch Tier with Event and Organizer Details
+    // We use 'events!inner' and 'organizers:organizer_profile_id' 
+    // to match your schema exactly.
     const { data: tier, error: tierError } = await supabase
       .from('ticket_tiers')
       .select(`
         id,
         name,
         price,
-        events (
+        events!inner (
           id,
           title,
           allows_resellers,
+          organizer_subaccount,
           organizer_profile_id,
           organizers:organizer_profile_id (
             paystack_subaccount_code
@@ -57,10 +61,14 @@ export async function POST(req) {
     }
 
     // 3. Check Organizer has Subaccount
-    const organizerSubaccount = tier.events?.organizers?.paystack_subaccount_code;
+    // FALLBACK LOGIC: Check the joined table first, then the direct column on events
+    const organizerSubaccount = 
+      tier.events?.organizers?.paystack_subaccount_code || 
+      tier.events?.organizer_subaccount;
     
     if (!organizerSubaccount) {
-      console.error("❌ Organizer has no Paystack subaccount!");
+      console.error("❌ Organizer has no Paystack subaccount! Checked both profile and event columns.");
+      console.error("Debug Tier Data:", JSON.stringify(tier, null, 2));
       return NextResponse.json({ 
         error: "Event organizer payment setup incomplete. Please contact support." 
       }, { status: 400 });
