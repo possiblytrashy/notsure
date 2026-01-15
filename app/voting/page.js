@@ -48,32 +48,50 @@ export default function VotingPortal() {
   useEffect(() => {
     fetchLatestData();
   }, [fetchLatestData]);
-// In your voting portal component
-useEffect(() => {
-  const params = new URLSearchParams(window.location.search);
-  if (params.get('payment') === 'success') {
+
+  // 2. HANDLE PAYMENT SUCCESS CALLBACK
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const params = new URLSearchParams(window.location.search);
+    const paymentStatus = params.get('payment');
     const candidateId = params.get('candidate_id');
-    
-    // Show success message
-    setToast({ 
-      type: 'SUCCESS', 
-      message: 'Payment successful! Votes will be added shortly.' 
-    });
-    
-    // Refresh data after a short delay to allow webhook to process
-    setTimeout(() => {
-      fetchLatestData(true);
-    }, 2000);
-    
-    // Clean URL
-    window.history.replaceState({}, '', '/voting');
-  }
-}, []);
+
+    if (paymentStatus === 'success' && candidateId) {
+      // Find the candidate to show their name
+      const candidate = competitions
+        .flatMap(comp => comp.contests || [])
+        .flatMap(contest => contest.candidates || [])
+        .find(c => c.id === candidateId);
+
+      if (candidate) {
+        setToast({ 
+          type: 'SUCCESS', 
+          message: `Payment successful! Votes for ${candidate.name} are being processed.` 
+        });
+      } else {
+        setToast({ 
+          type: 'SUCCESS', 
+          message: 'Payment successful! Votes are being processed.' 
+        });
+      }
+
+      // Refresh data after 2 seconds to show updated vote count
+      setTimeout(() => {
+        fetchLatestData(true);
+        setToast(null);
+      }, 3000);
+
+      // Clean URL
+      window.history.replaceState({}, '', '/voting');
+    }
+  }, [competitions, fetchLatestData]);
+
   // DERIVED STATES
   const activeComp = competitions.find(c => c.id === activeCompId);
   const activeContest = activeComp?.contests?.find(ct => ct.id === activeCatId);
 
-  // 2. HANDLERS
+  // 3. HANDLERS
   const triggerConfetti = () => {
     if (typeof window !== "undefined" && window.confetti) {
       window.confetti({
@@ -85,45 +103,39 @@ useEffect(() => {
     }
   };
 
-const handleVote = async (candidate, qty) => {
-     if (!activeContest || !activeContest.is_active) {
-       setToast({ type: 'ERROR', message: 'Voting is currently paused.' });
-       return;
-     }
+  const handleVote = async (candidate, qty) => {
+    // 1. Initial Safety Check
+    if (!activeContest || !activeContest.is_active) {
+      setToast({ type: 'ERROR', message: 'Voting is currently paused for this category.' });
+      return;
+    }
 
-     try {
-       console.log('Sending vote request:', {
-         type: 'VOTE',
-         candidate_id: candidate.id,
-         vote_count: qty,
-         email: "voter@ousted.com"
-       });
+    try {
+      // 2. Initialize payment on the BACKEND
+      const response = await fetch('/api/checkout/secure-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'VOTE',
+          candidate_id: candidate.id,
+          vote_count: qty,
+          email: "voter@ousted.com" // You can later replace this with a real user email input
+        }),
+      });
 
-       const response = await fetch('/api/checkout/secure-session', {
-         method: 'POST',
-         headers: { 'Content-Type': 'application/json' },
-         body: JSON.stringify({
-           type: 'VOTE',
-           candidate_id: candidate.id,
-           vote_count: qty,
-           email: "voter@ousted.com"
-         }),
-       });
+      const initData = await response.json();
 
-       const initData = await response.json();
-       console.log('Response:', initData);
+      if (!response.ok) {
+        throw new Error(initData.error || 'Failed to initialize payment');
+      }
 
-       if (!response.ok) {
-         throw new Error(initData.error || 'Failed to initialize payment');
-       }
+      // 3. Redirect to Paystack checkout
+      window.location.href = initData.authorization_url;
 
-       window.location.href = initData.authorization_url;
-
-     } catch (err) {
-       console.error('Vote error:', err);
-       setToast({ type: 'ERROR', message: err.message });
-     }
-   };
+    } catch (err) {
+      setToast({ type: 'ERROR', message: err.message });
+    }
+  };
 
   const handleShare = (candidate) => {
     const shareText = `Vote for ${candidate.name} in ${activeContest?.title}! Support here: ${window.location.href}`;
@@ -236,6 +248,7 @@ const handleVote = async (candidate, qty) => {
               </div>
               <div style={cardInfo}>
                 <h3 style={candidateName}>{can.name}</h3>
+                <p style={voteCountDisplay}>{can.vote_count.toLocaleString()} votes</p>
                 <div style={barContainer}><div style={{...barFill, width: `${percentage}%`}} /></div>
                 <div style={votingControl}>
                   <div style={qtySelector}>
@@ -259,8 +272,8 @@ const handleVote = async (candidate, qty) => {
       {toast && (
         <div style={{...toastContainer, borderColor: toast.type === 'ERROR' ? '#ef4444' : '#0ea5e9'}}>
           {toast.type === 'ERROR' ? <AlertCircle size={18} color="#ef4444"/> : <Check size={18} color="#0ea5e9"/>} 
-          <span>{toast.type === 'ERROR' ? toast.message : `Success! ${toast.count} votes for ${toast.name}`}</span>
-          {toast.type === 'ERROR' && <button onClick={() => setToast(null)} style={{background:'none', border:'none', marginLeft:'10px', cursor:'pointer'}}>×</button>}
+          <span>{toast.type === 'ERROR' ? toast.message : toast.message}</span>
+          <button onClick={() => setToast(null)} style={{background:'none', border:'none', marginLeft:'10px', cursor:'pointer', fontSize:'18px'}}>×</button>
         </div>
       )}
 
@@ -274,7 +287,7 @@ const handleVote = async (candidate, qty) => {
   );
 }
 
-// --- STYLES (Kept exactly as requested) ---
+// --- STYLES ---
 const container = { maxWidth: '1100px', margin: '0 auto', padding: '100px 20px' };
 const headerStyle = { textAlign:'center', marginBottom:'60px' };
 const mainTitle = { fontSize: 'clamp(40px, 8vw, 72px)', fontWeight: 900, letterSpacing: '-4px' };
@@ -302,7 +315,8 @@ const heroImg = { width: '100%', height: '100%', objectFit: 'cover' };
 const rankOverlay = { position: 'absolute', top: '20px', left: '20px', background: 'rgba(0,0,0,0.7)', color: '#fff', padding: '10px 18px', borderRadius: '15px', fontWeight: 900, backdropFilter: 'blur(10px)' };
 const shareBtn = { position: 'absolute', top: '20px', right: '20px', width: '45px', height: '45px', background: 'rgba(255,255,255,0.9)', border: 'none', borderRadius: '15px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
 const cardInfo = { padding: '30px' };
-const candidateName = { fontSize: '28px', fontWeight: 900, marginBottom: '20px', textAlign: 'center' };
+const candidateName = { fontSize: '28px', fontWeight: 900, marginBottom: '10px', textAlign: 'center' };
+const voteCountDisplay = { fontSize: '16px', fontWeight: 700, color: '#0ea5e9', textAlign: 'center', marginBottom: '20px' };
 const barContainer = { background:'#f1f5f9', height:'10px', borderRadius:'20px', marginBottom:'25px', overflow:'hidden' };
 const barFill = { background: 'linear-gradient(90deg, #0ea5e9, #6366f1)', height:'100%', transition:'width 1s ease' };
 const votingControl = { display:'flex', flexDirection:'column', gap:'12px' };
