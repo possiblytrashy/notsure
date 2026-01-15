@@ -247,7 +247,7 @@ export async function POST(req) {
       email: normalizedEmail,
       amount: amountInPesewas,
       currency: "GHS",
-      callback_url: `${process.env.NEXT_PUBLIC_BASE_URL}/events/${event_id}?payment=success`,
+callback_url: `${process.env.NEXT_PUBLIC_BASE_URL}?vote=success`,
       metadata: {
         event_id,
         tier_id,
