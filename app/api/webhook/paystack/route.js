@@ -72,9 +72,18 @@ async function handleVotePayment(supabase, { reference, metadata, customer, amou
 
   console.log('🗳️ Processing vote payment:', {
     candidate_id,
+    candidate_name,
     vote_count,
-    reference
+    contest_id,
+    competition_id,
+    reference,
+    amount: amount / 100
   });
+
+  if (!candidate_id || !vote_count) {
+    console.error('❌ Missing required vote metadata:', metadata);
+    return new Response('Missing vote metadata', { status: 400 });
+  }
 
   // 1. IDEMPOTENCY CHECK
   const { data: existingVote } = await supabase
@@ -88,31 +97,55 @@ async function handleVotePayment(supabase, { reference, metadata, customer, amou
     return new Response('Already Processed', { status: 200 });
   }
 
-  // 2. UPDATE CANDIDATE VOTE COUNT (Atomic increment)
-  const { data: candidate, error: updateError } = await supabase
-    .rpc('increment_vote_count', {
-      p_candidate_id: candidate_id,
-      p_vote_increment: vote_count
-    });
+  // 2. UPDATE CANDIDATE VOTE COUNT - Try RPC first, then fallback
+  console.log(`Attempting to add ${vote_count} votes to candidate ${candidate_id}`);
+  
+  let voteUpdateSuccess = false;
 
-  if (updateError) {
-    console.error('❌ Failed to update vote count:', updateError);
+  // Try using RPC function
+  const { error: rpcError } = await supabase.rpc('increment_vote_count', {
+    p_candidate_id: candidate_id,
+    p_vote_increment: vote_count
+  });
+
+  if (rpcError) {
+    console.warn('⚠️ RPC failed, trying direct update:', rpcError.message);
     
-    // Fallback to direct update if RPC doesn't exist
-    const { error: fallbackError } = await supabase
+    // Fallback: Direct SQL update
+    const { data: updated, error: updateError } = await supabase
       .from('candidates')
-      .update({ 
-        vote_count: supabase.raw(`vote_count + ${vote_count}`)
-      })
+      .select('id, name, vote_count')
+      .eq('id', candidate_id)
+      .single();
+
+    if (updateError || !updated) {
+      console.error('❌ Candidate not found:', candidate_id, updateError);
+      return new Response('Candidate Not Found', { status: 404 });
+    }
+
+    const newCount = updated.vote_count + vote_count;
+
+    const { error: directUpdateError } = await supabase
+      .from('candidates')
+      .update({ vote_count: newCount })
       .eq('id', candidate_id);
 
-    if (fallbackError) {
-      console.error('❌ Fallback update also failed:', fallbackError);
+    if (directUpdateError) {
+      console.error('❌ Direct update failed:', directUpdateError);
       return new Response('Vote Update Failed', { status: 500 });
     }
+
+    voteUpdateSuccess = true;
+    console.log(`✅ Direct update: ${updated.vote_count} → ${newCount}`);
+  } else {
+    voteUpdateSuccess = true;
+    console.log(`✅ RPC update: Added ${vote_count} votes via function`);
   }
 
-  console.log(`✅ Added ${vote_count} votes to candidate ${candidate_id}`);
+  if (!voteUpdateSuccess) {
+    console.error('❌ All vote update methods failed');
+    return new Response('Vote Update Failed', { status: 500 });
+  }
 
   // 3. CREATE VOTE TRANSACTION RECORD
   const { error: voteRecordError } = await supabase
@@ -130,7 +163,9 @@ async function handleVotePayment(supabase, { reference, metadata, customer, amou
     });
 
   if (voteRecordError) {
-    console.warn('⚠️ Failed to create vote record (non-critical):', voteRecordError);
+    console.warn('⚠️ Failed to create vote record (non-critical):', voteRecordError.message);
+  } else {
+    console.log('✅ Vote transaction recorded');
   }
 
   // 4. ORGANIZER PAYOUT TRACKING
