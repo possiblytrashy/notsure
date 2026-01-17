@@ -10,8 +10,6 @@ import {
 
 export default function AdvancedScanner() {
   // --- 1. STATE MANAGEMENT ---
-  const [isLocked, setIsLocked] = useState(true);
-  const [pin, setPin] = useState('');
   const [events, setEvents] = useState([]);
   const [selectedEvent, setSelectedEvent] = useState(null); 
   const [eventSearch, setEventSearch] = useState('');
@@ -22,8 +20,7 @@ export default function AdvancedScanner() {
     type: 'ready', message: 'Ready to Scan', color: '#1e293b', details: 'Position QR code in frame', eventName: '', tier: '' 
   });
 
-  const STAFF_PIN = "1234"; 
-
+  
   // --- 2. INITIALIZATION ---
   useEffect(() => {
     async function loadEvents() {
@@ -37,16 +34,7 @@ export default function AdvancedScanner() {
     return events.filter(e => e.title.toLowerCase().includes(eventSearch.toLowerCase()));
   }, [events, eventSearch]);
 
-  const handlePinInput = (value) => {
-    const newPin = pin + value;
-    if (newPin.length <= 4) setPin(newPin);
-    if (newPin === STAFF_PIN) {
-        setTimeout(() => setIsLocked(false), 300);
-    } else if (newPin.length === 4) {
-        setPin('');
-        alert("Invalid PIN");
-    }
-  };
+  
 
   // --- 3. VERIFICATION LOGIC ---
   const verifyTicket = async (decodedText, isManual = false) => {
