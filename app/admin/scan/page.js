@@ -39,8 +39,6 @@ export default function AdvancedScanner() {
   // --- 3. VERIFICATION LOGIC ---
   const verifyTicket = async (decodedText, isManual = false) => {
     if (!isScanning && !isManual) return;
-    if (isLocked) return;
-
     setIsScanning(false);
     let ticketRef = "";
     let qrEventId = "";
