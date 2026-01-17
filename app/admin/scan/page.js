@@ -4,8 +4,8 @@ import { Html5QrcodeScanner } from 'html5-qrcode';
 import { supabase } from '../../../lib/supabase';
 import { 
   CheckCircle2, XCircle, AlertCircle, RefreshCw, 
-  Lock, Camera, History as HistoryIcon, UserCheck, 
-  MapPin, Search, Filter, Tag, Info
+  Camera, History as HistoryIcon, UserCheck, 
+  MapPin, Search, Filter, Tag
 } from 'lucide-react';
 
 export default function AdvancedScanner() {
@@ -20,7 +20,6 @@ export default function AdvancedScanner() {
     type: 'ready', message: 'Ready to Scan', color: '#1e293b', details: 'Position QR code in frame', eventName: '', tier: '' 
   });
 
-  
   // --- 2. INITIALIZATION ---
   useEffect(() => {
     async function loadEvents() {
@@ -34,11 +33,10 @@ export default function AdvancedScanner() {
     return events.filter(e => e.title.toLowerCase().includes(eventSearch.toLowerCase()));
   }, [events, eventSearch]);
 
-  
-
   // --- 3. VERIFICATION LOGIC ---
   const verifyTicket = async (decodedText, isManual = false) => {
     if (!isScanning && !isManual) return;
+
     setIsScanning(false);
     let ticketRef = "";
     let qrEventId = "";
@@ -130,34 +128,11 @@ export default function AdvancedScanner() {
   };
 
   useEffect(() => {
-    if (isLocked || !isScanning) return;
+    if (!isScanning) return;
     const scanner = new Html5QrcodeScanner('reader', { fps: 15, qrbox: 250 });
     scanner.render(verifyTicket, () => {});
     return () => scanner.clear().catch(() => {});
-  }, [isScanning, isLocked, selectedEvent]);
-
-  if (isLocked) {
-    return (
-      <div style={styles.lockContainer}>
-        <div style={styles.lockCard}>
-          <div style={styles.lockIconBox}><Lock size={40} color="#64748b" /></div>
-          <h2 style={{fontWeight: 900, color: '#fff', marginBottom: '30px'}}>Scanner Locked</h2>
-          <div style={styles.pinDisplay}>
-            {[...Array(4)].map((_, i) => <div key={i} style={styles.pinDot(pin.length > i)}></div>)}
-          </div>
-          <div style={styles.keypad}>
-            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 'C', 0, '←'].map(btn => (
-              <button key={btn} style={styles.keyBtn} onClick={() => {
-                if (btn === 'C') setPin('');
-                else if (btn === '←') setPin(pin.slice(0, -1));
-                else handlePinInput(btn.toString());
-              }}>{btn}</button>
-            ))}
-          </div>
-        </div>
-      </div>
-    );
-  }
+  }, [isScanning, selectedEvent]);
 
   return (
     <div style={styles.container}>
@@ -165,7 +140,6 @@ export default function AdvancedScanner() {
       <div style={styles.topSection}>
         <div style={styles.headerRow}>
           <h2 style={{fontWeight: 950, margin: 0, fontSize: '20px'}}>Gate Portal</h2>
-          <button onClick={() => setIsLocked(true)} style={styles.lockCircle}><Lock size={16}/></button>
         </div>
 
         {!selectedEvent ? (
@@ -267,17 +241,9 @@ export default function AdvancedScanner() {
 
 const styles = {
   container: { maxWidth: '480px', margin: '0 auto', padding: '15px', fontFamily: 'system-ui, -apple-system, sans-serif' },
-  lockContainer: { height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#0f172a' },
-  lockCard: { width: '100%', maxWidth: '320px', textAlign: 'center' },
-  lockIconBox: { width: '70px', height: '70px', background: '#1e293b', borderRadius: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 20px' },
-  pinDisplay: { display: 'flex', justifyContent: 'center', gap: '12px', margin: '30px 0' },
-  pinDot: (filled) => ({ width: '14px', height: '14px', borderRadius: '50%', background: filled ? '#38bdf8' : '#334155', transition: '0.2s' }),
-  keypad: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' },
-  keyBtn: { padding: '18px', borderRadius: '18px', border: 'none', background: '#1e293b', color: '#fff', fontSize: '18px', fontWeight: 'bold' },
   
   topSection: { marginBottom: '20px' },
   headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' },
-  lockCircle: { background: '#f1f5f9', border: 'none', width: '40px', height: '40px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center' },
   
   eventPicker: { background: '#f8fafc', padding: '15px', borderRadius: '20px', border: '1px solid #e2e8f0' },
   label: { margin: '0 0 10px', fontSize: '12px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase' },
@@ -288,19 +254,20 @@ const styles = {
   
   activeEventCard: { background: '#1e293b', color: '#fff', padding: '15px', borderRadius: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
   activeEventInfo: { display: 'flex', alignItems: 'center', gap: '8px' },
-  changeBtn: { background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', padding: '5px 10px', borderRadius: '10px', fontSize: '12px' },
+  changeBtn: { background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', padding: '5px 10px', borderRadius: '10px', fontSize: '12px', cursor: 'pointer' },
 
   searchWrapper: { position: 'relative', display: 'flex', alignItems: 'center', marginBottom: '15px' },
   searchIcon: { position: 'absolute', left: '15px', color: '#94a3b8' },
   searchInput: { width: '100%', padding: '15px 15px 15px 45px', borderRadius: '15px', border: '1px solid #e2e8f0', fontSize: '14px', outline: 'none', background: '#f8fafc' },
-  searchGo: { position: 'absolute', right: '10px', background: '#000', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '8px', fontSize: '12px', fontWeight: '900' },
+  searchGo: { position: 'absolute', right: '10px', background: '#000', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '8px', fontSize: '12px', fontWeight: '900', cursor: 'pointer' },
 
   statusCard: { position: 'relative', padding: '40px 20px', borderRadius: '30px', color: '#fff', textAlign: 'center', marginBottom: '15px', overflow: 'hidden' },
+  statusIconBox: { marginBottom: '10px' },
   tierContainer: { position: 'absolute', top: '20px', left: '0', right: '0', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '6px' },
   tierText: { fontSize: '12px', fontWeight: '900', letterSpacing: '1px' },
   statusTitle: { margin: '10px 0 5px', fontSize: '26px', fontWeight: '900', letterSpacing: '-0.5px' },
   statusDetails: { margin: 0, opacity: 0.9, fontSize: '16px', fontWeight: '600' },
-  nextBtn: { marginTop: '20px', width: '100%', padding: '14px', background: '#fff', color: '#000', border: 'none', borderRadius: '14px', fontWeight: '900', fontSize: '14px' },
+  nextBtn: { marginTop: '20px', width: '100%', padding: '14px', background: '#fff', color: '#000', border: 'none', borderRadius: '14px', fontWeight: '900', fontSize: '14px', cursor: 'pointer' },
   
   scannerContainer: { borderRadius: '25px', overflow: 'hidden', border: '5px solid #000', marginBottom: '20px' },
   historySection: { background: '#f8fafc', padding: '15px', borderRadius: '20px', border: '1px solid #e2e8f0' },
