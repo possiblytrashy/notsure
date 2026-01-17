@@ -264,30 +264,161 @@ useEffect(() => {
   };
     
   // --- 3. RIDESHARING CONCIERGE LOGIC ---
-  const handleRide = (type) => {
-    if (!event.lat || !event.lng) return;
-    
-    const lat = event.lat;
-    const lng = event.lng;
-    const label = encodeURIComponent(event.location || event.title);
+// Replace your handleRide function with this improved version
 
-    const urls = {
-      google: `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`,
-      apple: `maps://?q=${label}&ll=${lat},${lng}`,
-      uber: `uber://?action=setPickup&dropoff[latitude]=${lat}&dropoff[longitude]=${lng}&dropoff[nickname]=${label}`,
-      bolt: `bolt://ride?action=setDest&destination_lat=${lat}&destination_lng=${lng}&destination_name=${label}`,
-      yango: `yango://?finish_lat=${lat}&finish_lon=${lng}`
-    };
+const handleRide = (type) => {
+  if (!event?.lat || !event?.lng) {
+    alert("Location coordinates not available for this event.");
+    return;
+  }
+  
+  const lat = event.lat;
+  const lng = event.lng;
+  const label = encodeURIComponent(event.location || event.title || 'Event Location');
 
-    const isApple = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+  // Detect device type
+  const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+  const isAndroid = /Android/i.test(navigator.userAgent);
+
+  const urls = {
+    // Maps - use appropriate app based on device
+    google: `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`,
+    apple: `maps://?daddr=${lat},${lng}&q=${label}`,
     
-    if (type === 'maps') {
-      window.open(isApple ? urls.apple : urls.google, '_blank');
-    } else {
-      window.open(urls[type], '_blank');
+    // Uber - works on both iOS and Android
+    uber: `uber://?action=setPickup&dropoff[latitude]=${lat}&dropoff[longitude]=${lng}&dropoff[nickname]=${label}`,
+    uberWeb: `https://m.uber.com/ul/?action=setPickup&pickup=my_location&dropoff[latitude]=${lat}&dropoff[longitude]=${lng}&dropoff[nickname]=${label}`,
+    
+    // Bolt - deep link format
+    bolt: `bolt://riderequest?destination_latitude=${lat}&destination_longitude=${lng}`,
+    boltWeb: `https://bolt.eu/`,
+    
+    // Yango - correct deep link format
+    yango: `yango://route?end-lat=${lat}&end-lon=${lng}&appmetrica_tracking_id=1178268795219780156`,
+    yangoWeb: `https://yango.com/`
+  };
+
+  if (type === 'maps') {
+    // Open native maps app
+    const mapsUrl = isIOS ? urls.apple : urls.google;
+    window.location.href = mapsUrl;
+    return;
+  }
+
+  if (type === 'uber') {
+    // Try to open Uber app, fallback to web
+    window.location.href = urls.uber;
+    
+    // If app doesn't open in 2 seconds, go to web version
+    setTimeout(() => {
+      if (document.hidden) return; // App opened successfully
+      window.open(urls.uberWeb, '_blank');
+    }, 2000);
+    return;
+  }
+
+  if (type === 'bolt') {
+    // Try Bolt app first
+    window.location.href = urls.bolt;
+    
+    // Fallback to website
+    setTimeout(() => {
+      if (document.hidden) return;
+      window.open(urls.boltWeb, '_blank');
+    }, 2000);
+    return;
+  }
+
+  if (type === 'yango') {
+    // Try Yango app first
+    window.location.href = urls.yango;
+    
+    // Fallback to website
+    setTimeout(() => {
+      if (document.hidden) return;
+      window.open(urls.yangoWeb, '_blank');
+    }, 2000);
+    return;
+  }
+};
+
+// Alternative: More reliable version with user feedback
+const handleRideWithFallback = (type) => {
+  if (!event?.lat || !event?.lng) {
+    alert("Location coordinates not available for this event.");
+    return;
+  }
+  
+  const lat = event.lat;
+  const lng = event.lng;
+  const label = encodeURIComponent(event.location || event.title || 'Event Location');
+
+  const apps = {
+    maps: {
+      ios: `maps://?daddr=${lat},${lng}&q=${label}`,
+      android: `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`,
+      web: `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`,
+      name: 'Maps'
+    },
+    uber: {
+      deepLink: `uber://?action=setPickup&dropoff[latitude]=${lat}&dropoff[longitude]=${lng}`,
+      web: `https://m.uber.com/ul/?action=setPickup&pickup=my_location&dropoff[latitude]=${lat}&dropoff[longitude]=${lng}`,
+      name: 'Uber'
+    },
+    bolt: {
+      deepLink: `bolt://riderequest?destination_latitude=${lat}&destination_longitude=${lng}`,
+      web: 'https://bolt.eu/',
+      name: 'Bolt'
+    },
+    yango: {
+      deepLink: `yango://route?end-lat=${lat}&end-lon=${lng}`,
+      web: 'https://yango.com/',
+      name: 'Yango'
     }
   };
 
+  const app = apps[type];
+  if (!app) return;
+
+  const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
+  
+  if (type === 'maps') {
+    // For maps, directly open appropriate URL
+    const url = isIOS ? app.ios : app.android;
+    window.location.href = url;
+    return;
+  }
+
+  // For rideshare apps: try deep link, then fallback to web
+  const tryOpenApp = () => {
+    // Try deep link
+    window.location.href = app.deepLink;
+    
+    // Set up fallback timer
+    const fallbackTimer = setTimeout(() => {
+      // If we're still on the page (app didn't open), show options
+      if (!document.hidden) {
+        const shouldOpenWeb = confirm(
+          `${app.name} app not installed. Open ${app.name} website instead?`
+        );
+        if (shouldOpenWeb) {
+          window.open(app.web, '_blank');
+        }
+      }
+    }, 2500);
+
+    // Clear timer if page becomes hidden (app opened)
+    const visibilityHandler = () => {
+      if (document.hidden) {
+        clearTimeout(fallbackTimer);
+      }
+    };
+
+    document.addEventListener('visibilitychange', visibilityHandler, { once: true });
+  };
+
+  tryOpenApp();
+};
   // --- 4. SECURE PAYSTACK TRANSACTION LOGIC ---
 
 // Replace your handlePurchase function with this fixed version
