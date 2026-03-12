@@ -333,7 +333,7 @@ useEffect(() => {
     
     return {
       totalGross,
-      organizerShare: totalGross * 0.95, // 95% to Organizer
+      organizerShare: data.tickets.reduce((acc, t) => acc + (parseFloat(t.base_amount || t.amount) || 0), 0), // 95% to Organizer
       platformFee: totalGross * 0.05,    // 5% Platform Fee
       ticketCount: data.tickets.length,
       activeEvents: data.events.length,
@@ -656,7 +656,7 @@ const handleEditSubmit = async (e) => {
        <p style={userEmail}>{data.profile?.email}</p>
        <div style={onboardingBadge(paystackConfig.subaccountCode)}>
          <div style={dot(paystackConfig.subaccountCode)}></div>
-         {paystackConfig.subaccountCode ? 'PAYOUTS ACTIVE (95/5)' : 'ACTION REQUIRED: SETUP PAYOUT'}
+         {paystackConfig.subaccountCode ? 'PAYOUTS ACTIVE — 5% FEE ADDED' : 'ACTION REQUIRED: SETUP PAYOUT'}
        </div>
      </div>
 
@@ -679,7 +679,7 @@ const handleEditSubmit = async (e) => {
         <div style={balanceCard}>
           <div style={cardHeader}>
             <div style={balanceInfo}>
-              <p style={financeLabel}>YOUR EARNINGS (95% SHARE)</p>
+              <p style={financeLabel}>YOUR EARNINGS (FULL ORGANIZER AMOUNT)</p>
               <h2 style={balanceValue}>GHS {stats.organizerShare.toLocaleString(undefined, {minimumFractionDigits: 2})}</h2>
             </div>
             <div style={iconCircleGold}><Sparkles size={24} color="#d4af37"/></div>
@@ -856,7 +856,7 @@ const handleEditSubmit = async (e) => {
                 <p style={guestMuted}>{t.events?.title}</p>
                 <p style={{...guestMuted, fontSize: '10px'}}>{new Date(t.created_at).toLocaleDateString()}</p>
               </div>
-              <p style={{ fontWeight: 900, color: '#16a34a' }}>GHS {(t.amount * 0.95).toFixed(2)}</p>
+              <p style={{ fontWeight: 900, color: '#16a34a' }}>GHS {parseFloat(t.base_amount || t.amount).toFixed(2)}</p>
             </div>
           </div>
         ))}
@@ -870,7 +870,7 @@ const handleEditSubmit = async (e) => {
                   <th style={tableTh}>GUEST / REFERENCE</th>
                   <th style={tableTh}>EVENT</th>
                   <th style={tableTh}>GROSS (100%)</th>
-                  <th style={tableTh}>YOUR NET (95%)</th>
+                  <th style={tableTh}>ORGANIZER RECEIVES</th>
                   <th style={tableTh}>STATUS</th>
                   <th style={tableTh}>DATE</th>
                 </tr>
@@ -885,7 +885,7 @@ const handleEditSubmit = async (e) => {
                     <td style={tableTd}>{t.events?.title}</td>
                     <td style={tableTd}>GHS {t.amount}</td>
                     <td style={{ ...tableTd, fontWeight: 900, color: '#16a34a' }}>
-                      GHS {(t.amount * 0.95).toFixed(2)}
+                      GHS {parseFloat(t.base_amount || t.amount).toFixed(2)}
                     </td>
                     <td style={tableTd}>
                       {t.is_scanned ? <span style={scannedPill}>CHECKED IN</span> : <span style={activePill}>VALID</span>}

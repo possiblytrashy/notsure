@@ -30,7 +30,7 @@ export default function RootLayout({ children }) {
     <html lang="en" style={{ scrollBehavior: 'smooth' }}>
       <head>
         <title>OUSTED — Premium Event Ticketing in Accra</title>
-        <meta name="description" content="Buy tickets for the best events in Accra. Concerts, parties, galas and more. Secured by Paystack." />
+        <meta name="description" content="Buy tickets for the best events in Accra. Secured by Paystack." />
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5" />
         <meta name="theme-color" content="#000000" />
         <meta name="robots" content="index, follow" />
@@ -107,7 +107,7 @@ export default function RootLayout({ children }) {
           <div className="footer-brand">
             <h2>OUSTED<span style={{ color: '#e73c7e' }}>.</span></h2>
             <p>Accra's premium event platform. Buy tickets, host events, run competitions — all secured by Paystack.</p>
-            <div style={{ marginTop: '20px', display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            <div style={{ marginTop: '20px', display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'flex-start' }}>
               {['Paystack Secured', 'SSL Encrypted', 'Instant Delivery'].map(t => (
                 <span key={t} style={{ fontSize: '10px', fontWeight: 800, background: '#000', color: '#fff', padding: '4px 10px', borderRadius: '6px' }}>{t}</span>
               ))}

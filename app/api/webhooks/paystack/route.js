@@ -1,158 +1,187 @@
-// FILE: app/api/webhooks/paystack/route.js
-// OUSTED FORTRESS — Paystack Webhook Handler
-// • HMAC-SHA512 signature verification with timingSafeEqual
-// • Idempotency (safe to receive same webhook multiple times)
-// • Atomic vote count increments
-// • Full ticket generation with unique ticket number
-// • Reseller commission tracking
+// OUSTED WEBHOOK ENGINE v3.0
+// Handles: charge.success for TICKET and VOTE purchases
+// Idempotent, timing-safe HMAC verification, records base_price correctly
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 
 export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
 
 function generateTicketNumber() {
-  const timestamp = Date.now().toString(36).toUpperCase();
-  const random = Math.random().toString(36).substring(2, 8).toUpperCase();
-  return `OT-${timestamp}-${random}`;
+  const ts = Date.now().toString(36).toUpperCase();
+  const rand = Math.random().toString(36).substring(2, 8).toUpperCase();
+  return `OT-${ts}-${rand}`;
 }
 
 export async function POST(req) {
+  const body = await req.text();
+  const signature = req.headers.get('x-paystack-signature') || '';
+
+  // ── TIMING-SAFE HMAC VERIFICATION ───────────────────────────────
+  const expected = crypto.createHmac('sha512', process.env.PAYSTACK_SECRET_KEY || '').update(body).digest('hex');
+  try {
+    if (!crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expected, 'hex'))) {
+      console.error('[WEBHOOK] Invalid signature');
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+  } catch {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
+  let event;
+  try { event = JSON.parse(body); } catch { return NextResponse.json({ ok: true }); }
+
+  if (event.event !== 'charge.success') return NextResponse.json({ ok: true });
+
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL,
+    process.env.SUPABASE_SERVICE_ROLE_KEY,
+    { auth: { autoRefreshToken: false, persistSession: false } }
+  );
+
+  const { reference } = event.data;
+
+  // ── IDEMPOTENCY CHECK ────────────────────────────────────────────
+  const { data: existing } = await supabase.from('webhook_log').select('id,status').eq('reference', reference).single().catch(() => ({ data: null }));
+  if (existing?.status === 'processed') {
+    console.log(`[WEBHOOK] Already processed: ${reference}`);
+    return NextResponse.json({ ok: true });
+  }
+
+  // Mark as processing
+  await supabase.from('webhook_log').upsert({ reference, status: 'processing', raw_payload: event }, { onConflict: 'reference' }).catch(() => {});
+
+  const meta = event.data.metadata || {};
   const startTime = Date.now();
-  let reference = 'unknown';
 
   try {
-    const body = await req.text();
-
-    // VERIFY PAYSTACK HMAC-SHA512 SIGNATURE
-    const secret = process.env.PAYSTACK_SECRET_KEY;
-    if (!secret) return NextResponse.json({ error: 'Server misconfiguration' }, { status: 500 });
-
-    const signature = req.headers.get('x-paystack-signature');
-    if (!signature) return NextResponse.json({ error: 'Missing signature' }, { status: 401 });
-
-    const expectedHash = crypto.createHmac('sha512', secret).update(body).digest('hex');
-
-    const sigBuf = Buffer.from(signature.padEnd(128, '0').substring(0, 128), 'hex');
-    const expBuf = Buffer.from(expectedHash, 'hex');
-
-    let isValid = true;
-    if (signature.length !== expectedHash.length) {
-      isValid = false;
-    } else {
-      try {
-        isValid = crypto.timingSafeEqual(Buffer.from(signature, 'hex'), expBuf);
-      } catch { isValid = false; }
+    if (meta.type === 'TICKET') {
+      await processTicket(supabase, event.data, meta);
+    } else if (meta.type === 'VOTE') {
+      await processVote(supabase, event.data, meta);
     }
 
-    if (!isValid) {
-      console.error('SECURITY: Invalid Paystack webhook signature — possible forgery attempt');
-      return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
-    }
-
-    let event;
-    try { event = JSON.parse(body); } catch {
-      return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
-    }
-
-    const { data } = event;
-    reference = data?.reference || 'unknown';
-
-    if (event.event !== 'charge.success' || data.status !== 'success') {
-      return NextResponse.json({ message: 'Event acknowledged' });
-    }
-
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.SUPABASE_SERVICE_ROLE_KEY,
-      { auth: { autoRefreshToken: false, persistSession: false } }
-    );
-
-    // IDEMPOTENCY CHECK
-    const { data: existing } = await supabase
-      .from('webhook_log')
-      .select('id')
-      .eq('reference', reference)
-      .eq('status', 'processed')
-      .maybeSingle();
-
-    if (existing) {
-      return NextResponse.json({ message: 'Already processed', idempotent: true });
-    }
-
+    // Mark processed
     await supabase.from('webhook_log').upsert({
-      reference, event_type: event.event,
-      amount: data.amount / 100, status: 'processing',
-      processed_at: new Date().toISOString()
-    }, { onConflict: 'reference' });
-
-    const metadata = data.metadata || {};
-    let result = {};
-
-    if (metadata.type === 'VOTE') {
-      result = await handleVotePayment(supabase, data, metadata);
-    } else if (metadata.type === 'TICKET') {
-      result = await handleTicketPayment(supabase, data, metadata);
-    }
-
-    await supabase.from('webhook_log').update({
-      status: 'processed', duration_ms: Date.now() - startTime
-    }).eq('reference', reference);
-
-    return NextResponse.json({ success: true, ...result });
+      reference, status: 'processed',
+      duration_ms: Date.now() - startTime,
+      raw_payload: event
+    }, { onConflict: 'reference' }).catch(() => {});
 
   } catch (err) {
-    console.error('Webhook error:', err.message);
-    return NextResponse.json({ error: 'Processing error', reference }, { status: 200 });
+    console.error('[WEBHOOK] Processing error:', err.message);
+    await supabase.from('webhook_log').upsert({
+      reference, status: 'failed',
+      duration_ms: Date.now() - startTime,
+      raw_payload: { ...event, _error: err.message }
+    }, { onConflict: 'reference' }).catch(() => {});
+    // Return 200 to prevent Paystack retry storms
   }
+
+  return NextResponse.json({ ok: true });
 }
 
-async function handleTicketPayment(supabase, data, metadata) {
-  const { event_id, tier_id, guest_email, guest_name, reseller_code, event_reseller_id, is_reseller_purchase, base_price } = metadata;
-  const reference = data.reference;
-  const amountPaid = data.amount / 100;
+async function processTicket(supabase, data, meta) {
+  const {
+    event_id, tier_id, guest_email, guest_name,
+    reseller_code, event_reseller_id, is_reseller_purchase,
+    base_price, buyer_price, platform_fee, reseller_commission, quantity = 1
+  } = meta;
 
-  const { data: tier } = await supabase.from('ticket_tiers').select('id, name, max_quantity').eq('id', tier_id).single();
-  if (!tier) throw new Error(`Tier ${tier_id} not found`);
+  if (!event_id || !tier_id || !guest_email) throw new Error('Missing ticket metadata');
 
-  const ticketNumber = generateTicketNumber();
+  const qty = Math.max(1, Math.min(10, parseInt(quantity, 10) || 1));
 
-  const { error: ticketErr } = await supabase.from('tickets').insert({
-    ticket_number: ticketNumber, reference,
-    event_id, tier_id, tier_name: tier.name,
-    guest_name: guest_name || 'Guest', guest_email,
-    amount: amountPaid, base_amount: base_price || amountPaid,
-    status: 'valid', is_scanned: false,
-    reseller_code: reseller_code || 'DIRECT',
+  // Capacity check before creating tickets
+  const { data: tier } = await supabase.from('ticket_tiers').select('max_quantity,name').eq('id', tier_id).single();
+  if (tier?.max_quantity > 0) {
+    const { count } = await supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('tier_id', tier_id).eq('status', 'valid');
+    if ((count || 0) + qty > tier.max_quantity) {
+      console.error(`[WEBHOOK] Oversell prevented for tier ${tier_id}`);
+      return;
+    }
+  }
+
+  // Generate tickets (one per quantity)
+  const tickets = Array.from({ length: qty }, () => ({
+    event_id,
+    tier_id,
+    tier_name: tier?.name || '',
+    reference: data.reference,
+    ticket_number: generateTicketNumber(),
+    guest_email: guest_email.trim().toLowerCase(),
+    guest_name: guest_name || 'Guest',
+    // Financial recording: store what the organizer receives (base price), not buyer price
+    amount: base_price || (data.amount / 100 / (qty || 1)),
+    base_amount: base_price || (data.amount / 100 / (qty || 1)),
+    platform_fee: platform_fee || 0,
     is_reseller_purchase: is_reseller_purchase || false,
-    created_at: new Date().toISOString()
+    reseller_code: reseller_code || 'DIRECT',
+    event_reseller_id: event_reseller_id || null,
+    status: 'valid',
+    is_scanned: false
+  }));
+
+  const { error: insertError } = await supabase.from('tickets').insert(tickets);
+  if (insertError) throw insertError;
+
+  // Update event tickets_sold counter
+  await supabase.rpc('increment_event_tickets_sold', { event_id_param: event_id, amount: qty }).catch(() => {
+    // fallback direct update
+    supabase.from('events').select('tickets_sold').eq('id', event_id).single().then(({ data: ev }) => {
+      supabase.from('events').update({ tickets_sold: (ev?.tickets_sold || 0) + qty }).eq('id', event_id);
+    });
   });
 
-  if (ticketErr) throw new Error(`Ticket creation failed: ${ticketErr.message}`);
+  // Update reseller stats
+  if (is_reseller_purchase && event_reseller_id && reseller_commission) {
+    await supabase.from('event_resellers').update({
+      tickets_sold: supabase.rpc('increment', { x: qty }),
+      total_earned: supabase.rpc('increment', { x: reseller_commission * qty })
+    }).eq('id', event_reseller_id).catch(() => {});
+  }
 
-  console.log(`✅ Ticket ${ticketNumber} created for ${guest_email}`);
-  return { ticket_number: ticketNumber, guest_name, tier_name: tier.name };
+  console.log(`[WEBHOOK] ✅ ${qty} ticket(s) created for ${guest_email} | ref: ${data.reference}`);
 }
 
-async function handleVotePayment(supabase, data, metadata) {
-  const { candidate_id, vote_count, voter_email, contest_id, competition_id } = metadata;
-  const reference = data.reference;
-  const amountPaid = data.amount / 100;
+async function processVote(supabase, data, meta) {
+  const {
+    candidate_id, candidate_name, contest_id,
+    vote_count, voter_email, voter_name,
+    vote_price, platform_fee, competition_id
+  } = meta;
+
+  if (!candidate_id || !vote_count) throw new Error('Missing vote metadata');
+
   const votes = parseInt(vote_count, 10);
 
-  if (!candidate_id || !votes) throw new Error('Invalid vote metadata');
+  // Log vote transaction (audit trail)
+  await supabase.from('vote_transactions').upsert({
+    reference: data.reference,
+    candidate_id,
+    contest_id,
+    competition_id,
+    voter_email: voter_email?.toLowerCase(),
+    voter_name: voter_name || 'Anonymous',
+    vote_count: votes,
+    vote_price: vote_price || 0,
+    platform_fee: platform_fee || 0,
+    amount_paid: data.amount / 100,
+    status: 'confirmed'
+  }, { onConflict: 'reference' }).catch(() => {});
 
-  const { data: current } = await supabase.from('candidates').select('vote_count').eq('id', candidate_id).single();
-  const { error } = await supabase.from('candidates').update({ vote_count: (current?.vote_count || 0) + votes }).eq('id', candidate_id);
-  if (error) throw new Error(`Vote update failed: ${error.message}`);
+  // Increment vote count
+  const { error: rpcError } = await supabase.rpc('increment_vote_count', {
+    p_candidate_id: candidate_id,
+    p_vote_increment: votes
+  });
 
-  await supabase.from('vote_transactions').insert({
-    reference, candidate_id, contest_id, competition_id,
-    voter_email, vote_count: votes, amount_paid: amountPaid,
-    created_at: new Date().toISOString()
-  }).then(({ error: le }) => { if (le) console.warn('Vote log failed:', le.message); });
+  if (rpcError) {
+    // Manual fallback
+    const { data: cand } = await supabase.from('candidates').select('vote_count').eq('id', candidate_id).single();
+    await supabase.from('candidates').update({ vote_count: (cand?.vote_count || 0) + votes }).eq('id', candidate_id);
+  }
 
-  return { candidate_id, votes_added: votes };
+  console.log(`[WEBHOOK] ✅ ${votes} vote(s) for ${candidate_name} | ref: ${data.reference}`);
 }
