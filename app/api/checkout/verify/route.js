@@ -1,90 +1,63 @@
-// FILE PATH: app/api/checkout/verify/route.js
-// This is a NEW file - create this endpoint
-
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
+export const runtime = 'nodejs';
+
 export async function POST(req) {
   try {
-    const { reference } = await req.json();
+    let body;
+    try { body = await req.json(); } catch { return NextResponse.json({ error: 'Invalid request' }, { status: 400 }); }
 
-    if (!reference) {
-      return NextResponse.json({ 
-        error: 'Payment reference required' 
-      }, { status: 400 });
+    const { reference } = body;
+    if (!reference || typeof reference !== 'string' || reference.length > 200) {
+      return NextResponse.json({ error: 'Valid payment reference required' }, { status: 400 });
     }
 
-    console.log("Verifying payment:", reference);
+    // Sanitize reference — only alphanumeric and hyphens
+    const safeRef = reference.replace(/[^a-zA-Z0-9_-]/g, '');
+    if (!safeRef) return NextResponse.json({ error: 'Invalid reference format' }, { status: 400 });
 
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL,
-      process.env.SUPABASE_SERVICE_ROLE_KEY
+      process.env.SUPABASE_SERVICE_ROLE_KEY,
+      { auth: { autoRefreshToken: false, persistSession: false } }
     );
 
-    // 1. Check if ticket already exists (webhook already processed)
-    const { data: ticket, error } = await supabase
+    // Check if ticket already exists (webhook processed)
+    const { data: ticket } = await supabase
       .from('tickets')
       .select('*, ticket_tiers(name)')
-      .eq('reference', reference)
+      .eq('reference', safeRef)
       .maybeSingle();
 
     if (ticket) {
-      console.log("✅ Ticket found in database:", ticket.ticket_number);
       return NextResponse.json({
-        success: true,
-        guest_name: ticket.guest_name,
+        success: true, guest_name: ticket.guest_name,
         tier_name: ticket.ticket_tiers?.name || ticket.tier_name,
         ticket_ready: true
       });
     }
 
-    // 2. If webhook hasn't processed yet, verify payment with Paystack
-    console.log("Ticket not found, verifying with Paystack...");
-    
-    const paystackRes = await fetch(
-      `https://api.paystack.co/transaction/verify/${reference}`,
-      {
-        headers: {
-          'Authorization': `Bearer ${process.env.PAYSTACK_SECRET_KEY}`
-        }
-      }
-    );
-
+    // Verify with Paystack
+    const paystackRes = await fetch(`https://api.paystack.co/transaction/verify/${encodeURIComponent(safeRef)}`, {
+      headers: { 'Authorization': `Bearer ${process.env.PAYSTACK_SECRET_KEY}` }
+    });
     const result = await paystackRes.json();
 
-    if (!result.status) {
-      console.error("Paystack verification failed:", result.message);
-      return NextResponse.json({ 
-        success: false, 
-        error: 'Payment verification failed' 
-      }, { status: 400 });
+    if (!result.status || result.data?.status !== 'success') {
+      return NextResponse.json({ success: false, error: `Payment status: ${result.data?.status || 'unknown'}` }, { status: 400 });
     }
 
-    if (result.data.status === 'success') {
-      console.log("✅ Payment confirmed by Paystack, waiting for webhook...");
-      
-      // Payment is confirmed, webhook will create ticket
-      return NextResponse.json({
-        success: true,
-        guest_name: result.data.metadata?.guest_name || 'Guest',
-        tier_name: 'Ticket',
-        ticket_pending: true, // Indicates webhook is processing
-        amount: result.data.amount / 100
-      });
-    }
-
-    // Payment failed or pending
-    console.log("❌ Payment not successful:", result.data.status);
-    return NextResponse.json({ 
-      success: false, 
-      error: `Payment status: ${result.data.status}` 
-    }, { status: 400 });
+    return NextResponse.json({
+      success: true,
+      guest_name: result.data.metadata?.guest_name || 'Guest',
+      tier_name: result.data.metadata?.tier_name || 'Ticket',
+      ticket_pending: true,
+      amount: result.data.amount / 100
+    });
 
   } catch (err) {
-    console.error('Verification error:', err);
-    return NextResponse.json({ 
-      error: 'Verification failed',
-      details: err.message 
-    }, { status: 500 });
+    console.error('Verification error:', err.message);
+    return NextResponse.json({ error: 'Verification failed' }, { status: 500 });
   }
 }

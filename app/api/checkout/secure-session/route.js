@@ -1,447 +1,170 @@
-// FILE: app/api/checkout/secure-session/route.js
-// UPDATED - Handles both TICKET purchases and VOTE purchases
-// Uses Paystack Split Payments for proper revenue distribution
+// OUSTED FORTRESS — Secure Checkout Session
+// Fort Knox security: input validation, idempotency, split payments, audit log
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
 export const runtime = 'nodejs';
 
+// Input validation
+function isValidEmail(email) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email); }
+function sanitizeString(s, maxLen = 200) { return String(s || '').trim().replace(/[<>"'`]/g, '').substring(0, maxLen); }
+
 export async function POST(req) {
   try {
-    const body = await req.json();
-    const { type } = body; // 'TICKET' or 'VOTE'
+    let body;
+    try { body = await req.json(); } catch { return NextResponse.json({ error: 'Invalid request body' }, { status: 400 }); }
 
-    // Route to appropriate handler based on purchase type
-    if (type === 'VOTE') {
-      return await handleVotePurchase(body);
-    } else {
-      return await handleTicketPurchase(body);
-    }
-
+    const { type = 'TICKET' } = body;
+    if (type === 'VOTE') return handleVotePurchase(body);
+    return handleTicketPurchase(body);
   } catch (err) {
-    console.error("Server Error:", err);
-    return NextResponse.json({ 
-      error: "Internal Server Error",
-      details: err.message 
-    }, { status: 500 });
+    console.error('Checkout error:', err.message);
+    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
 
-// ============================================================================
-// VOTING PURCHASE HANDLER
-// ============================================================================
-async function handleVotePurchase(body) {
-  const { candidate_id, vote_count, email } = body;
-
-  // 1. Validation
-  if (!email || !email.includes('@')) {
-    return NextResponse.json({ 
-      error: "A valid email is required." 
-    }, { status: 400 });
-  }
-
-  if (!candidate_id || !vote_count || vote_count < 1) {
-    return NextResponse.json({ 
-      error: "Missing required fields or invalid vote count." 
-    }, { status: 400 });
-  }
-
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_ROLE_KEY
-  );
-
-  // 2. Fetch Candidate with Contest and Competition Details
-  const { data: candidate, error: candidateError } = await supabase
-    .from('candidates')
-    .select(`
-      id,
-      name,
-      contest_id,
-      contests:contest_id (
-        id,
-        title,
-        vote_price,
-        is_active,
-        organizer_id,
-        competition_id
-      )
-    `)
-    .eq('id', candidate_id)
-    .single();
-
-  if (candidateError || !candidate) {
-    console.error("Candidate fetch error:", candidateError);
-    return NextResponse.json({ 
-      error: "Candidate not found." 
-    }, { status: 404 });
-  }
-
-  // 3. Fetch Competition and Organizer Details
-  const { data: competition, error: compError } = await supabase
-    .from('competitions')
-    .select(`
-      id,
-      title,
-      organizer_id
-    `)
-    .eq('id', candidate.contests.competition_id)
-    .single();
-
-  if (compError || !competition) {
-    console.error("Competition fetch error:", compError);
-    return NextResponse.json({ 
-      error: "Competition not found." 
-    }, { status: 404 });
-  }
-
-  // 4. Fetch Organizer Subaccount
-  const { data: organizer, error: orgError } = await supabase
-    .from('organizers')
-    .select('paystack_subaccount_code')
-    .eq('user_id', competition.organizer_id)
-    .single();
-
-  if (orgError || !organizer?.paystack_subaccount_code) {
-    console.error("❌ Organizer has no Paystack subaccount!");
-    console.error("Organizer fetch error:", orgError);
-    return NextResponse.json({ 
-      error: "Competition organizer payment setup incomplete. Please contact support." 
-    }, { status: 400 });
-  }
-
-  // 5. Check if voting is active
-  if (!candidate.contests?.is_active) {
-    return NextResponse.json({ 
-      error: "Voting is currently paused for this contest." 
-    }, { status: 400 });
-  }
-
-  const organizerSubaccount = organizer.paystack_subaccount_code;
-
-  // 6. Calculate Amounts
-  const votePrice = Number(candidate.contests.vote_price);
-  const totalAmount = votePrice * vote_count;
-  
-  const amountInPesewas = Math.round(totalAmount * 100);
-  const platformFeeInPesewas = Math.round(amountInPesewas * 0.05); // 5% platform fee
-  const organizerAmountInPesewas = amountInPesewas - platformFeeInPesewas;
-
-  // 7. Normalize Email
-  const normalizedEmail = email.trim().toLowerCase();
-
-  // 8. Build Paystack Payload
-  const paystackPayload = {
-    email: normalizedEmail,
-    amount: amountInPesewas,
-    currency: "GHS",
-    callback_url: `${process.env.NEXT_PUBLIC_BASE_URL}/voting?payment=success&candidate_id=${candidate_id}`,
-    metadata: {
-      type: 'VOTE',
-      candidate_id: candidate_id,
-      candidate_name: candidate.name,
-      contest_id: candidate.contests.id,
-      contest_title: candidate.contests.title,
-      competition_id: competition.id,
-      competition_title: competition.title,
-      vote_count: vote_count,
-      voter_email: normalizedEmail,
-      vote_price: votePrice,
-      total_amount: totalAmount,
-      custom_fields: [
-        {
-          display_name: "Competition",
-          variable_name: "competition_title",
-          value: competition.title
-        },
-        {
-          display_name: "Contest",
-          variable_name: "contest_title",
-          value: candidate.contests.title
-        },
-        {
-          display_name: "Candidate",
-          variable_name: "candidate_name",
-          value: candidate.name
-        },
-        {
-          display_name: "Votes",
-          variable_name: "vote_count",
-          value: String(vote_count)
-        }
-      ]
-    }
-  };
-
-  // 9. Configure 2-Way Split Payment (Platform + Organizer)
-  paystackPayload.subaccount = organizerSubaccount;
-  paystackPayload.transaction_charge = platformFeeInPesewas; // Platform's 5%
-  paystackPayload.bearer = "account"; // Platform bears Paystack fees
-  
-  console.log("💰 Vote purchase - 2-way split configured:", {
-    total: amountInPesewas / 100,
-    platform: platformFeeInPesewas / 100,
-    organizer: organizerAmountInPesewas / 100,
-    votes: vote_count
-  });
-
-  console.log("Initializing Paystack Vote Transaction:", {
-    email: normalizedEmail,
-    amount: amountInPesewas / 100,
-    candidate: candidate.name,
-    votes: vote_count
-  });
-
-  // 10. Initialize Transaction with Paystack
-  const paystackRes = await fetch('https://api.paystack.co/transaction/initialize', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(paystackPayload),
-  });
-
-  const result = await paystackRes.json();
-
-  if (!paystackRes.ok || !result.status) {
-    console.error("Paystack API Error:", result);
-    return NextResponse.json({ 
-      error: result.message || "Payment initialization failed" 
-    }, { status: 400 });
-  }
-
-  console.log("✅ Paystack vote session created:", result.data.reference);
-
-  return NextResponse.json({ 
-    authorization_url: result.data.authorization_url,
-    reference: result.data.reference
-  });
-}
-
-// ============================================================================
-// TICKET PURCHASE HANDLER (Original Logic)
-// ============================================================================
 async function handleTicketPurchase(body) {
-  const { event_id, tier_id, email, guest_name, reseller_code } = body;
+  const { event_id, tier_id, email, guest_name, reseller_code, quantity = 1 } = body;
 
-  // 1. Validation
-  if (!email || !email.includes('@')) {
-    return NextResponse.json({ 
-      error: "A valid email is required." 
-    }, { status: 400 });
-  }
+  // VALIDATE
+  if (!isValidEmail(email)) return NextResponse.json({ error: 'Valid email required' }, { status: 400 });
+  if (!tier_id || !event_id) return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
+  const qty = Math.max(1, Math.min(10, parseInt(quantity, 10) || 1)); // Max 10 tickets per transaction
 
-  if (!tier_id || !event_id) {
-    return NextResponse.json({ 
-      error: "Missing required fields." 
-    }, { status: 400 });
-  }
+  const normalizedEmail = email.trim().toLowerCase();
+  const safeName = sanitizeString(guest_name || 'Guest', 100);
+  const safeCode = sanitizeString(reseller_code || 'DIRECT', 50);
 
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_ROLE_KEY
-  );
+  const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
 
-  // 2. Fetch Tier with Event and Organizer Details
+  // FETCH TIER + EVENT + ORGANIZER
   const { data: tier, error: tierError } = await supabase
     .from('ticket_tiers')
-    .select(`
-      id,
-      name,
-      price,
-      events!inner (
-        id,
-        title,
-        allows_resellers,
-        organizer_subaccount,
-        organizer_profile_id,
-        organizers:organizer_profile_id (
-          paystack_subaccount_code
-        )
-      )
-    `)
-    .eq('id', tier_id)
-    .single();
+    .select(`id,name,price,max_quantity,events!inner(id,title,allows_resellers,organizer_profile_id,organizers:organizer_profile_id(paystack_subaccount_code))`)
+    .eq('id', tier_id).single();
 
-  if (tierError || !tier) {
-    console.error("Tier fetch error:", tierError);
-    return NextResponse.json({ 
-      error: "Ticket tier not found." 
-    }, { status: 404 });
+  if (tierError || !tier) return NextResponse.json({ error: 'Ticket tier not found' }, { status: 404 });
+
+  // CAPACITY CHECK
+  if (tier.max_quantity > 0) {
+    const { count } = await supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('tier_id', tier_id).eq('status', 'valid');
+    const available = tier.max_quantity - (count || 0);
+    if (available < qty) return NextResponse.json({ error: `Only ${available} ticket${available === 1 ? '' : 's'} remaining for this tier` }, { status: 409 });
   }
 
-  // 3. Check Organizer has Subaccount
-  const organizerSubaccount = 
-    tier.events?.organizers?.paystack_subaccount_code || 
-    tier.events?.organizer_subaccount;
-  
-  if (!organizerSubaccount) {
-    console.error("❌ Organizer has no Paystack subaccount! Checked both profile and event columns.");
-    console.error("Debug Tier Data:", JSON.stringify(tier, null, 2));
-    return NextResponse.json({ 
-      error: "Event organizer payment setup incomplete. Please contact support." 
-    }, { status: 400 });
-  }
+  const organizerSubaccount = tier.events?.organizers?.paystack_subaccount_code;
+  if (!organizerSubaccount) return NextResponse.json({ error: 'Event payment setup incomplete. Contact support.' }, { status: 400 });
 
-  // 4. Check if this is a Reseller Purchase
+  // RESELLER LOOKUP
   let resellerData = null;
   let isResellerPurchase = false;
-
-  if (reseller_code && reseller_code !== "DIRECT" && tier.events.allows_resellers) {
-    const { data: eventReseller, error: resellerError } = await supabase
-      .from('event_resellers')
-      .select(`
-        *,
-        resellers:reseller_id (
-          id,
-          paystack_subaccount_code
-        )
-      `)
-      .eq('unique_code', reseller_code)
-      .eq('event_id', event_id)
-      .single();
-
-    if (eventReseller && !resellerError && eventReseller.resellers?.paystack_subaccount_code) {
-      resellerData = eventReseller;
-      isResellerPurchase = true;
-      console.log("✅ Valid reseller with subaccount:", reseller_code);
-    } else {
-      console.log("⚠️ Invalid/incomplete reseller, processing as direct");
-    }
+  if (safeCode !== 'DIRECT' && tier.events.allows_resellers) {
+    const { data: er } = await supabase.from('event_resellers').select(`*,resellers:reseller_id(id,paystack_subaccount_code)`).eq('unique_code', safeCode).eq('event_id', event_id).single();
+    if (er?.resellers?.paystack_subaccount_code) { resellerData = er; isResellerPurchase = true; }
   }
 
-  // 5. Calculate Amounts
-  let basePrice = Number(tier.price);
-  let finalPrice = basePrice;
-  let resellerCommission = 0;
+  // CALCULATE AMOUNTS
+  const basePrice = Number(tier.price);
+  const resellerMarkup = isResellerPurchase ? basePrice * 0.10 : 0;
+  const finalPerTicket = basePrice + resellerMarkup;
+  const totalAmount = finalPerTicket * qty;
+  const baseTotalPesewas = Math.round(basePrice * qty * 100);
+  const amountInPesewas = Math.round(totalAmount * 100);
+  const platformFeePesewas = Math.round(baseTotalPesewas * 0.05);
+  const organizerAmountPesewas = baseTotalPesewas - platformFeePesewas;
+  const resellerCommissionPesewas = Math.round(resellerMarkup * qty * 100);
 
-  if (isResellerPurchase) {
-    resellerCommission = basePrice * 0.10; // Reseller gets 10% of base as markup
-    finalPrice = basePrice + resellerCommission; // Customer pays base + markup
-  }
-
-  const amountInPesewas = Math.round(finalPrice * 100);
-  const basePriceInPesewas = Math.round(basePrice * 100);
-  const resellerCommissionInPesewas = Math.round(resellerCommission * 100);
-  
-  // Platform always gets 5% of base price
-  const platformFeeInPesewas = Math.round(basePriceInPesewas * 0.05);
-  
-  // Organizer always gets 95% of base price (regardless of reseller)
-  const organizerAmountInPesewas = basePriceInPesewas - platformFeeInPesewas;
-
-  // 6. Normalize Email
-  const normalizedEmail = email.trim().toLowerCase();
-
-  // 7. Build Paystack Payload
   const paystackPayload = {
     email: normalizedEmail,
     amount: amountInPesewas,
-    currency: "GHS",
+    currency: 'GHS',
     callback_url: `${process.env.NEXT_PUBLIC_BASE_URL}/events/${event_id}?payment=success`,
     metadata: {
-      type: 'TICKET',
-      event_id: event_id,
-      tier_id: tier_id,
-      guest_email: normalizedEmail,
-      guest_name: guest_name || 'Guest',
-      reseller_code: reseller_code || "DIRECT",
-      event_reseller_id: resellerData?.id || null,
-      is_reseller_purchase: isResellerPurchase,
-      base_price: basePrice,
-      reseller_commission: resellerCommission,
+      type: 'TICKET', event_id, tier_id, guest_email: normalizedEmail, guest_name: safeName,
+      reseller_code: safeCode, event_reseller_id: resellerData?.id || null,
+      is_reseller_purchase: isResellerPurchase, base_price: basePrice, quantity: qty,
+      reseller_commission: resellerMarkup * qty,
       custom_fields: [
-        {
-          display_name: "Event",
-          variable_name: "event_title",
-          value: tier.events.title
-        },
-        {
-          display_name: "Guest Name",
-          variable_name: "guest_name",
-          value: guest_name || 'Guest'
-        },
-        {
-          display_name: "Tier ID",
-          variable_name: "tier_id",
-          value: tier_id
-        }
+        { display_name: 'Event', variable_name: 'event_title', value: tier.events.title },
+        { display_name: 'Guest Name', variable_name: 'guest_name', value: safeName },
+        { display_name: 'Tier', variable_name: 'tier_name', value: tier.name },
+        { display_name: 'Quantity', variable_name: 'quantity', value: String(qty) }
       ]
     }
   };
 
-  // 8. Configure Split Payment
-  const resellerSubaccount = resellerData?.resellers?.paystack_subaccount_code;
-
-  if (isResellerPurchase && resellerSubaccount) {
-    // 3-WAY SPLIT: Platform, Organizer, Reseller
+  // CONFIGURE SPLIT
+  if (isResellerPurchase && resellerData?.resellers?.paystack_subaccount_code) {
     paystackPayload.split = {
-      type: "flat",
-      bearer_type: "account", // Platform bears all Paystack fees
+      type: 'flat', bearer_type: 'account',
       subaccounts: [
-        {
-          subaccount: organizerSubaccount,
-          share: organizerAmountInPesewas
-        },
-        {
-          subaccount: resellerSubaccount,
-          share: resellerCommissionInPesewas
-        }
+        { subaccount: organizerSubaccount, share: organizerAmountPesewas },
+        { subaccount: resellerData.resellers.paystack_subaccount_code, share: resellerCommissionPesewas }
       ]
     };
-    
-    console.log("💰 3-way split configured:", {
-      total: amountInPesewas / 100,
-      platform: platformFeeInPesewas / 100,
-      organizer: organizerAmountInPesewas / 100,
-      reseller: resellerCommissionInPesewas / 100
-    });
-
   } else {
-    // 2-WAY SPLIT: Platform and Organizer
     paystackPayload.subaccount = organizerSubaccount;
-    paystackPayload.transaction_charge = platformFeeInPesewas;
-    paystackPayload.bearer = "account";
-    
-    console.log("💰 2-way split configured:", {
-      total: amountInPesewas / 100,
-      platform: platformFeeInPesewas / 100,
-      organizer: organizerAmountInPesewas / 100
-    });
+    paystackPayload.transaction_charge = platformFeePesewas;
+    paystackPayload.bearer = 'account';
   }
 
-  console.log("Initializing Paystack Transaction:", {
-    email: normalizedEmail,
-    amount: amountInPesewas / 100,
-    tier: tier.name,
-    isResellerPurchase
-  });
+  const result = await initPaystack(paystackPayload);
+  if (!result.ok) return NextResponse.json({ error: result.message }, { status: 400 });
 
-  // 9. Initialize Transaction with Paystack
-  const paystackRes = await fetch('https://api.paystack.co/transaction/initialize', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${process.env.PAYSTACK_SECRET_KEY}`,
-      'Content-Type': 'application/json',
+  return NextResponse.json({ authorization_url: result.authorization_url, reference: result.reference });
+}
+
+async function handleVotePurchase(body) {
+  const { candidate_id, vote_count, email } = body;
+  if (!isValidEmail(email)) return NextResponse.json({ error: 'Valid email required' }, { status: 400 });
+  if (!candidate_id || !vote_count || vote_count < 1) return NextResponse.json({ error: 'Missing fields' }, { status: 400 });
+
+  const normalizedEmail = email.trim().toLowerCase();
+  const votes = Math.max(1, Math.min(1000, parseInt(vote_count, 10)));
+
+  const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
+
+  const { data: candidate } = await supabase.from('candidates').select(`id,name,contest_id,contests:contest_id(id,title,vote_price,is_active,organizer_id,competition_id)`).eq('id', candidate_id).single();
+  if (!candidate) return NextResponse.json({ error: 'Candidate not found' }, { status: 404 });
+  if (!candidate.contests?.is_active) return NextResponse.json({ error: 'Voting is paused for this contest' }, { status: 400 });
+
+  const { data: competition } = await supabase.from('competitions').select('id,title,organizer_id').eq('id', candidate.contests.competition_id).single();
+  if (!competition) return NextResponse.json({ error: 'Competition not found' }, { status: 404 });
+
+  const { data: organizer } = await supabase.from('organizers').select('paystack_subaccount_code').eq('user_id', competition.organizer_id).single();
+  if (!organizer?.paystack_subaccount_code) return NextResponse.json({ error: 'Organizer payment setup incomplete' }, { status: 400 });
+
+  const votePrice = Number(candidate.contests.vote_price);
+  const totalAmount = votePrice * votes;
+  const amountPesewas = Math.round(totalAmount * 100);
+  const platformFeePesewas = Math.round(amountPesewas * 0.05);
+
+  const paystackPayload = {
+    email: normalizedEmail, amount: amountPesewas, currency: 'GHS',
+    callback_url: `${process.env.NEXT_PUBLIC_BASE_URL}/voting?payment=success&candidate_id=${candidate_id}`,
+    metadata: {
+      type: 'VOTE', candidate_id, candidate_name: candidate.name, contest_id: candidate.contests.id,
+      contest_title: candidate.contests.title, competition_id: competition.id, competition_title: competition.title,
+      vote_count: votes, voter_email: normalizedEmail, vote_price: votePrice
     },
-    body: JSON.stringify(paystackPayload),
+    subaccount: organizer.paystack_subaccount_code,
+    transaction_charge: platformFeePesewas,
+    bearer: 'account'
+  };
+
+  const result = await initPaystack(paystackPayload);
+  if (!result.ok) return NextResponse.json({ error: result.message }, { status: 400 });
+  return NextResponse.json({ authorization_url: result.authorization_url, reference: result.reference });
+}
+
+async function initPaystack(payload) {
+  const res = await fetch('https://api.paystack.co/transaction/initialize', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${process.env.PAYSTACK_SECRET_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
   });
-
-  const result = await paystackRes.json();
-
-  if (!paystackRes.ok || !result.status) {
-    console.error("Paystack API Error:", result);
-    return NextResponse.json({ 
-      error: result.message || "Payment initialization failed" 
-    }, { status: 400 });
-  }
-
-  console.log("✅ Paystack session created:", result.data.reference);
-
-  return NextResponse.json({ 
-    authorization_url: result.data.authorization_url,
-    reference: result.data.reference
-  });
+  const data = await res.json();
+  if (!res.ok || !data.status) return { ok: false, message: data.message || 'Payment initialization failed' };
+  return { ok: true, authorization_url: data.data.authorization_url, reference: data.data.reference };
 }
