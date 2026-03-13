@@ -95,7 +95,7 @@ const LocationPicker = ({ position, setPosition, setLocationName }) => {
         showMarker: false, // We use our own marker
         retainZoomLevel: false,
         animateZoom: true,
-        searchLabel: 'Search venue in Ghana...',
+        searchLabel: 'Search venue anywhere...',
       });
 
       map.addControl(searchControl);
@@ -782,8 +782,8 @@ const handleEditSubmit = async (e) => {
   style={circleAction} 
   onClick={() => {
     setEditingEvent(event); 
-    // Load existing coordinates or default to Accra
-    setMapCoords(event.lat && event.lng ? [event.lat, event.lng] : [5.6037, -0.1870]); 
+    // Load existing coordinates or default to 
+    setMapCoords(event.lat && event.lng ? [event.lat, event.lng] : [0, 0]); 
     setShowEventModal(true);
   }}
 >

@@ -43,10 +43,10 @@ export default function Auth() {
       <div className="auth-info" style={{ padding: '40px', background: '#000', borderRadius: '36px', color: '#fff', display: 'flex', flexDirection: 'column', justifyContent: 'center', minHeight: '500px' }}>
         <div style={{ marginBottom: '10px' }}><Sparkles size={32} color="#e73c7e" /></div>
         <h2 style={{ fontSize: '38px', fontWeight: 950, letterSpacing: '-2px', margin: '15px 0 20px', lineHeight: 0.9 }}>
-          {isSignup ? (role === 'organizer' ? 'Start selling tickets today.' : 'Your pass to Accra\'s best events.') : 'Welcome back.'}
+          {isSignup ? (role === 'organizer' ? 'Start selling tickets today.' : 'Your pass to Worldwide\'s best events.') : 'Welcome back.'}
         </h2>
         <p style={{ color: 'rgba(255,255,255,0.55)', fontSize: '15px', lineHeight: 1.6, margin: '0 0 35px' }}>
-          {role === 'organizer' ? 'Join the organizers running the most exclusive events in Ghana.' : 'Access all your tickets, voting power, and exclusive events in one place.'}
+          {role === 'organizer' ? 'Join the organizers running the most exclusive events in your city.' : 'Access all your tickets, voting power, and exclusive events in one place.'}
         </p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
           {benefits.map(({ icon: Icon, text }, i) => (
@@ -61,7 +61,7 @@ export default function Auth() {
       {/* AUTH FORM */}
       <div className="auth-grid" style={{ background: 'rgba(255,255,255,0.85)', backdropFilter: 'blur(20px)', borderRadius: '36px', padding: '44px', border: '1px solid rgba(255,255,255,0.6)' }}>
         <h2 style={{ fontWeight: 950, fontSize: '28px', textAlign: 'center', margin: '0 0 8px', letterSpacing: '-1px' }}>{isSignup ? 'Create Account' : 'Sign In'}</h2>
-        <p style={{ textAlign: 'center', fontSize: '14px', color: '#64748b', fontWeight: 600, margin: '0 0 28px' }}>{isSignup ? 'Join thousands of event-goers in Accra' : 'Access your tickets and dashboard'}</p>
+        <p style={{ textAlign: 'center', fontSize: '14px', color: '#64748b', fontWeight: 600, margin: '0 0 28px' }}>{isSignup ? 'Join thousands of event-goers in Worldwide' : 'Access your tickets and dashboard'}</p>
 
         {/* ROLE SELECTOR */}
         <div style={{ display: 'flex', background: '#f1f5f9', borderRadius: '16px', padding: '5px', marginBottom: '22px' }}>

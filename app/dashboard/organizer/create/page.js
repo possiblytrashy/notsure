@@ -82,7 +82,7 @@ const MapLogic = ({ lat, lng, setEventData }) => {
           showMarker: false,
           retainZoomLevel: false,
           animateZoom: true,
-          searchLabel: 'Search venue in Ghana...',
+          searchLabel: 'Search venue by city or address...',
           classNames: { 
             container: 'luxury-search-container',
             button: 'luxury-search-btn',
@@ -155,8 +155,8 @@ export default function CreateEvent() {
     minute: '00',
     period: 'PM',
     location: '', 
-    lat: 5.6037, // Default Accra
-    lng: -0.1870,
+    lat: 0, // Default center — user will pick their location
+    lng: 0,
     category: 'Entertainment',
     images: [], 
     is_published: true

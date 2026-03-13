@@ -23,13 +23,13 @@ const luxuryIcon = typeof window !== 'undefined' ? L.divIcon({
 export default function LuxuryMap({ lat, lng, location }) {
   return (
     <MapContainer 
-      center={[lat || 5.6037, lng || -0.1870]} 
+      center={[lat || 0, lng || 0]} 
       zoom={15} 
       style={{ height: '100%', width: '100%' }}
     >
       <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" />
       <MapUpdater lat={lat} lng={lng} />
-      {luxuryIcon && <Marker position={[lat || 5.6037, lng || -0.1870]} icon={luxuryIcon} />}
+      {luxuryIcon && <Marker position={[lat || 0, lng || 0]} icon={luxuryIcon} />}
     </MapContainer>
   );
 }

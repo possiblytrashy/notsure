@@ -193,24 +193,58 @@ export default function EventPage() {
     validate();
   }, [refCode, id]);
 
-  // Auto-verify on return from Paystack
+  // Auto-verify on return from Paystack — resilient with retries
   useEffect(() => {
     if (!event || event === 'DELETED') return;
     const verify = async () => {
       const params = new URLSearchParams(window.location.search);
-      const ref = params.get('reference');
+      const ref = params.get('reference') || params.get('trxref');
       const ps = params.get('payment');
       if (!ref || ps !== 'success') return;
       setIsProcessing(true);
-      try {
-        const res = await fetch('/api/checkout/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reference: ref }) });
-        const data = await res.json();
-        if (data.success) {
-          setPaymentSuccess({ reference: ref, customer: data.guest_name || guestEmail, tier: data.tier_name || 'Ticket' });
-          window.history.replaceState({}, '', `/events/${id}`);
-        } else { alert('Verification failed. Contact support with ref: ' + ref); }
-      } catch { alert('Unable to verify. Contact support.'); }
-      finally { setIsProcessing(false); }
+      window.history.replaceState({}, '', `/events/${id}`);
+
+      // Retry up to 5 times with backoff (webhook may be slightly delayed)
+      let attempts = 0;
+      const maxAttempts = 5;
+      const attemptVerify = async () => {
+        try {
+          const res = await fetch(`/api/checkout/verify?reference=${encodeURIComponent(ref)}`);
+          const data = await res.json();
+
+          if (data.ticket_ready && data.ticket) {
+            setPaymentSuccess({
+              reference: ref,
+              customer: data.ticket.guest_email || guestName || 'Guest',
+              tier: data.ticket.tier_name || activeTier?.name || 'Ticket'
+            });
+            setIsProcessing(false);
+            return;
+          }
+
+          if (data.status === 'processing' || data.status === 'paid') {
+            // Webhook in flight — retry with backoff
+            attempts++;
+            if (attempts < maxAttempts) {
+              setTimeout(attemptVerify, 2000 * attempts);
+            } else {
+              // Show partial success — payment confirmed but ticket still processing
+              setPaymentSuccess({ reference: ref, customer: guestEmail || 'Guest', tier: 'Processing...', pending: true });
+              setIsProcessing(false);
+            }
+            return;
+          }
+
+          // Not confirmed
+          setIsProcessing(false);
+          alert(`Payment not confirmed. If you were charged, contact support with reference: ${ref}`);
+        } catch {
+          attempts++;
+          if (attempts < maxAttempts) setTimeout(attemptVerify, 3000);
+          else { setIsProcessing(false); alert(`Verification error. Save this reference: ${ref}`); }
+        }
+      };
+      await attemptVerify();
     };
     verify();
   }, [id, event]);

@@ -199,7 +199,7 @@ async function handleVotePurchase(body) {
     email: normalizedEmail,
     amount: totalAmountPesewas,
     currency: 'GHS',
-    callback_url: `${process.env.NEXT_PUBLIC_BASE_URL}/voting?payment=success&candidate_id=${candidate_id}&votes=${votes}`,
+    callback_url: `${process.env.NEXT_PUBLIC_BASE_URL}/dashboard/user?payment=success`,
     metadata: {
       type: 'VOTE',
       candidate_id, candidate_name: candidate.name,

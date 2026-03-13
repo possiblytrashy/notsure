@@ -242,7 +242,7 @@ export default function Home() {
           <span style={{WebkitTextStroke:'2px #000',WebkitTextFillColor:'transparent'}}>Experience.</span>
         </h1>
         <p style={{fontSize:'17px',color:'#64748b',fontWeight:600,margin:'22px 0 0',maxWidth:'480px',lineHeight:1.6}}>
-          Accra's premium event ticketing. Concerts, parties, galas — get in before it sells out.
+          's premium event ticketing. Concerts, parties, galas — get in before it sells out.
         </p>
         <div style={{position:'relative',width:'100%',maxWidth:'580px',marginTop:'36px'}}>
           <Search size={19} style={{position:'absolute',left:'22px',top:'50%',transform:'translateY(-50%)',color:'#94a3b8'}}/>
@@ -250,7 +250,7 @@ export default function Home() {
           {search&&<button onClick={()=>setSearch('')} style={{position:'absolute',right:'18px',top:'50%',transform:'translateY(-50%)',background:'none',border:'none',cursor:'pointer',color:'#94a3b8',padding:'4px'}}><X size={17}/></button>}
         </div>
         <div style={{display:'flex',gap:'22px',marginTop:'25px',flexWrap:'wrap',justifyContent:'center'}}>
-          {[{icon:Shield,text:'Paystack Secured'},{icon:CheckCircle,text:'Instant Tickets'},{icon:Globe,text:'Accra & Beyond'}].map(({icon:Icon,text},i)=>(
+          {[{icon:Shield,text:'Paystack Secured'},{icon:CheckCircle,text:'Instant Tickets'},{icon:Globe,text:' & Beyond'}].map(({icon:Icon,text},i)=>(
             <div key={i} style={{display:'flex',alignItems:'center',gap:'5px',fontSize:'12px',fontWeight:700,color:'#64748b'}}><Icon size={13} color="#10b981"/> {text}</div>
           ))}
         </div>
