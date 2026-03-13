@@ -1,279 +1,216 @@
 "use client";
-import { useState, useEffect, useMemo } from 'react';
-import { Html5QrcodeScanner } from 'html5-qrcode';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase } from '../../../lib/supabase';
-import { 
-  CheckCircle2, XCircle, AlertCircle, RefreshCw, 
-  Camera, History as HistoryIcon, UserCheck, 
-  MapPin, Search, Filter, Tag
+import {
+  CheckCircle2, XCircle, AlertCircle, RefreshCw, Camera,
+  History as HistoryIcon, UserCheck, MapPin, Search,
+  Filter, Tag, ShieldCheck, ShieldX, AlertTriangle, Loader2
 } from 'lucide-react';
 
-export default function AdvancedScanner() {
-  // --- 1. STATE MANAGEMENT ---
+export default function GateScanner() {
   const [events, setEvents] = useState([]);
-  const [selectedEvent, setSelectedEvent] = useState(null); 
+  const [selectedEvent, setSelectedEvent] = useState(null);
   const [eventSearch, setEventSearch] = useState('');
-  const [manualTicketSearch, setManualTicketSearch] = useState('');
+  const [manualRef, setManualRef] = useState('');
   const [scanHistory, setScanHistory] = useState([]);
   const [isScanning, setIsScanning] = useState(true);
-  const [status, setStatus] = useState({ 
-    type: 'ready', message: 'Ready to Scan', color: '#1e293b', details: 'Position QR code in frame', eventName: '', tier: '' 
-  });
+  const [status, setStatus] = useState({ type: 'ready', reason: null, message: 'Ready to Scan', sub: 'Position QR in frame', event_name: '', tier: '', guest: '' });
+  const scannerRef = useRef(null);
 
-  // --- 2. INITIALIZATION ---
   useEffect(() => {
-    async function loadEvents() {
-      const { data } = await supabase.from('events').select('id, title').order('created_at', { ascending: false });
-      if (data) setEvents(data);
-    }
-    loadEvents();
+    supabase.from('events').select('id,title,date').order('date', { ascending: false })
+      .then(({ data }) => { if (data) setEvents(data); });
   }, []);
 
-  const filteredEvents = useMemo(() => {
-    return events.filter(e => e.title.toLowerCase().includes(eventSearch.toLowerCase()));
-  }, [events, eventSearch]);
+  const filteredEvents = useMemo(() => events.filter(e => e.title?.toLowerCase().includes(eventSearch.toLowerCase())), [events, eventSearch]);
 
-  // --- 3. VERIFICATION LOGIC ---
-  const verifyTicket = async (decodedText, isManual = false) => {
+  // ── VERIFY VIA SERVER API ─────────────────────────────────────
+  const verifyQR = async (rawData, isManual = false) => {
     if (!isScanning && !isManual) return;
-
     setIsScanning(false);
-    let ticketRef = "";
-    let qrEventId = "";
-
-    if (decodedText.includes('REF:') && decodedText.includes('|')) {
-      const segments = decodedText.split('|');
-      ticketRef = segments[0].replace('REF:', '').trim();
-      qrEventId = segments[1].replace('EVT:', '').trim();
-    } else {
-      ticketRef = decodedText.trim();
-    }
-
-    setStatus({ type: 'loading', message: 'Verifying...', color: '#0ea5e9', details: `Ref: ${ticketRef}`, tier: '' });
+    setStatus({ type: 'loading', message: 'Verifying...', sub: rawData.substring(0, 30), event_name: '', tier: '', guest: '' });
 
     try {
-      const { data: ticket, error: fetchError } = await supabase
-        .from('tickets')
-        .select(`id, guest_name, tier_name, is_scanned, status, event_id, updated_at, events(title)`)
-        .eq('reference', ticketRef)
-        .maybeSingle();
-
-      if (fetchError) throw fetchError;
-
-      if (!ticket) {
-        setStatus({ type: 'error', message: 'NOT FOUND', color: '#ef4444', details: 'No record matches this reference.', tier: '' });
-        return;
-      }
-
-      const eventTitle = ticket.events?.title || 'Event';
-      const ticketTier = ticket.tier_name || 'Standard Entry';
-
-      // Security Check: Event Match
-      if (selectedEvent && ticket.event_id !== selectedEvent.id) {
-        setStatus({ 
-            type: 'error', message: 'WRONG EVENT', color: '#000', 
-            details: `Valid for: ${eventTitle}`,
-            eventName: 'GATE DENIED',
-            tier: ticketTier
-        });
-        return;
-      }
-
-      // Security Check: QR Data Integrity
-      if (qrEventId && ticket.event_id !== qrEventId) {
-        setStatus({ type: 'error', message: 'QR TAMPERED', color: '#7f1d1d', details: 'Event ID mismatch.', tier: ticketTier });
-        return;
-      }
-
-      // Payment Status Check
-      if (ticket.status !== 'valid' && ticket.status !== 'success') {
-        setStatus({ type: 'error', message: 'INVALID STATUS', color: '#f59e0b', details: `Ticket is ${ticket.status}`, tier: ticketTier });
-        return;
-      }
-
-      // Already Scanned Check
-      if (ticket.is_scanned) {
-        setStatus({ 
-          type: 'warning', message: 'USED TICKET', color: '#64748b', 
-          details: `In: ${new Date(ticket.updated_at).toLocaleTimeString()}`, 
-          eventName: eventTitle,
-          tier: ticketTier
-        });
-        return;
-      }
-
-      // Success Path
-      const { error: updateError } = await supabase
-        .from('tickets')
-        .update({ is_scanned: true, updated_at: new Date().toISOString() })
-        .eq('id', ticket.id);
-
-      if (updateError) throw updateError;
-
-      setScanHistory(prev => [{
-        name: ticket.guest_name, event: eventTitle, tier: ticketTier, time: new Date().toLocaleTimeString()
-      }, ...prev].slice(0, 5));
-
-      setStatus({ 
-        type: 'success', message: 'ACCESS GRANTED', color: '#22c55e', 
-        details: ticket.guest_name, 
-        eventName: eventTitle,
-        tier: ticketTier 
+      const res = await fetch('/api/scanner/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          qr_data: rawData.trim(),
+          selected_event_id: selectedEvent?.id || null,
+          scanner_id: 'gate-web'
+        })
       });
+      const d = await res.json();
 
-    } catch (err) {
-      console.error(err);
-      setStatus({ type: 'error', message: 'SYSTEM ERROR', color: '#000', details: 'Check internet connection.', tier: '' });
+      const base = { event_name: d.event_name || '', tier: d.tier || '', guest: d.guest_name || '' };
+
+      if (d.valid) {
+        setScanHistory(prev => [{
+          guest: d.guest_name, tier: d.tier, event: d.event_name, time: new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })
+        }, ...prev].slice(0, 8));
+        setStatus({ ...base, type: 'success', reason: 'ACCESS_GRANTED', message: 'ACCESS GRANTED', sub: d.guest_name });
+        if (d.signature_warning) {
+          setTimeout(() => setStatus(s => ({ ...s, sub: `${d.guest_name} (legacy QR — no signature)` })), 300);
+        }
+      } else if (d.reason === 'FORGED_QR') {
+        setStatus({ ...base, type: 'forged', reason: 'FORGED_QR', message: 'FORGED QR DETECTED', sub: 'Do not allow entry. Alert security.' });
+      } else if (d.reason === 'ALREADY_USED') {
+        setStatus({ ...base, type: 'warning', reason: 'ALREADY_USED', message: 'TICKET ALREADY USED', sub: d.message });
+      } else if (d.reason === 'WRONG_EVENT') {
+        setStatus({ ...base, type: 'wrong', reason: 'WRONG_EVENT', message: 'WRONG EVENT', sub: `Valid for: "${d.event_name}"` });
+      } else {
+        setStatus({ ...base, type: 'error', reason: d.reason, message: d.reason?.replace(/_/g, ' ') || 'INVALID', sub: d.message });
+      }
+    } catch {
+      setStatus({ type: 'error', message: 'NETWORK ERROR', sub: 'Check internet connection', event_name: '', tier: '', guest: '' });
     }
   };
 
+  // ── QR SCANNER INIT ───────────────────────────────────────────
   useEffect(() => {
     if (!isScanning) return;
-    const scanner = new Html5QrcodeScanner('reader', { fps: 15, qrbox: 250 });
-    scanner.render(verifyTicket, () => {});
-    return () => scanner.clear().catch(() => {});
+    let scanner = null;
+    import('html5-qrcode').then(({ Html5QrcodeScanner }) => {
+      scanner = new Html5QrcodeScanner('reader', { fps: 15, qrbox: 260 }, false);
+      scanner.render((decoded) => verifyQR(decoded), () => {});
+      scannerRef.current = scanner;
+    });
+    return () => { scanner?.clear().catch(() => {}); };
   }, [isScanning, selectedEvent]);
 
+  // ── COLORS & ICONS ────────────────────────────────────────────
+  const statusConfig = {
+    ready:   { bg: '#0f172a', icon: <Camera size={52} />,             accent: '#334155' },
+    loading: { bg: '#0c1a2e', icon: <Loader2 size={52} style={{ animation: 'spin .8s linear infinite' }} />, accent: '#0ea5e9' },
+    success: { bg: '#052e16', icon: <CheckCircle2 size={52} />,       accent: '#22c55e' },
+    warning: { bg: '#1c1708', icon: <AlertCircle size={52} />,        accent: '#f59e0b' },
+    error:   { bg: '#1a0505', icon: <XCircle size={52} />,            accent: '#ef4444' },
+    wrong:   { bg: '#1a0c00', icon: <AlertTriangle size={52} />,      accent: '#f97316' },
+    forged:  { bg: '#1a0000', icon: <ShieldX size={52} />,            accent: '#dc2626' },
+  };
+  const cfg = statusConfig[status.type] || statusConfig.ready;
+
   return (
-    <div style={styles.container}>
-      {/* EVENT SELECTOR SECTION */}
-      <div style={styles.topSection}>
-        <div style={styles.headerRow}>
-          <h2 style={{fontWeight: 950, margin: 0, fontSize: '20px'}}>Gate Portal</h2>
-        </div>
+    <div style={{ maxWidth: 480, margin: '0 auto', padding: '15px 14px 80px', fontFamily: 'system-ui,-apple-system,sans-serif', background: '#f8fafc', minHeight: '100vh' }}>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}@keyframes pulse{0%,100%{opacity:.5}50%{opacity:1}}`}</style>
 
-        {!selectedEvent ? (
-          <div style={styles.eventPicker}>
-            <p style={styles.label}>Select Gate Event:</p>
-            <div style={styles.searchBox}>
-              <Search size={16} color="#94a3b8" />
-              <input 
-                style={styles.input} 
-                placeholder="Search..." 
-                value={eventSearch}
-                onChange={(e) => setEventSearch(e.target.value)}
-              />
-            </div>
-            <div style={styles.eventList}>
-              {filteredEvents.map(e => (
-                <div key={e.id} style={styles.eventItem} onClick={() => setSelectedEvent(e)}>
-                  <span>{e.title}</span>
-                  <Filter size={14} color="#38bdf8" />
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div style={styles.activeEventCard}>
-            <div style={styles.activeEventInfo}>
-              <MapPin size={16} color="#38bdf8" />
-              <span style={{fontWeight: 800}}>{selectedEvent.title}</span>
-            </div>
-            <button style={styles.changeBtn} onClick={() => setSelectedEvent(null)}>Change Event</button>
-          </div>
-        )}
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+        <div>
+          <h1 style={{ fontSize: 22, fontWeight: 950, margin: 0, letterSpacing: '-1px' }}>Gate Portal</h1>
+          <p style={{ margin: '2px 0 0', fontSize: 12, color: '#94a3b8', fontWeight: 700 }}>OUSTED · Secure Entry Scanner</p>
+        </div>
+        <div style={{ background: '#22c55e15', border: '1px solid #22c55e30', borderRadius: 12, padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <ShieldCheck size={12} color="#22c55e" />
+          <span style={{ fontSize: 9, fontWeight: 900, color: '#22c55e', letterSpacing: '1.5px' }}>SECURED</span>
+        </div>
       </div>
 
-      {/* MANUAL SEARCH */}
-      <div style={styles.searchWrapper}>
-        <Search size={18} style={styles.searchIcon} />
-        <input 
-          style={styles.searchInput} 
-          placeholder="Manual Ticket ID Entry" 
-          value={manualTicketSearch}
-          onChange={(e) => setManualTicketSearch(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && verifyTicket(manualTicketSearch, true)}
+      {/* Event selector */}
+      {!selectedEvent ? (
+        <div style={{ background: '#fff', borderRadius: 20, padding: 16, marginBottom: 14, border: '1px solid #e2e8f0', boxShadow: '0 1px 4px rgba(0,0,0,.04)' }}>
+          <p style={{ margin: '0 0 10px', fontSize: 11, fontWeight: 900, color: '#94a3b8', letterSpacing: '1.5px' }}>SELECT EVENT (OPTIONAL)</p>
+          <div style={{ display: 'flex', alignItems: 'center', background: '#f8fafc', padding: '0 12px', borderRadius: 12, border: '1px solid #e2e8f0', marginBottom: 10 }}>
+            <Search size={13} color="#94a3b8" />
+            <input style={{ flex: 1, border: 'none', padding: '10px 8px', outline: 'none', fontSize: 13, background: 'transparent' }} placeholder="Search events..." value={eventSearch} onChange={e => setEventSearch(e.target.value)} />
+          </div>
+          <div style={{ maxHeight: 130, overflowY: 'auto' }}>
+            {filteredEvents.map(e => (
+              <div key={e.id} onClick={() => setSelectedEvent(e)} style={{ padding: '10px 8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f1f5f9', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>
+                <span>{e.title}</span><Filter size={12} color="#38bdf8" />
+              </div>
+            ))}
+            <div onClick={() => setSelectedEvent({ id: null, title: 'Any Event' })} style={{ padding: '10px 8px', fontSize: 12, color: '#94a3b8', fontWeight: 700, cursor: 'pointer' }}>
+              → Accept tickets for ANY event
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div style={{ background: '#0f172a', color: '#fff', padding: '13px 15px', borderRadius: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <MapPin size={14} color="#38bdf8" />
+            <span style={{ fontWeight: 800, fontSize: 14 }}>{selectedEvent.title}</span>
+          </div>
+          <button onClick={() => setSelectedEvent(null)} style={{ background: 'rgba(255,255,255,.1)', border: 'none', color: '#fff', padding: '4px 10px', borderRadius: 8, fontSize: 11, fontWeight: 800, cursor: 'pointer' }}>Change</button>
+        </div>
+      )}
+
+      {/* Manual entry */}
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'center', marginBottom: 14 }}>
+        <Search size={16} style={{ position: 'absolute', left: 14, color: '#94a3b8' }} />
+        <input
+          style={{ width: '100%', padding: '13px 14px 13px 42px', borderRadius: 14, border: '1px solid #e2e8f0', fontSize: 13, outline: 'none', background: '#fff' }}
+          placeholder="Manual ticket reference or ID..."
+          value={manualRef}
+          onChange={e => setManualRef(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && verifyQR(manualRef, true)}
         />
-        {manualTicketSearch && (
-          <button style={styles.searchGo} onClick={() => verifyTicket(manualTicketSearch, true)}>CHECK</button>
-        )}
+        {manualRef && <button onClick={() => verifyQR(manualRef, true)} style={{ position: 'absolute', right: 10, background: '#000', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: 8, fontSize: 11, fontWeight: 900, cursor: 'pointer' }}>CHECK</button>}
       </div>
 
-      {/* RESULT STATUS CARD */}
-      <div style={{...styles.statusCard, background: status.color}}>
-        {/* TICKET TIER DISPLAY - HIGH VISIBILITY */}
+      {/* Status card */}
+      <div style={{ background: cfg.bg, border: `2px solid ${cfg.accent}33`, borderRadius: 28, padding: '36px 20px 28px', color: '#fff', textAlign: 'center', marginBottom: 14, position: 'relative', overflow: 'hidden' }}>
+        {/* Glow */}
+        <div style={{ position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)', width: 120, height: 120, background: `${cfg.accent}22`, borderRadius: '50%', filter: 'blur(40px)', pointerEvents: 'none' }} />
+
+        {/* Tier badge */}
         {status.tier && (
-          <div style={styles.tierContainer}>
-            <Tag size={14} />
-            <span style={styles.tierText}>{status.tier.toUpperCase()}</span>
+          <div style={{ position: 'absolute', top: 15, left: 0, right: 0, display: 'flex', justifyContent: 'center' }}>
+            <div style={{ background: `${cfg.accent}22`, border: `1px solid ${cfg.accent}44`, borderRadius: 20, padding: '3px 12px', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Tag size={10} color={cfg.accent} />
+              <span style={{ fontSize: 9, fontWeight: 900, color: cfg.accent, letterSpacing: '1.5px' }}>{status.tier.toUpperCase()}</span>
+            </div>
           </div>
         )}
-        
-        <div style={styles.statusIconBox}>
-          {status.type === 'ready' && <Camera size={48} />}
-          {status.type === 'loading' && <RefreshCw size={48} className="animate-spin" />}
-          {status.type === 'success' && <CheckCircle2 size={48} />}
-          {status.type === 'warning' && <AlertCircle size={48} />}
-          {status.type === 'error' && <XCircle size={48} />}
-        </div>
-        <h1 style={styles.statusTitle}>{status.message}</h1>
-        <p style={styles.statusDetails}>{status.details}</p>
-        
+
+        {/* ⭐ EVENT NAME — always shown prominently when available */}
+        {status.event_name && (
+          <div style={{ marginBottom: 12, marginTop: status.tier ? 14 : 0 }}>
+            <p style={{ margin: 0, fontSize: 11, color: `${cfg.accent}80`, fontWeight: 900, letterSpacing: '1.5px', marginBottom: 3 }}>EVENT</p>
+            <p style={{ margin: 0, fontSize: 16, fontWeight: 900, color: cfg.accent, letterSpacing: '-.3px' }}>{status.event_name}</p>
+          </div>
+        )}
+
+        <div style={{ marginBottom: 12, color: cfg.accent }}>{cfg.icon}</div>
+        <h1 style={{ margin: '0 0 8px', fontSize: 28, fontWeight: 950, letterSpacing: '-1px', color: cfg.accent }}>{status.message}</h1>
+        <p style={{ margin: '0 0 4px', opacity: .85, fontSize: 16, fontWeight: 700 }}>{status.sub}</p>
+
+        {/* Forged QR warning box */}
+        {status.reason === 'FORGED_QR' && (
+          <div style={{ marginTop: 16, background: 'rgba(220,38,38,.15)', border: '1px solid rgba(220,38,38,.4)', borderRadius: 14, padding: '10px 14px' }}>
+            <p style={{ margin: 0, fontSize: 12, fontWeight: 800, color: '#fca5a5' }}>🚨 This QR code was not issued by OUSTED. The cryptographic signature is invalid. Deny entry and alert security if necessary.</p>
+          </div>
+        )}
+
         {!isScanning && (
-          <button onClick={() => {setIsScanning(true); setManualTicketSearch('');}} style={styles.nextBtn}>
-            READY FOR NEXT SCAN
+          <button onClick={() => { setIsScanning(true); setManualRef(''); }} style={{ marginTop: 20, width: '100%', padding: '14px', background: '#fff', color: '#000', border: 'none', borderRadius: 14, fontWeight: 900, fontSize: 14, cursor: 'pointer' }}>
+            ↩ READY FOR NEXT SCAN
           </button>
         )}
       </div>
 
-      <div style={styles.scannerContainer}><div id="reader"></div></div>
+      {/* Scanner */}
+      {isScanning && <div style={{ borderRadius: 22, overflow: 'hidden', border: '4px solid #000', marginBottom: 14 }}><div id="reader" /></div>}
 
-      {/* CHECK-IN HISTORY */}
-      <div style={styles.historySection}>
-        <div style={styles.historyHeader}><HistoryIcon size={16} /> <span>RECENT GUESTS</span></div>
-        {scanHistory.length === 0 && <p style={{textAlign: 'center', color: '#94a3b8', fontSize: '13px'}}>No recent check-ins.</p>}
-        {scanHistory.map((item, idx) => (
-          <div key={idx} style={styles.historyItem}>
-            <div style={{flex: 1}}>
-              <p style={styles.historyName}>{item.name}</p>
-              <div style={styles.historyMetaRow}>
-                 <span style={styles.historyTier}>{item.tier}</span>
-                 <span>• {item.time}</span>
+      {/* History */}
+      <div style={{ background: '#fff', borderRadius: 20, padding: 15, border: '1px solid #e2e8f0' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 10, fontWeight: 900, color: '#94a3b8', marginBottom: 12, letterSpacing: '1.5px' }}>
+          <HistoryIcon size={13} />RECENT CHECK-INS ({scanHistory.length})
+        </div>
+        {scanHistory.length === 0
+          ? <p style={{ textAlign: 'center', color: '#cbd5e1', fontSize: 13, margin: '16px 0', fontWeight: 600 }}>No check-ins yet</p>
+          : scanHistory.map((item, i) => (
+            <div key={i} style={{ background: '#f8fafc', padding: '11px 13px', borderRadius: 12, marginBottom: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid #f1f5f9' }}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ margin: '0 0 2px', fontSize: 14, fontWeight: 900, color: '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.guest}</p>
+                <p style={{ margin: 0, fontSize: 11, color: '#64748b', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  <span style={{ color: '#0ea5e9' }}>{item.tier}</span> · {item.event} · {item.time}
+                </p>
               </div>
+              <UserCheck size={16} color="#22c55e" style={{ flexShrink: 0, marginLeft: 10 }} />
             </div>
-            <UserCheck size={18} color="#22c55e" />
-          </div>
-        ))}
+          ))}
       </div>
     </div>
   );
 }
-
-const styles = {
-  container: { maxWidth: '480px', margin: '0 auto', padding: '15px', fontFamily: 'system-ui, -apple-system, sans-serif' },
-  
-  topSection: { marginBottom: '20px' },
-  headerRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' },
-  
-  eventPicker: { background: '#f8fafc', padding: '15px', borderRadius: '20px', border: '1px solid #e2e8f0' },
-  label: { margin: '0 0 10px', fontSize: '12px', fontWeight: '800', color: '#64748b', textTransform: 'uppercase' },
-  searchBox: { display: 'flex', alignItems: 'center', background: '#fff', padding: '0 12px', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '10px' },
-  input: { flex: 1, border: 'none', padding: '10px', outline: 'none', fontSize: '14px' },
-  eventList: { maxHeight: '120px', overflowY: 'auto' },
-  eventItem: { padding: '10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #f1f5f9', fontSize: '14px', cursor: 'pointer', fontWeight: '600' },
-  
-  activeEventCard: { background: '#1e293b', color: '#fff', padding: '15px', borderRadius: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
-  activeEventInfo: { display: 'flex', alignItems: 'center', gap: '8px' },
-  changeBtn: { background: 'rgba(255,255,255,0.1)', border: 'none', color: '#fff', padding: '5px 10px', borderRadius: '10px', fontSize: '12px', cursor: 'pointer' },
-
-  searchWrapper: { position: 'relative', display: 'flex', alignItems: 'center', marginBottom: '15px' },
-  searchIcon: { position: 'absolute', left: '15px', color: '#94a3b8' },
-  searchInput: { width: '100%', padding: '15px 15px 15px 45px', borderRadius: '15px', border: '1px solid #e2e8f0', fontSize: '14px', outline: 'none', background: '#f8fafc' },
-  searchGo: { position: 'absolute', right: '10px', background: '#000', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: '8px', fontSize: '12px', fontWeight: '900', cursor: 'pointer' },
-
-  statusCard: { position: 'relative', padding: '40px 20px', borderRadius: '30px', color: '#fff', textAlign: 'center', marginBottom: '15px', overflow: 'hidden' },
-  statusIconBox: { marginBottom: '10px' },
-  tierContainer: { position: 'absolute', top: '20px', left: '0', right: '0', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '6px' },
-  tierText: { fontSize: '12px', fontWeight: '900', letterSpacing: '1px' },
-  statusTitle: { margin: '10px 0 5px', fontSize: '26px', fontWeight: '900', letterSpacing: '-0.5px' },
-  statusDetails: { margin: 0, opacity: 0.9, fontSize: '16px', fontWeight: '600' },
-  nextBtn: { marginTop: '20px', width: '100%', padding: '14px', background: '#fff', color: '#000', border: 'none', borderRadius: '14px', fontWeight: '900', fontSize: '14px', cursor: 'pointer' },
-  
-  scannerContainer: { borderRadius: '25px', overflow: 'hidden', border: '5px solid #000', marginBottom: '20px' },
-  historySection: { background: '#f8fafc', padding: '15px', borderRadius: '20px', border: '1px solid #e2e8f0' },
-  historyHeader: { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11px', fontWeight: '900', color: '#94a3b8', marginBottom: '10px' },
-  historyItem: { background: '#fff', padding: '12px', borderRadius: '12px', marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid #f1f5f9' },
-  historyName: { margin: 0, fontSize: '14px', fontWeight: '800', color: '#0f172a' },
-  historyMetaRow: { fontSize: '11px', color: '#64748b', display: 'flex', gap: '4px' },
-  historyTier: { color: '#0ea5e9', fontWeight: '800' }
-};

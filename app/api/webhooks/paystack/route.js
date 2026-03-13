@@ -135,17 +135,36 @@ async function processTicket(supabase, data, meta) {
   });
 
   // Update reseller stats
-  if (is_reseller_purchase && event_reseller_id && reseller_commission) {
+  if (is_reseller_purchase && event_reseller_id) {
+    const earned = (reseller_commission || 0) * qty;
+    const { data: er } = await supabase.from('event_resellers').select('tickets_sold,total_earned').eq('id', event_reseller_id).single().catch(() => ({ data: null }));
     await supabase.from('event_resellers').update({
-      tickets_sold: supabase.rpc('increment', { x: qty }),
-      total_earned: supabase.rpc('increment', { x: reseller_commission * qty })
+      tickets_sold: (er?.tickets_sold || 0) + qty,
+      total_earned: parseFloat(((er?.total_earned || 0) + earned).toFixed(2))
     }).eq('id', event_reseller_id).catch(() => {});
   }
+
+  // Write to payout ledger so admin can see what to pay out
+  const orgOwes = meta.organizer_owes || (base_price * qty) || 0;
+  const resOwes = meta.reseller_owes || (is_reseller_purchase ? (reseller_commission || 0) * qty : 0);
+  await supabase.from('payout_ledger').insert({
+    reference: data.reference,
+    event_id,
+    organizer_id: meta.organizer_id || null,
+    event_reseller_id: is_reseller_purchase ? event_reseller_id : null,
+    transaction_type: 'TICKET',
+    total_collected: data.amount / 100,
+    organizer_owes: parseFloat(orgOwes.toFixed(2)),
+    reseller_owes: parseFloat(resOwes.toFixed(2)),
+    platform_keeps: parseFloat((data.amount / 100 - orgOwes - resOwes).toFixed(2)),
+    status: 'pending',
+    notes: `${qty}x ${tier?.name || 'ticket'} for ${guest_email}`
+  }).catch(() => {});
 
   console.log(`[WEBHOOK] ✅ ${qty} ticket(s) created for ${guest_email} | ref: ${data.reference}`);
 }
 
-async function processVote(supabase, data, meta) {
+async function processVote(supabase, data, meta) {  // meta passed through for ledger
   const {
     candidate_id, candidate_name, contest_id,
     vote_count, voter_email, voter_name,
@@ -182,6 +201,24 @@ async function processVote(supabase, data, meta) {
     const { data: cand } = await supabase.from('candidates').select('vote_count').eq('id', candidate_id).single();
     await supabase.from('candidates').update({ vote_count: (cand?.vote_count || 0) + votes }).eq('id', candidate_id);
   }
+
+  // Write to payout ledger
+  const voteOrgOwes = meta.organizer_owes || (vote_price * votes) || 0;
+  await supabase.from('payout_ledger').insert({
+    reference: data.reference,
+    event_id: null,
+    organizer_id: meta.organizer_id || null,
+    event_reseller_id: null,
+    transaction_type: 'VOTE',
+    total_collected: data.amount / 100,
+    organizer_owes: parseFloat(voteOrgOwes.toFixed(2)),
+    reseller_owes: 0,
+    platform_keeps: parseFloat((data.amount / 100 - voteOrgOwes).toFixed(2)),
+    contest_id: contest_id || null,
+    competition_id: competition_id || null,
+    status: 'pending',
+    notes: `${votes} vote(s) for ${candidate_name}`
+  }).catch(() => {});
 
   console.log(`[WEBHOOK] ✅ ${votes} vote(s) for ${candidate_name} | ref: ${data.reference}`);
 }

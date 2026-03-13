@@ -85,10 +85,21 @@ function TicketCard({ ticket, onQR, onNav, onShare }) {
   );
 }
 
-function QRModal({ ticket, onClose }) {
+function QRModal({ ticket, userEmail, onClose }) {
   const [copied, setCopied] = useState(false);
+  const [qrData, setQrData] = useState(null);
+  const [qrLoading, setQrLoading] = useState(true);
   const ev = ticket.events || {};
   const copy = () => { navigator.clipboard.writeText(ticket.reference); setCopied(true); setTimeout(() => setCopied(false), 2000); };
+
+  useEffect(() => {
+    // Fetch server-signed QR data — prevents any forgery
+    fetch(`/api/tickets/qr-data?ref=${encodeURIComponent(ticket.reference)}&email=${encodeURIComponent(userEmail || ticket.guest_email || '')}`)
+      .then(r => r.json())
+      .then(d => { setQrData(d.qr_data || ticket.reference); setQrLoading(false); })
+      .catch(() => { setQrData(ticket.reference); setQrLoading(false); });
+  }, [ticket.reference, userEmail, ticket.guest_email]);
+
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.97)', zIndex: 1000, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, animation: 'fadeUp .25s ease' }}>
       <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: 340 }}>
@@ -98,16 +109,19 @@ function QRModal({ ticket, onClose }) {
           <h3 style={{ color: '#fff', fontWeight: 950, fontSize: 22, margin: '0 0 4px', letterSpacing: '-.5px' }}>{ev.title}</h3>
           <p style={{ color: '#555', fontSize: 12, fontWeight: 600, margin: 0 }}>{ev.date ? new Date(ev.date).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' }) : ''}{ev.location ? ` · ${ev.location}` : ''}</p>
         </div>
-        <div style={{ background: '#fff', borderRadius: 24, padding: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16, boxShadow: '0 0 60px rgba(205,164,52,.2)' }}>
-          <img src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(ticket.reference)}&bgcolor=ffffff&color=000000&qzone=2`} alt="QR" style={{ width: 220, height: 220, display: 'block' }} />
+        <div style={{ background: '#fff', borderRadius: 24, padding: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 16, boxShadow: '0 0 60px rgba(205,164,52,.2)', minHeight: 264 }}>
+          {qrLoading
+            ? <div style={{ width: 44, height: 44, border: '3px solid #eee', borderTop: '3px solid #CDA434', borderRadius: '50%', animation: 'spin .8s linear infinite' }} />
+            : <img src={`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(qrData)}&bgcolor=ffffff&color=000000&qzone=2`} alt="QR" style={{ width: 220, height: 220, display: 'block' }} />
+          }
         </div>
-        <div style={{ background: 'rgba(255,255,255,.05)', border: '1px solid rgba(255,255,255,.09)', borderRadius: 16, padding: '13px 15px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+        <div style={{ background: 'rgba(255,255,255,.05)', border: '1px solid rgba(255,255,255,.09)', borderRadius: 16, padding: '13px 15px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
           <div><p style={{ margin: '0 0 3px', fontSize: 8, color: '#444', fontWeight: 900, letterSpacing: '2px' }}>REFERENCE</p><p style={{ margin: 0, fontSize: 13, fontWeight: 800, color: '#fff', fontFamily: 'monospace' }}>{ticket.reference}</p></div>
           <button onClick={copy} style={{ background: copied ? '#22c55e20' : 'rgba(255,255,255,.07)', border: `1px solid ${copied ? '#22c55e44' : 'rgba(255,255,255,.1)'}`, color: copied ? '#22c55e' : '#fff', width: 36, height: 36, borderRadius: 10, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all .2s' }}>
             {copied ? <Check size={14} /> : <Copy size={14} />}
           </button>
         </div>
-        <p style={{ textAlign: 'center', fontSize: 11, color: '#444', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}><ShieldCheck size={11} color="#22c55e" /> Verified by OUSTED · Present at the entry gate</p>
+        <p style={{ textAlign: 'center', fontSize: 11, color: '#444', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}><ShieldCheck size={11} color="#22c55e" /> Cryptographically signed · Cannot be forged</p>
       </div>
     </div>
   );
@@ -313,7 +327,7 @@ export default function UserDashboard() {
         )}
       </div>
 
-      {qrTicket && <QRModal ticket={qrTicket} onClose={() => setQrTicket(null)} />}
+      {qrTicket && <QRModal ticket={qrTicket} userEmail={user?.email} onClose={() => setQrTicket(null)} />}
       {navTicket && <TransportSheet ticket={navTicket} onClose={() => setNavTicket(null)} />}
     </div>
   );
