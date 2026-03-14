@@ -97,7 +97,8 @@ export async function POST(request) {
           business_name: business_name,
           bank_code: settlement_bank,
           account_number: account_number,
-          paystack_subaccount_code: subaccountCode
+          paystack_subaccount_code: subaccountCode,
+          default_subaccount_code: subaccountCode,
         })
         .eq('user_id', userId);
 
@@ -107,6 +108,8 @@ export async function POST(request) {
       }
     } else {
       // Create new organizer profile
+      // Get user email for contact
+      const { data: { user: authUser } } = await supabaseAdmin.auth.admin.getUserById(userId);
       const { error: orgCreateErr } = await supabaseAdmin
         .from('organizers')
         .insert({ 
@@ -116,6 +119,8 @@ export async function POST(request) {
           bank_code: settlement_bank,
           account_number: account_number,
           paystack_subaccount_code: subaccountCode,
+          default_subaccount_code: subaccountCode,
+          contact_email: authUser?.email || null,
           is_verified: true
         });
 

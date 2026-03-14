@@ -149,56 +149,82 @@ export default function AdminDashboard() {
     });
     if (!res.ok) { setLoading(false); setRefreshing(false); return; }
 
-    const { tickets, votes, organizers, resellers, eventResellers, events, candidates, contests, competitions, ledger } = await res.json();
+    const {
+      tickets, votes, organizers, resellers, eventResellers,
+      resellerSales, events, candidates, contests, competitions, ledger
+    } = await res.json();
 
-    // ── BUILD LOOKUP MAPS ─────────────────────────────────────
+    // ── LOOKUP MAPS ───────────────────────────────────────────
     const eventMap = {};
     (events || []).forEach(e => { eventMap[e.id] = e; });
 
+    // Organizers keyed by user_id (that's the FK events.organizer_id points to)
     const orgByUserId = {};
     (organizers || []).forEach(o => { orgByUserId[o.user_id] = o; });
 
+    // Resellers keyed by their id (event_resellers.reseller_id)
     const resellerById = {};
     (resellers || []).forEach(r => { resellerById[r.id] = r; });
 
-    const erById = {};  // event_resellers
+    // event_resellers keyed by id
+    const erById = {};
     (eventResellers || []).forEach(er => { erById[er.id] = er; });
 
     const contestMap = {};
     (contests || []).forEach(ct => { contestMap[ct.id] = ct; });
+    const compMap = {};
+    (competitions || []).forEach(cp => { compMap[cp.id] = cp; });
+    const candMap = {};
+    (candidates || []).forEach(c => { candMap[c.id] = c; });
 
-    const competitionMap = {};
-    (competitions || []).forEach(cp => { competitionMap[cp.id] = cp; });
+    // reseller_sales grouped by event_reseller_id
+    const salesByEr = {};
+    (resellerSales || []).forEach(s => {
+      if (!salesByEr[s.event_reseller_id]) salesByEr[s.event_reseller_id] = [];
+      salesByEr[s.event_reseller_id].push(s);
+    });
 
-    const candidateMap = {};
-    (candidates || []).forEach(c => { candidateMap[c.id] = c; });
+    const ledgerRefs = new Set((ledger || []).map(r => r.reference));
+
+    // ── HELPER: payment display ───────────────────────────────
+    const paymentInfo = (entity) => {
+      // entity can be an organizer or reseller row
+      if (entity?.mobile_money_number) {
+        return {
+          display: `${entity.mobile_money_provider || 'MoMo'}: ${entity.mobile_money_number}`,
+          account: entity.mobile_money_number,
+          method: entity.mobile_money_provider || 'Mobile Money',
+        };
+      }
+      if (entity?.account_number) {
+        return {
+          display: `${entity.bank_code || entity.bank_name || 'Bank'}: ${entity.account_number}`,
+          account: entity.account_number,
+          method: entity.bank_code || entity.bank_name || 'Bank Transfer',
+        };
+      }
+      return { display: 'Payment details not on file', account: null, method: null };
+    };
 
     // ── BUILD PAYOUT ENTRIES ──────────────────────────────────
     const orgMap = {};
     const resMap = {};
-    const ledgerRefs = new Set((ledger || []).map(r => r.reference));
 
     const getOrg = (orgUserId, eventId, txType) => {
       const key = `${orgUserId}||${eventId || 'votes'}`;
       if (!orgMap[key]) {
         const o = orgByUserId[orgUserId] || {};
         const ev = eventMap[eventId] || {};
-        // Determine display name for payment method
-        let paymentDisplay = '';
-        if (o.mobile_money_number) {
-          paymentDisplay = `${o.mobile_money_provider || 'MoMo'} · ${o.mobile_money_number}`;
-        } else if (o.account_number) {
-          paymentDisplay = `${o.bank_code || 'Bank'} · ${o.account_number}`;
-        }
+        const pi = paymentInfo(o);
         orgMap[key] = {
           id: key, recipient_type: 'ORGANIZER',
           organizer_id: orgUserId, event_id: eventId,
           event_title: ev.title || (txType === 'VOTE' ? 'Vote Revenue' : 'Unknown Event'),
           transaction_type: txType,
           recipient_name: o.business_name || o.name || '—',
-          payment_display: paymentDisplay,
-          account_number: o.mobile_money_number || o.account_number || null,
-          bank_name: o.bank_code || null,
+          payment_display: pi.display,
+          account_number: pi.account,
+          bank_name: pi.method,
           mobile_money_provider: o.mobile_money_provider || null,
           account_name: o.name || o.business_name || null,
           amount_owed: 0, platform_total: 0, ticket_count: 0,
@@ -211,23 +237,20 @@ export default function AdminDashboard() {
     const getRes = (erLinkId, eventId) => {
       if (!resMap[erLinkId]) {
         const er = erById[erLinkId] || {};
+        // reseller_id on event_resellers points to resellers.id
         const r = resellerById[er.reseller_id] || {};
         const ev = eventMap[eventId] || {};
-        let paymentDisplay = '';
-        if (r.mobile_money_number) {
-          paymentDisplay = `${r.mobile_money_provider || 'MoMo'} · ${r.mobile_money_number}`;
-        } else if (r.account_number) {
-          paymentDisplay = `${r.bank_code || 'Bank'} · ${r.account_number}`;
-        }
+        const pi = paymentInfo(r);
         resMap[erLinkId] = {
           id: erLinkId, recipient_type: 'RESELLER', event_reseller_id: erLinkId,
+          reseller_id: er.reseller_id,
           event_id: eventId, event_title: ev.title || '—', transaction_type: 'TICKET',
           recipient_name: r.name || '—',
-          payment_display: paymentDisplay,
-          account_number: r.mobile_money_number || r.account_number || null,
-          bank_name: r.bank_code || null,
+          payment_display: pi.display,
+          account_number: pi.account,
+          bank_name: pi.method,
           mobile_money_provider: r.mobile_money_provider || null,
-          account_name: r.name || null,
+          account_name: r.account_name || r.name || null,
           amount_owed: 0, platform_total: 0, ticket_count: 0,
           status: 'pending', transactions: []
         };
@@ -235,11 +258,11 @@ export default function AdminDashboard() {
       return resMap[erLinkId];
     };
 
-    // Process ledger rows
+    // Process ledger rows (already computed splits)
     (ledger || []).forEach(row => {
-      if (row.organizer_id) {
+      if (row.organizer_id && Number(row.organizer_owes) > 0) {
         const e = getOrg(row.organizer_id, row.event_id, row.transaction_type);
-        e.amount_owed += Number(row.organizer_owes || 0);
+        e.amount_owed += Number(row.organizer_owes);
         e.platform_total += Number(row.platform_keeps || 0);
         e.ticket_count++;
         e.transactions.push({ reference: row.reference, organizer_owes: row.organizer_owes, created_at: row.created_at });
@@ -247,9 +270,9 @@ export default function AdminDashboard() {
       }
       if (row.event_reseller_id && Number(row.reseller_owes) > 0) {
         const r = getRes(row.event_reseller_id, row.event_id);
-        r.amount_owed += Number(row.reseller_owes || 0);
+        r.amount_owed += Number(row.reseller_owes);
         r.ticket_count++;
-        r.transactions.push({ reference: row.reference, reseller_owes: row.reseller_owes });
+        r.transactions.push({ reference: row.reference, reseller_owes: row.reseller_owes, created_at: row.created_at });
         if (row.reseller_paid) r.status = 'paid';
       }
     });
@@ -272,15 +295,33 @@ export default function AdminDashboard() {
         const r = getRes(t.event_reseller_id, t.event_id);
         r.amount_owed += markup;
         r.ticket_count++;
-        r.transactions.push({ reference: t.reference, reseller_owes: markup });
+        r.transactions.push({ reference: t.reference, reseller_owes: markup, created_at: t.created_at });
       }
     });
 
-    // Process votes not yet in ledger
+    // Process reseller_sales (the dedicated commission table)
+    // This is the most reliable source for reseller payouts
+    (resellerSales || []).forEach(sale => {
+      const er = erById[sale.event_reseller_id] || {};
+      if (!er.id) return;
+      // Check if this sale's ticket is already accounted for above
+      const alreadyCounted = Object.values(resMap).some(r =>
+        r.transactions.some(t => t.reference === sale.ticket_ref)
+      );
+      if (alreadyCounted) return;
+      const r = getRes(sale.event_reseller_id, er.event_id);
+      const commission = Number(sale.commission_earned || 0);
+      r.amount_owed += commission;
+      r.ticket_count++;
+      r.transactions.push({ reference: sale.ticket_ref, reseller_owes: commission, created_at: sale.created_at });
+      if (sale.paid) r.status = 'paid';
+    });
+
+    // Votes not in ledger
     (votes || []).filter(v => !ledgerRefs.has(v.reference)).forEach(v => {
-      const cand = candidateMap[v.candidate_id] || {};
+      const cand = candMap[v.candidate_id] || {};
       const contest = contestMap[cand.contest_id || v.contest_id] || {};
-      const comp = competitionMap[contest.competition_id || v.competition_id] || {};
+      const comp = compMap[contest.competition_id || v.competition_id] || {};
       const orgUserId = comp.organizer_id || contest.organizer_id;
       if (!orgUserId) return;
       const owed = Number(v.vote_price || 0) * Number(v.vote_count || 1);
@@ -306,16 +347,18 @@ export default function AdminDashboard() {
     const collected = tktRevenue + voteRevenue;
     const owedOrg = Object.values(orgMap).reduce((s, p) => s + p.amount_owed, 0);
     const owedRes = Object.values(resMap).reduce((s, p) => s + p.amount_owed, 0);
-    setTotals({ collected, owed_org: owedOrg, owed_res: owedRes,
+    setTotals({
+      collected, owed_org: owedOrg, owed_res: owedRes,
       platform: collected - owedOrg - owedRes,
-      pending_count: allPayouts.filter(p => p.status !== 'paid').length });
+      pending_count: allPayouts.filter(p => p.status !== 'paid').length
+    });
 
     // ── EVENT BREAKDOWN ───────────────────────────────────────
     const evBreak = {};
     (tickets || []).forEach(t => {
-      const title = eventMap[t.event_id]?.title || 'Unknown';
+      const ev = eventMap[t.event_id] || {};
       const k = t.event_id || 'other';
-      if (!evBreak[k]) evBreak[k] = { title, collected: 0, owed_org: 0, owed_res: 0, platform: 0, tx: 0 };
+      if (!evBreak[k]) evBreak[k] = { title: ev.title || 'Unknown', collected: 0, owed_org: 0, owed_res: 0, platform: 0, tx: 0 };
       const b = Number(t.base_amount || t.amount || 0);
       evBreak[k].collected += b * (t.is_reseller_purchase ? 1.15 : 1.05);
       evBreak[k].owed_org += b;
@@ -323,14 +366,16 @@ export default function AdminDashboard() {
       evBreak[k].platform += b * 0.05;
       evBreak[k].tx++;
     });
-    (votes || []).forEach(v => {
+    (votes || []).forEach(() => {
       if (!evBreak['votes']) evBreak['votes'] = { title: 'Vote Revenue', collected: 0, owed_org: 0, owed_res: 0, platform: 0, tx: 0 };
+    });
+    (votes || []).forEach(v => {
       evBreak['votes'].collected += Number(v.amount_paid || 0);
       evBreak['votes'].owed_org += Number(v.vote_price || 0) * Number(v.vote_count || 1);
       evBreak['votes'].platform += Number(v.platform_fee || 0) * Number(v.vote_count || 1);
       evBreak['votes'].tx++;
     });
-    setEventBreakdown(Object.values(evBreak).sort((a, b) => b.collected - a.collected));
+    setEventBreakdown(Object.values(evBreak).filter(e => e.tx > 0).sort((a, b) => b.collected - a.collected));
 
     setLoading(false); setRefreshing(false);
   }, []);
