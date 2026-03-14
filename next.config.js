@@ -9,30 +9,29 @@ const nextConfig = {
       {
         source: '/(.*)',
         headers: [
+          // Security
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
           { key: 'X-XSS-Protection', value: '1; mode=block' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          { key: 'Permissions-Policy', value: 'camera=*, microphone=(), geolocation=(self)' },
           {
             key: 'Content-Security-Policy',
             value: [
               "default-src 'self'",
-              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.paystack.com https://*.paystack.co https://www.scanapp.org https://scanapp.org",
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.paystack.com https://*.paystack.co",
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
               "font-src 'self' https://fonts.gstatic.com",
               "img-src 'self' data: blob: https: http:",
-              "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.paystack.co https://*.paystack.com https://nominatim.openstreetmap.org https://*.tile.openstreetmap.org https://www.scanapp.org https://scanapp.org",
-              "frame-src 'self' https://*.paystack.com https://*.paystack.co https://www.scanapp.org https://scanapp.org",
-              "worker-src 'self' blob:",
-              "child-src 'self' blob:",
-              "media-src 'self' blob:",
-
+              "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.paystack.co https://*.paystack.com https://nominatim.openstreetmap.org https://*.tile.openstreetmap.org",
+              "frame-src https://*.paystack.com https://*.paystack.co",
+              "worker-src blob: 'self'",
             ].join('; ')
           },
+          // SEO/Perf
           { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' },
         ],
       },
-  
       // Cache static assets aggressively
       {
         source: '/(.*)\\.(ico|png|svg|jpg|jpeg|webp|woff2|woff)',
