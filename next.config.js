@@ -93,10 +93,7 @@ const nextConfig = {
 
   // ── EXPERIMENTAL ─────────────────────────────────────────────
   experimental: {
-    // Optimize CSS loading
-    optimizeCss: true,
-    // Partial pre-rendering for hybrid static/dynamic
-    ppr: false,
+    // ppr: false, // enable in Next 15+
   },
 };
 
