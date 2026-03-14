@@ -1,6 +1,6 @@
 /** @type {import('next').NextConfig} */
 
-const SITE_URL = process.env.NEXT_PUBLIC_BASE_URL || 'https://ousted.vercel.app'; 
+const SITE_URL = process.env.NEXT_PUBLIC_BASE_URL || 'https://ousted.live';
 
 const nextConfig = {
   // ── SECURITY + SEO HEADERS ───────────────────────────────────
@@ -14,6 +14,7 @@ const nextConfig = {
           { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
           { key: 'X-XSS-Protection', value: '1; mode=block' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+          { key: 'Permissions-Policy', value: 'camera=*, microphone=(), geolocation=(self)' },
           {
             key: 'Content-Security-Policy',
             value: [
@@ -25,7 +26,6 @@ const nextConfig = {
               "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.paystack.co https://*.paystack.com https://nominatim.openstreetmap.org https://*.tile.openstreetmap.org",
               "frame-src https://*.paystack.com https://*.paystack.co",
               "worker-src blob: 'self'",
-              "media-src 'self' blob:", 
             ].join('; ')
           },
           // SEO/Perf
