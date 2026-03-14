@@ -60,12 +60,12 @@ export const metadata = {
   },
   icons: {
     icon: [
-      { url: '/favicon.ico', sizes: 'any' },
-      { url: '/icon-192.png', type: 'image/png', sizes: '192x192' },
-      { url: '/icon-512.png', type: 'image/png', sizes: '512x512' },
+      { url: '/api/icon?size=32', sizes: '32x32', type: 'image/png' },
+      { url: '/api/icon?size=192', sizes: '192x192', type: 'image/png' },
+      { url: '/api/icon?size=512', sizes: '512x512', type: 'image/png' },
     ],
-    apple: [{ url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }],
-    shortcut: '/favicon.ico',
+    apple: [{ url: '/api/icon?size=180&bg=CDA434&fg=000000', sizes: '180x180', type: 'image/png' }],
+    shortcut: '/api/icon?size=32',
   },
   manifest: '/site.webmanifest',
   appleWebApp: {
