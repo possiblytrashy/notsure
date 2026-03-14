@@ -14,7 +14,14 @@ const nextConfig = {
           { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
           { key: 'X-XSS-Protection', value: '1; mode=block' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
-         { key: 'Permissions-Policy', value: 'camera=*, microphone=(), geolocation=(self)' },
+{ 
+  key: 'Permissions-Policy', 
+  value: 'camera=*, microphone=*, geolocation=(self)' 
+},
+{ 
+  key: 'Feature-Policy', 
+  value: "camera '*'; microphone 'none'; geolocation 'self'" 
+},
           {
             key: 'Content-Security-Policy',
             value: [
