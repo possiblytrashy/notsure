@@ -23,7 +23,7 @@ const nextConfig = {
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
               "font-src 'self' https://fonts.gstatic.com",
               "img-src 'self' data: blob: https: http:",
-              "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.paystack.co https://*.paystack.com https://nominatim.openstreetmap.org https://*.tile.openstreetmap.org",
+              "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.paystack.co https://*.paystack.com https://*.scanapp.org https://nominatim.openstreetmap.org https://*.tile.openstreetmap.org",
               "frame-src https://*.paystack.com https://*.paystack.co",
               "worker-src blob: 'self'",
             ].join('; ')
