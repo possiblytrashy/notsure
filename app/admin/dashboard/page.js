@@ -329,17 +329,20 @@ export default function AdminDashboard() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { router.push('/login'); return; }
 
-      // Upsert profile so the row always exists with email populated
+      // Ensure profile row exists — NEVER overwrite role here
       try {
-        await supabase.from('profiles').upsert(
-          { id: user.id, email: user.email, role: user.user_metadata?.role || 'user' },
-          { onConflict: 'id', ignoreDuplicates: false }
-        );
+        await supabase.from('profiles')
+          .upsert({ id: user.id, email: user.email }, { onConflict: 'id', ignoreDuplicates: true });
       } catch {}
 
-      // Check admin role — accept from DB profile OR user_metadata
-      const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
-      const isAdmin = profile?.role === 'admin' || user.user_metadata?.role === 'admin';
+      // Check admin — read role from DB only, never from user_metadata
+      const { data: profile } = await supabase
+        .from('profiles').select('role').eq('id', user.id).maybeSingle();
+
+      // Also accept ADMIN_EMAIL env var as a hard bypass
+      const adminEmails = (process.env.NEXT_PUBLIC_ADMIN_EMAILS || '').split(',').map(e => e.trim().toLowerCase()).filter(Boolean);
+      const isAdmin = profile?.role === 'admin' || adminEmails.includes(user.email?.toLowerCase());
+
       if (!isAdmin) { router.push('/'); return; }
       await load();
     })();
