@@ -3,6 +3,7 @@
 const SITE_URL = process.env.NEXT_PUBLIC_BASE_URL || 'https://ousted.live';
 
 const nextConfig = {
+  // ── SECURITY + SEO HEADERS ───────────────────────────────────
   async headers() {
     return [
       {
@@ -10,32 +11,30 @@ const nextConfig = {
         headers: [
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
+          { key: 'X-XSS-Protection', value: '1; mode=block' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
           { 
             key: 'Permissions-Policy', 
-            // We allow the camera for your site AND scanapp.org
             value: 'camera=(self "https://www.scanapp.org" "https://scanapp.org"), microphone=(), geolocation=(self)' 
           },
           {
             key: 'Content-Security-Policy',
             value: [
               "default-src 'self'",
-              // Added scanapp.org to script-src and connect-src
               "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.paystack.com https://*.paystack.co https://www.scanapp.org https://scanapp.org",
               "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
               "font-src 'self' https://fonts.gstatic.com",
               "img-src 'self' data: blob: https: http:",
-              "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.paystack.co https://*.paystack.com https://nominatim.openstreetmap.org https://*.tile.openstreetmap.org https://www.scanapp.org",
-              "frame-src 'self' https://*.paystack.com https://*.paystack.co https://www.scanapp.org",
+              "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.paystack.co https://*.paystack.com https://nominatim.openstreetmap.org https://*.tile.openstreetmap.org https://www.scanapp.org https://scanapp.org",
+              "frame-src 'self' https://*.paystack.com https://*.paystack.co https://www.scanapp.org https://scanapp.org",
               "worker-src 'self' blob:",
-              "child-src 'self' blob: https://www.scanapp.org",
+              "child-src 'self' blob: https://www.scanapp.org https://scanapp.org",
             ].join('; ')
           },
           { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' },
         ],
       },
-    ];
-  },
+  
       // Cache static assets aggressively
       {
         source: '/(.*)\\.(ico|png|svg|jpg|jpeg|webp|woff2|woff)',
