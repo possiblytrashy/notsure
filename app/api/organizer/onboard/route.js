@@ -93,7 +93,10 @@ export async function POST(request) {
       const { error: orgUpdateErr } = await supabaseAdmin
         .from('organizers')
         .update({ 
+          name: business_name,
           business_name: business_name,
+          bank_code: settlement_bank,
+          account_number: account_number,
           paystack_subaccount_code: subaccountCode
         })
         .eq('user_id', userId);
@@ -107,8 +110,11 @@ export async function POST(request) {
       const { error: orgCreateErr } = await supabaseAdmin
         .from('organizers')
         .insert({ 
-          user_id: userId, // ✅ Use user_id, not id
+          user_id: userId,
+          name: business_name,
           business_name: business_name,
+          bank_code: settlement_bank,
+          account_number: account_number,
           paystack_subaccount_code: subaccountCode,
           is_verified: true
         });

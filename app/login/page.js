@@ -11,9 +11,11 @@ export default function Auth() {
   const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [agreed, setAgreed] = useState(false);
 
   const handleAuth = async () => {
     setError('');
+    if (isSignup && !agreed) { setError('Please agree to the Terms and Conditions, Privacy Policy, and User Agreement to continue.'); return; }
     if (!email.includes('@')) { setError('Please enter a valid email address.'); return; }
     if (password.length < 6) { setError('Password must be at least 6 characters.'); return; }
     setLoading(true);
@@ -89,7 +91,20 @@ export default function Auth() {
 
         {error && <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '12px', padding: '12px 16px', fontSize: '13px', fontWeight: 600, color: '#dc2626', marginBottom: '16px' }}>{error}</div>}
 
-        <button onClick={handleAuth} disabled={loading} style={{ width: '100%', background: loading ? '#94a3b8' : '#000', color: '#fff', border: 'none', padding: '18px', borderRadius: '16px', fontWeight: 900, fontSize: '15px', cursor: loading ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', fontFamily: 'inherit', transition: 'all 0.2s' }}>
+        {isSignup && (
+          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 14, padding: '14px', background: agreed ? '#f0fdf4' : '#f8fafc', borderRadius: 14, border: `1.5px solid ${agreed ? '#86efac' : '#e2e8f0'}`, cursor: 'pointer', transition: 'all .2s' }} onClick={() => setAgreed(a => !a)}>
+            <div style={{ width: 20, height: 20, borderRadius: 6, border: `2px solid ${agreed ? '#22c55e' : '#cbd5e1'}`, background: agreed ? '#22c55e' : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, marginTop: 1, transition: 'all .2s' }}>
+              {agreed && <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="#fff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+            </div>
+            <p style={{ margin: 0, fontSize: 12, color: '#475569', fontWeight: 600, lineHeight: 1.5 }}>
+              I have read and agree to the{' '}
+              <a href="/legal/terms" target="_blank" onClick={e => e.stopPropagation()} style={{ color: '#000', fontWeight: 800, textDecoration: 'underline' }}>Terms & Conditions</a>,{' '}
+              <a href="/legal/privacy" target="_blank" onClick={e => e.stopPropagation()} style={{ color: '#000', fontWeight: 800, textDecoration: 'underline' }}>Privacy Policy</a>, and{' '}
+              <a href="/legal/user-agreement" target="_blank" onClick={e => e.stopPropagation()} style={{ color: '#000', fontWeight: 800, textDecoration: 'underline' }}>User Agreement</a>
+            </p>
+          </div>
+        )}
+        <button onClick={handleAuth} disabled={loading || (isSignup && !agreed)} style={{ width: '100%', background: (loading || (isSignup && !agreed)) ? '#94a3b8' : '#000', color: '#fff', border: 'none', padding: '18px', borderRadius: '16px', fontWeight: 900, fontSize: '15px', cursor: (loading || (isSignup && !agreed)) ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', fontFamily: 'inherit', transition: 'all 0.2s' }}>
           {loading ? 'PROCESSING...' : <>{isSignup ? 'CREATE ACCOUNT' : 'SIGN IN'} <ArrowRight size={17} /></>}
         </button>
 

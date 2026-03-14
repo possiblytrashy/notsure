@@ -166,11 +166,12 @@ export async function POST(req) {
       payment_method: payment_method
     };
 
+    resellerData.name = business_name;  // always save name
     if (payment_method === 'mobile_money') {
       resellerData.mobile_money_provider = mobile_money_provider;
       resellerData.mobile_money_number = mobile_money_number;
     } else {
-      resellerData.bank_name = settlement_bank;
+      resellerData.bank_code = settlement_bank;
       resellerData.account_number = account_number;
     }
 

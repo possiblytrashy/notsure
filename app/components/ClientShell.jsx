@@ -70,6 +70,12 @@ export default function ClientShell({ children }) {
           <a href="/" className="footer-link"><Ticket size={15} aria-hidden="true" /> All Events</a>
           <a href="/login" className="footer-link"><Sparkles size={15} aria-hidden="true" /> Host an Event</a>
           <a href="/tickets/find" className="footer-link"><ScanLine size={15} aria-hidden="true" /> Find My Ticket</a>
+          <div style={{ marginTop: '20px' }}>
+            <h4>Legal</h4>
+            <a href="/legal/terms" className="footer-link" style={{ fontSize: '12px', opacity: 0.7 }}>Terms & Conditions</a>
+            <a href="/legal/privacy" className="footer-link" style={{ fontSize: '12px', opacity: 0.7 }}>Privacy Policy</a>
+            <a href="/legal/user-agreement" className="footer-link" style={{ fontSize: '12px', opacity: 0.7 }}>User Agreement</a>
+          </div>
         </nav>
         <div className="footer-col">
           <h4>Account</h4>
