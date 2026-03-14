@@ -1,40 +1,158 @@
-"use client";
-import { useState, useEffect } from 'react';
-import { supabase } from '@/lib/supabase';
-import { Outfit } from 'next/font/google';
-import { ScanLine, LayoutDashboard, LogIn, Vote, Ticket, LogOut, Sparkles } from 'lucide-react';
+// SERVER COMPONENT — exports metadata for SEO
+// Client nav/footer logic lives in ClientShell.jsx
 
-const outfit = Outfit({ subsets: ['latin'], display: 'swap' });
+import { Outfit } from 'next/font/google';
+import ClientShell from './components/ClientShell';
+
+const outfit = Outfit({ subsets: ['latin'], display: 'swap', variable: '--font-outfit' });
+
+const SITE_URL = process.env.NEXT_PUBLIC_BASE_URL || 'https://ousted.live';
+const SITE_NAME = 'OUSTED';
+const SITE_DESCRIPTION = 'Buy tickets for the best events — concerts, parties, competitions. Instant delivery, secured by Paystack. Sell tickets as a reseller and earn 10% commission.';
+const OG_IMAGE = `${SITE_URL}/og-default.png`;
+
+export const metadata = {
+  metadataBase: new URL(SITE_URL),
+  title: {
+    default: 'OUSTED — Premium Event Ticketing',
+    template: '%s | OUSTED'
+  },
+  description: SITE_DESCRIPTION,
+  keywords: ['event tickets', 'buy tickets online', 'Ghana events', 'concert tickets', 'party tickets', 'event ticketing platform', 'Paystack tickets', 'vote for candidates', 'online voting', 'ticket reseller'],
+  authors: [{ name: 'OUSTED', url: SITE_URL }],
+  creator: 'OUSTED',
+  publisher: 'OUSTED',
+  applicationName: 'OUSTED',
+  category: 'Entertainment',
+  classification: 'Event Ticketing',
+  robots: {
+    index: true,
+    follow: true,
+    nocache: false,
+    googleBot: {
+      index: true,
+      follow: true,
+      noimageindex: false,
+      'max-video-preview': -1,
+      'max-image-preview': 'large',
+      'max-snippet': -1,
+    },
+  },
+  openGraph: {
+    type: 'website',
+    locale: 'en_GH',
+    alternateLocale: ['en_US', 'en_GB'],
+    url: SITE_URL,
+    siteName: SITE_NAME,
+    title: 'OUSTED — Premium Event Ticketing',
+    description: SITE_DESCRIPTION,
+    images: [
+      { url: OG_IMAGE, width: 1200, height: 630, alt: 'OUSTED Event Ticketing Platform' }
+    ],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    site: '@oustedlive',
+    creator: '@oustedlive',
+    title: 'OUSTED — Premium Event Ticketing',
+    description: SITE_DESCRIPTION,
+    images: [OG_IMAGE],
+  },
+  icons: {
+    icon: [
+      { url: '/favicon.ico', sizes: 'any' },
+      { url: '/icon-192.png', type: 'image/png', sizes: '192x192' },
+      { url: '/icon-512.png', type: 'image/png', sizes: '512x512' },
+    ],
+    apple: [{ url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }],
+    shortcut: '/favicon.ico',
+  },
+  manifest: '/site.webmanifest',
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'OUSTED',
+  },
+  verification: {
+    google: process.env.GOOGLE_SITE_VERIFICATION || '',
+  },
+  alternates: {
+    canonical: SITE_URL,
+    types: {
+      'application/rss+xml': `${SITE_URL}/feed.xml`,
+    },
+  },
+  other: {
+    'msapplication-TileColor': '#000000',
+    'theme-color': '#000000',
+  }
+};
+
+export const viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 5,
+  themeColor: '#000000',
+};
+
+// Organization JSON-LD — appears on every page
+const orgSchema = {
+  '@context': 'https://schema.org',
+  '@type': 'Organization',
+  name: 'OUSTED',
+  url: SITE_URL,
+  logo: `${SITE_URL}/icon-512.png`,
+  sameAs: [
+    'https://twitter.com/oustedlive',
+    'https://instagram.com/oustedlive',
+  ],
+  contactPoint: {
+    '@type': 'ContactPoint',
+    contactType: 'customer support',
+    email: 'support@ousted.live',
+  }
+};
+
+// WebSite JSON-LD — enables Google sitelinks search box
+const websiteSchema = {
+  '@context': 'https://schema.org',
+  '@type': 'WebSite',
+  name: 'OUSTED',
+  url: SITE_URL,
+  potentialAction: {
+    '@type': 'SearchAction',
+    target: { '@type': 'EntryPoint', urlTemplate: `${SITE_URL}/?q={search_term_string}` },
+    'query-input': 'required name=search_term_string'
+  }
+};
 
 export default function RootLayout({ children }) {
-  const [user, setUser] = useState(null);
-  const [role, setRole] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) { setUser(session.user); setRole(session.user.user_metadata?.role || 'user'); }
-      setLoading(false);
-    });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
-      setUser(session?.user ?? null);
-      setRole(session?.user?.user_metadata?.role || 'user');
-    });
-    return () => subscription.unsubscribe();
-  }, []);
-
-  const handleLogout = async () => { await supabase.auth.signOut(); window.location.href = '/'; };
-  const dashLink = role === 'organizer' ? '/dashboard/organizer' : role === 'admin' ? '/admin/dashboard' : '/dashboard/user';
-
   return (
-    <html lang="en" style={{ scrollBehavior: 'smooth' }}>
+    <html lang="en" dir="ltr">
       <head>
-        <title>OUSTED — Premium Event Ticketing — Anywhere</title>
-        <meta name="description" content="Buy tickets for the best events near you. Secured by Paystack." />
-        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5" />
-        <meta name="theme-color" content="#000000" />
-        <meta name="robots" content="index, follow" />
+        {/* Preconnects for perf */}
         <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link rel="preconnect" href={process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://supabase.co'} />
+        <link rel="dns-prefetch" href="https://api.paystack.co" />
+        <link rel="dns-prefetch" href="https://api.qrserver.com" />
+
+        {/* Organization + WebSite structured data on every page */}
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(orgSchema) }}
+        />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteSchema) }}
+        />
+
+        {/* PWA / Mobile */}
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta name="format-detection" content="telephone=no" />
+
         <style>{`
           *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
           body{margin:0;-webkit-font-smoothing:antialiased}
@@ -71,84 +189,7 @@ export default function RootLayout({ children }) {
       </head>
       <body className={outfit.className} style={{ margin: 0, minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
         <div className="bg-canvas" />
-
-        {/* NAV */}
-        <nav className="nav glass">
-          <a href="/" className="logo">OUSTED<span style={{ color: '#e73c7e' }}>.</span></a>
-          <div className="nav-actions">
-            <a href="/voting" className="btn btn-vote">
-              <Vote size={14} />
-              <span>VOTE</span>
-            </a>
-            {!loading && (user ? (
-              <a href={dashLink} className="btn btn-outline">
-                <LayoutDashboard size={14} />
-                <span className="hide-mobile">{role === 'organizer' ? 'DASHBOARD' : 'MY TICKETS'}</span>
-              </a>
-            ) : (
-              <a href="/login" className="btn btn-outline">
-                <LogIn size={14} />
-                <span className="hide-mobile">SIGN IN</span>
-              </a>
-            ))}
-            <a href="/admin/scan" className="btn btn-solid">
-              <ScanLine size={14} />
-              <span className="hide-mobile">SCANNER</span>
-            </a>
-          </div>
-        </nav>
-
-        <main style={{ paddingTop: '90px', flex: 1 }}>
-          {children}
-        </main>
-
-        {/* FOOTER */}
-        <footer className="footer glass">
-          <div className="footer-brand">
-            <h2>OUSTED<span style={{ color: '#e73c7e' }}>.</span></h2>
-            <p>Your premium event platform. Buy tickets, host events, run competitions — all secured by Paystack.</p>
-            <div style={{ marginTop: '20px', display: 'flex', gap: '10px', flexWrap: 'wrap', justifyContent: 'flex-start' }}>
-              {['Paystack Secured', 'SSL Encrypted', 'Instant Delivery'].map(t => (
-                <span key={t} style={{ fontSize: '10px', fontWeight: 800, background: '#000', color: '#fff', padding: '4px 10px', borderRadius: '6px' }}>{t}</span>
-              ))}
-            </div>
-          </div>
-          <div className="footer-col">
-            <h4>Platform</h4>
-            <a href="/voting" className="footer-link"><Vote size={15} /> Voting Console</a>
-            <a href="/" className="footer-link"><Ticket size={15} /> All Events</a>
-            <a href="/login" className="footer-link"><Sparkles size={15} /> Host an Event</a>
-            <a href="/tickets/find" className="footer-link"><ScanLine size={15} /> Find My Ticket</a>
-          </div>
-          <div className="footer-col">
-            <h4>Account</h4>
-            <div className="status-card">
-              {!loading && (
-                user ? (
-                  <div>
-                    <div style={{ display: 'flex', alignItems: 'center', fontSize: '11px', fontWeight: 800, marginBottom: '10px', color: '#16a34a' }}>
-                      <span className="status-dot" style={{ background: '#10b981', boxShadow: '0 0 8px #10b981' }} />
-                      {role?.toUpperCase()} SESSION
-                    </div>
-                    <p style={{ fontSize: '11px', opacity: .55, margin: '0 0 12px', wordBreak: 'break-all' }}>{user.email}</p>
-                    <button onClick={handleLogout} className="btn btn-solid" style={{ width: '100%', justifyContent: 'center', borderRadius: '10px', padding: '10px' }}>
-                      <LogOut size={13} /> SIGN OUT
-                    </button>
-                  </div>
-                ) : (
-                  <div>
-                    <div style={{ display: 'flex', alignItems: 'center', fontSize: '11px', fontWeight: 800, marginBottom: '12px', color: '#94a3b8' }}>
-                      <span className="status-dot" style={{ background: '#e2e8f0' }} /> Guest Access
-                    </div>
-                    <a href="/login" className="btn btn-solid" style={{ width: '100%', justifyContent: 'center', borderRadius: '10px', padding: '10px', display: 'flex' }}>
-                      <LogIn size={13} /> SIGN IN
-                    </a>
-                  </div>
-                )
-              )}
-            </div>
-          </div>
-        </footer>
+        <ClientShell>{children}</ClientShell>
       </body>
     </html>
   );

@@ -1,0 +1,2 @@
+NOTE: app/page.js is already "use client" — the root layout's metadata export covers it.
+For the voting page, we create a server wrapper.
