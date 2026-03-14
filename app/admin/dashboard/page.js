@@ -260,9 +260,17 @@ export default function AdminDashboard() {
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { router.push('/login'); return; }
-      // Check admin role
-      const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).single();
-      if (profile?.role !== 'admin') { router.push('/'); return; }
+
+      // Upsert profile so the row always exists with email populated
+      await supabase.from('profiles').upsert(
+        { id: user.id, email: user.email, role: user.user_metadata?.role || 'user' },
+        { onConflict: 'id', ignoreDuplicates: false }
+      ).catch(() => {});
+
+      // Check admin role — accept from DB profile OR user_metadata
+      const { data: profile } = await supabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
+      const isAdmin = profile?.role === 'admin' || user.user_metadata?.role === 'admin';
+      if (!isAdmin) { router.push('/'); return; }
       await load();
     })();
   }, [router, load]);
