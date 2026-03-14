@@ -7,6 +7,8 @@ import { LogOut, QrCode, Navigation, Share2, Copy, Check, Search, X, Plus, Arrow
 function PaymentBanner({ reference, onDone }) {
   const [state, setState] = useState('polling');
   const [msg, setMsg] = useState('Confirming your payment...');
+  const [payType, setPayType] = useState(null); // 'TICKET' | 'VOTE' | null
+
   useEffect(() => {
     if (!reference) return;
     let alive = true, attempt = 0;
@@ -15,6 +17,7 @@ function PaymentBanner({ reference, onDone }) {
       try {
         const r = await fetch(`/api/payment/status?reference=${encodeURIComponent(reference)}`);
         const d = await r.json();
+        if (d.type) setPayType(d.type);
         setMsg(d.message || 'Verifying...');
         if (d.status === 'confirmed') { setState('confirmed'); setTimeout(onDone, 2000); return; }
         if (d.status === 'failed') { setState('failed'); return; }
@@ -28,14 +31,27 @@ function PaymentBanner({ reference, onDone }) {
   }, [reference, onDone]);
 
   const palette = { polling: '#f59e0b', confirmed: '#22c55e', failed: '#ef4444', slow: '#94a3b8' };
-  const c = palette[state] || '#f59e0b';
+  const col = palette[state] || '#f59e0b';
+
+  // Confirmed message depends on payment type
+  const confirmedMsg = payType === 'VOTE'
+    ? '🗳️ Votes confirmed! Results will update shortly.'
+    : '🎉 Ticket confirmed! Appearing in your vault...';
+
+  const slowMsg = payType === 'VOTE'
+    ? 'Payment received — votes being recorded. Ref: ' + reference
+    : 'Payment received — ticket arriving shortly. Ref: ' + reference;
+
   return (
-    <div style={{ background: `${c}0d`, border: `1px solid ${c}33`, borderRadius: 20, padding: '14px 18px', marginBottom: 16, display: 'flex', gap: 12, alignItems: 'flex-start', animation: 'fadeUp .3s ease' }}>
-      {state === 'polling' ? <Loader2 size={15} color={c} style={{ animation: 'spin 1s linear infinite', flexShrink: 0, marginTop: 2 }} /> : state === 'confirmed' ? <Check size={15} color={c} style={{ flexShrink: 0, marginTop: 2 }} /> : <AlertTriangle size={15} color={c} style={{ flexShrink: 0, marginTop: 2 }} />}
-      <div><p style={{ margin: '0 0 3px', fontSize: 13, fontWeight: 800, color: c }}>{state === 'confirmed' ? '🎉 Ticket confirmed! Appearing in your vault...' : msg}</p>
+    <div style={{ background: `${col}0d`, border: `1px solid ${col}33`, borderRadius: 20, padding: '14px 18px', marginBottom: 16, display: 'flex', gap: 12, alignItems: 'flex-start', animation: 'fadeUp .3s ease' }}>
+      {state === 'polling' ? <Loader2 size={15} color={col} style={{ animation: 'spin 1s linear infinite', flexShrink: 0, marginTop: 2 }} /> : state === 'confirmed' ? <Check size={15} color={col} style={{ flexShrink: 0, marginTop: 2 }} /> : <AlertTriangle size={15} color={col} style={{ flexShrink: 0, marginTop: 2 }} />}
+      <div>
+        <p style={{ margin: '0 0 3px', fontSize: 13, fontWeight: 800, color: col }}>
+          {state === 'confirmed' ? confirmedMsg : msg}
+        </p>
         {state === 'polling' && <p style={{ margin: 0, fontSize: 11, color: '#555', fontWeight: 600 }}>Keep this page open while we confirm with Paystack</p>}
-        {state === 'slow' && <p style={{ margin: '4px 0 0', fontSize: 11, color: '#555', fontWeight: 600 }}>Payment received — ticket arriving shortly. Ref: {reference}</p>}
-        {state === 'failed' && <p style={{ margin: '4px 0 0', fontSize: 11, color: '#ef444480', fontWeight: 600 }}>Issue with payment. Contact support: {reference}</p>}
+        {state === 'slow' && <p style={{ margin: '4px 0 0', fontSize: 11, color: '#555', fontWeight: 600 }}>{slowMsg}</p>}
+        {state === 'failed' && <p style={{ margin: '4px 0 0', fontSize: 11, color: '#ef444480', fontWeight: 600 }}>Issue with payment. Contact support with ref: {reference}</p>}
       </div>
     </div>
   );

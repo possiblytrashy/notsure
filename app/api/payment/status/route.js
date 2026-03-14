@@ -1,5 +1,4 @@
-// Payment status polling — called by client after Paystack redirect
-// Fixed: removed .catch() on Supabase query builder (not supported in v2)
+// Payment status polling — distinguishes TICKET vs VOTE payments correctly
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
@@ -23,66 +22,73 @@ export async function GET(req) {
 
     const supabase = db();
 
-    // 1. Check webhook_log — fastest signal that the webhook processed it
+    // ── 1. Check webhook_log ─────────────────────────────────
     let webhookStatus = null;
     try {
       const { data: wh } = await supabase
         .from('webhook_log')
-        .select('status')
+        .select('status,raw_payload')
         .eq('reference', reference)
-        .maybeSingle();           // maybeSingle() never throws on 0 rows
+        .maybeSingle();
       webhookStatus = wh?.status || null;
-    } catch {}
 
-    if (webhookStatus === 'processed') {
-      // Look up the ticket
-      let tickets = [];
-      try {
-        const { data } = await supabase
-          .from('tickets')
-          .select('id,ticket_number,reference,guest_name,tier_name,event_id')
-          .eq('reference', reference)
-          .limit(5);
-        tickets = data || [];
-      } catch {}
-      return NextResponse.json({ status: 'confirmed', message: 'Payment confirmed! Your ticket is ready.', tickets });
-    }
+      if (webhookStatus === 'processed') {
+        // Determine type from raw_payload metadata
+        const txType = wh?.raw_payload?.data?.metadata?.type || null;
+        if (txType === 'VOTE') {
+          return NextResponse.json({
+            status: 'confirmed', type: 'vote',
+            message: '🗳️ Votes confirmed! Your votes have been counted.'
+          });
+        }
+        // For tickets, fetch the actual ticket records
+        let tickets = [];
+        try {
+          const { data } = await supabase
+            .from('tickets')
+            .select('id,ticket_number,reference,guest_name,tier_name,event_id')
+            .eq('reference', reference)
+            .limit(5);
+          tickets = data || [];
+        } catch {}
+        return NextResponse.json({
+          status: 'confirmed', type: 'ticket',
+          message: '🎟️ Ticket confirmed! Appearing in your vault.',
+          tickets
+        });
+      }
+    } catch {}
 
     if (webhookStatus === 'failed') {
       return NextResponse.json({ status: 'failed', message: 'Payment failed. Please try again or contact support.' });
     }
 
-    // 2. Check if ticket already exists (webhook may have run before log was written)
-    let ticketExists = false;
+    // ── 2. Check tickets table directly ─────────────────────
     try {
-      const { data } = await supabase
-        .from('tickets')
-        .select('id')
-        .eq('reference', reference)
-        .limit(1);
-      ticketExists = (data?.length || 0) > 0;
+      const { data: t } = await supabase
+        .from('tickets').select('id').eq('reference', reference).limit(1);
+      if (t?.length) {
+        return NextResponse.json({
+          status: 'confirmed', type: 'ticket',
+          message: '🎟️ Ticket confirmed! Appearing in your vault.'
+        });
+      }
     } catch {}
 
-    if (ticketExists) {
-      return NextResponse.json({ status: 'confirmed', message: 'Payment confirmed! Your ticket is ready.' });
-    }
-
-    // 3. Check vote_transactions
-    let voteExists = false;
+    // ── 3. Check vote_transactions directly ─────────────────
     try {
-      const { data } = await supabase
-        .from('vote_transactions')
-        .select('id')
-        .eq('reference', reference)
-        .limit(1);
-      voteExists = (data?.length || 0) > 0;
+      const { data: v } = await supabase
+        .from('vote_transactions').select('id,vote_count').eq('reference', reference).limit(1);
+      if (v?.length) {
+        const count = v[0]?.vote_count || 1;
+        return NextResponse.json({
+          status: 'confirmed', type: 'vote',
+          message: `🗳️ ${count} vote${count !== 1 ? 's' : ''} confirmed! Results are updating.`
+        });
+      }
     } catch {}
 
-    if (voteExists) {
-      return NextResponse.json({ status: 'confirmed', message: 'Votes confirmed!' });
-    }
-
-    // 4. Verify directly with Paystack
+    // ── 4. Verify with Paystack directly ─────────────────────
     try {
       const psRes = await fetch(
         `https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`,
@@ -91,9 +97,13 @@ export async function GET(req) {
       if (psRes.ok) {
         const psData = await psRes.json();
         const txStatus = psData?.data?.status;
+        const txType = psData?.data?.metadata?.type || 'TICKET';
 
         if (txStatus === 'success') {
-          // Paystack confirms success but webhook hasn't fired yet — trigger fallback
+          const pendingMsg = txType === 'VOTE'
+            ? 'Payment received — counting your votes...'
+            : 'Payment received — issuing your ticket now...';
+          // Fire manual webhook fallback
           fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/webhooks/paystack/manual`, {
             method: 'POST',
             headers: {
@@ -102,16 +112,19 @@ export async function GET(req) {
             },
             body: JSON.stringify({ reference, data: psData.data })
           }).catch(() => {});
-          return NextResponse.json({ status: 'pending', message: 'Payment received — issuing your ticket now...' });
+          return NextResponse.json({
+            status: 'pending',
+            type: txType.toLowerCase(),
+            message: pendingMsg
+          });
         }
-
         if (txStatus === 'failed' || txStatus === 'reversed') {
           return NextResponse.json({ status: 'failed', message: 'Payment was not successful. Please try again.' });
         }
       }
     } catch {}
 
-    // 5. Still waiting
+    // ── 5. Still waiting ──────────────────────────────────────
     return NextResponse.json({ status: 'pending', message: 'Verifying your payment...' });
 
   } catch (err) {
