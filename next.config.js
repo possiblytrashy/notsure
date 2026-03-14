@@ -26,6 +26,7 @@ const nextConfig = {
               "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.paystack.co https://*.paystack.com https://*.scanapp.org https://nominatim.openstreetmap.org https://*.tile.openstreetmap.org",
               "frame-src https://*.paystack.com https://*.paystack.co",
               "worker-src blob: 'self'",
+              "child-src blob: 'self'", 
             ].join('; ')
           },
           // SEO/Perf
