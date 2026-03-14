@@ -28,7 +28,9 @@ const nextConfig = {
               "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.paystack.co https://*.paystack.com https://nominatim.openstreetmap.org https://*.tile.openstreetmap.org https://www.scanapp.org https://scanapp.org",
               "frame-src 'self' https://*.paystack.com https://*.paystack.co https://www.scanapp.org https://scanapp.org",
               "worker-src 'self' blob:",
-              "child-src 'self' blob: https://www.scanapp.org https://scanapp.org",
+              "child-src 'self' blob:",
+              "media-src 'self' blob:",
+
             ].join('; ')
           },
           { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' },
