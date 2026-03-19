@@ -18,7 +18,7 @@ export default function UserAgreementPage() {
       <ul className="legal-ul">
         <li>Keep your password secure and not share it with any third party</li>
         <li>Log out from shared devices after use</li>
-        <li>Immediately report any suspected unauthorised use to <a href="mailto:oustedad@gmail.com" style={{ color: '#000', fontWeight: 800 }}>oustedad@gmail.com</a></li>
+        <li>Immediately report any suspected unauthorised use to <a href="mailto:legal@ousted.live" style={{ color: '#000', fontWeight: 800 }}>legal@ousted.live</a></li>
         <li>Ensure all information you provide is accurate and up to date</li>
       </ul>
       <p className="legal-p">OUSTED will not be liable for any loss or damage arising from your failure to comply with these obligations.</p>
