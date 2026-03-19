@@ -102,8 +102,8 @@ function TicketCard({ ticket, onQR, onNav, onShare, onGoogleWallet, onAppleWalle
           <button onClick={() => onGoogleWallet(ticket)} style={{ flex: 1, background: '#1a1a2e', border: '1px solid rgba(255,255,255,.08)', color: '#fff', padding: '10px 0', borderRadius: 12, fontWeight: 800, fontSize: 10, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, letterSpacing: '.3px' }}>
             <span style={{ fontSize: 12 }}>🎫</span> G-WALLET
           </button>
-          <button onClick={() => onAppleWallet(ticket)} style={{ flex: 1, background: '#0d0d0d', border: '1px solid rgba(255,255,255,.12)', color: '#fff', padding: '10px 0', borderRadius: 12, fontWeight: 800, fontSize: 10, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, letterSpacing: '.3px' }}>
-            <span style={{ fontSize: 12 }}>🍎</span> A-WALLET
+          <button onClick={() => onAppleWallet(ticket)} style={{ flex: 1, background: 'rgba(255,255,255,.04)', border: '1px solid rgba(255,255,255,.08)', color: '#9ca3af', padding: '10px 0', borderRadius: 12, fontWeight: 800, fontSize: 10, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, letterSpacing: '.3px' }}>
+            <span style={{ fontSize: 12 }}>📅</span> CALENDAR
           </button>
           <button onClick={() => onCalendar(ticket)} style={{ flex: 1, background: 'rgba(59,130,246,.1)', border: '1px solid rgba(59,130,246,.2)', color: '#60a5fa', padding: '10px 0', borderRadius: 12, fontWeight: 800, fontSize: 10, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, letterSpacing: '.3px' }}>
             <span style={{ fontSize: 12 }}>📅</span> CALENDAR
@@ -243,8 +243,12 @@ function NFCModal({ ticket, userEmail, onClose }) {
 
         {status === 'unsupported' ? (
           <div style={{ background: 'rgba(100,116,139,.1)', border: '1px solid rgba(100,116,139,.2)', borderRadius: 16, padding: '16px', marginBottom: 18 }}>
-            <p style={{ margin: '0 0 6px', fontSize: 13, fontWeight: 800, color: '#94a3b8' }}>NFC not supported</p>
-            <p style={{ margin: 0, fontSize: 11, color: '#555', fontWeight: 600 }}>Web NFC requires Chrome on Android with NFC enabled. Use your QR code instead — it works everywhere.</p>
+            <p style={{ margin: '0 0 8px', fontSize: 13, fontWeight: 900, color: '#94a3b8' }}>Not available on this device</p>
+            <p style={{ margin: '0 0 10px', fontSize: 11, color: '#555', fontWeight: 600 }}>Web NFC is only supported in <strong style={{color:'#aaa'}}>Chrome on Android</strong> with NFC hardware enabled.</p>
+            <div style={{ background: 'rgba(255,255,255,.04)', borderRadius: 10, padding: '10px 12px' }}>
+              <p style={{ margin: '0 0 6px', fontSize: 10, fontWeight: 800, color: '#888', letterSpacing: '1px' }}>ON iOS / IPHONE</p>
+              <p style={{ margin: 0, fontSize: 11, color: '#555', fontWeight: 600 }}>Apple blocks Web NFC on iOS Safari entirely — this is an Apple restriction. Your <strong style={{color:'#aaa'}}>QR code</strong> works on all devices, and you can add the event to your calendar using the 📅 CALENDAR button.</p>
+            </div>
           </div>
         ) : status === 'done' ? (
           <div style={{ background: 'rgba(34,197,94,.08)', border: '1px solid rgba(34,197,94,.2)', borderRadius: 16, padding: '16px', marginBottom: 18 }}>

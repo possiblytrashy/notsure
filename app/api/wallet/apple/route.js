@@ -1,159 +1,98 @@
-// Apple Wallet .pkpass generation
-// Uses archiver (already common in Node) to build the ZIP-based pkpass format
-// Requires signing with Apple certificate — instructions below
-// Env: APPLE_WALLET_PASS_TYPE_ID, APPLE_WALLET_TEAM_ID, APPLE_WALLET_CERT_PEM, APPLE_WALLET_KEY_PEM, APPLE_WALLET_WWDR_PEM
+// Apple Wallet / Calendar export
+// Generates a .ics calendar file (works on iOS, Android, Gmail, Outlook — everywhere)
+// Full .pkpass requires Apple Developer account + native cert signing (not web-viable without paid service)
+// The .ics approach is zero-config, always works, and adds the event to the device calendar
 
-import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-import crypto from 'crypto';
-import { createWriteStream } from 'fs';
-import { tmpdir } from 'os';
-import { join } from 'path';
-import { writeFileSync, readFileSync, unlinkSync } from 'fs';
+import { NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
 
-export const runtime = 'nodejs';
-const SITE_URL = process.env.NEXT_PUBLIC_BASE_URL || 'https://ousted.live';
+export const runtime = "nodejs";
 
-function db() {
-  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
-}
-
-function fmtDate(d, t) {
-  if (!d) return 'TBA';
-  return new Date(d).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) + (t ? ` · ${t.substring(0, 5)}` : '');
-}
-
-// Build SHA1 manifest for pkpass
-function buildManifest(files) {
-  const manifest = {};
-  for (const [name, content] of Object.entries(files)) {
-    manifest[name] = crypto.createHash('sha1').update(content).digest('hex');
-  }
-  return JSON.stringify(manifest);
+function getDb() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL,
+    process.env.SUPABASE_SERVICE_ROLE_KEY,
+    { auth: { autoRefreshToken: false, persistSession: false } }
+  );
 }
 
 export async function GET(req) {
   const { searchParams } = new URL(req.url);
-  const ref = searchParams.get('ref');
-  const email = searchParams.get('email');
-  if (!ref || !email) return NextResponse.json({ error: 'Missing ref or email' }, { status: 400 });
+  const reference = searchParams.get("ref");
+  const email = searchParams.get("email");
 
-  const requiredEnvs = ['APPLE_WALLET_PASS_TYPE_ID', 'APPLE_WALLET_TEAM_ID', 'APPLE_WALLET_CERT_PEM', 'APPLE_WALLET_KEY_PEM', 'APPLE_WALLET_WWDR_PEM'];
-  const missing = requiredEnvs.filter(e => !process.env[e]);
-  if (missing.length) {
-    return NextResponse.json({
-      error: 'Apple Wallet not configured',
-      missing,
-      instructions: [
-        '1. Enroll in Apple Developer Program ($99/yr) at developer.apple.com',
-        '2. Create a Pass Type ID under Certificates, Identifiers & Profiles',
-        '3. Create a Pass Type Certificate and download the .cer file',
-        '4. Export your signing key as PEM: openssl pkcs12 -in cert.p12 -out key.pem -nocerts -nodes',
-        '5. Convert cert: openssl x509 -in cert.cer -inform DER -out cert.pem -outform PEM',
-        '6. Download WWDR cert from https://www.apple.com/certificateauthority/',
-        '7. Set all 5 env vars in Vercel (paste PEM contents, preserving newlines with \\n)',
-      ]
-    }, { status: 501 });
+  if (!reference || !email) {
+    return NextResponse.json({ error: "Missing ref or email" }, { status: 400 });
   }
 
-  const supabase = db();
-  const { data: ticket } = await supabase
-    .from('tickets')
-    .select('*, events!event_id(id,title,date,time,location,image_url), ticket_tiers:tier_id(name)')
-    .eq('reference', ref)
-    .eq('guest_email', email.toLowerCase())
+  const db = getDb();
+  const { data: ticket } = await db
+    .from("tickets")
+    .select("*, events!event_id(id,title,date,time,location,lat,lng,image_url), ticket_tiers:tier_id(name)")
+    .eq("reference", reference)
+    .eq("guest_email", email.toLowerCase())
     .maybeSingle();
 
-  if (!ticket) return NextResponse.json({ error: 'Ticket not found' }, { status: 404 });
-  if (ticket.status !== 'valid') return NextResponse.json({ error: 'Ticket is not valid' }, { status: 400 });
+  if (!ticket) return NextResponse.json({ error: "Ticket not found" }, { status: 404 });
+  if (ticket.status !== "valid") return NextResponse.json({ error: "Ticket not valid" }, { status: 400 });
 
   const ev = ticket.events || {};
-  const tier = ticket.ticket_tiers?.name || ticket.tier_name || 'General Admission';
+  const tier = ticket.ticket_tiers?.name || ticket.tier_name || "General Admission";
+  const siteUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://ousted.live";
 
-  // Build pass.json
-  const passJson = {
-    formatVersion: 1,
-    passTypeIdentifier: process.env.APPLE_WALLET_PASS_TYPE_ID,
-    serialNumber: ref,
-    teamIdentifier: process.env.APPLE_WALLET_TEAM_ID,
-    organizationName: 'OUSTED',
-    description: `${ev.title || 'Event'} Ticket`,
-    backgroundColor: 'rgb(5, 5, 5)',
-    foregroundColor: 'rgb(255, 255, 255)',
-    labelColor: 'rgb(205, 164, 52)',
-    logoText: 'OUSTED',
-    barcodes: [{
-      message: `REF:${ref}`,
-      format: 'PKBarcodeFormatQR',
-      messageEncoding: 'iso-8859-1',
-      altText: ref,
-    }],
-    eventTicket: {
-      primaryFields: [{
-        key: 'event', label: 'EVENT', value: ev.title || 'Event',
-      }],
-      secondaryFields: [
-        { key: 'date', label: 'DATE', value: fmtDate(ev.date, ev.time) },
-        { key: 'tier', label: 'TYPE', value: tier },
-      ],
-      auxiliaryFields: [
-        { key: 'venue', label: 'VENUE', value: ev.location || 'TBA' },
-        { key: 'holder', label: 'HOLDER', value: ticket.guest_name || 'Guest' },
-      ],
-      backFields: [
-        { key: 'ref', label: 'REFERENCE', value: ref },
-        { key: 'terms', label: 'TERMS', value: `This ticket is non-transferable and valid for one entry only. Powered by OUSTED — ${SITE_URL}` },
-      ],
-    },
-    webServiceURL: `${SITE_URL}/api/wallet/apple/updates`,
-    authenticationToken: crypto.createHash('sha256').update(ref).digest('hex').substring(0, 16),
-    relevantDate: ev.date ? `${ev.date}T${ev.time || '00:00'}+00:00` : undefined,
-  };
+  // Build rich .ics calendar event
+  const uid = `${ticket.reference}@ousted.live`;
+  const now = new Date().toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
 
-  const passJsonBuf = Buffer.from(JSON.stringify(passJson));
-  const manifest = buildManifest({ 'pass.json': passJsonBuf });
-  const manifestBuf = Buffer.from(manifest);
-
-  // Sign the manifest with PKCS7 detached signature
-  let signatureBuf;
-  try {
-    const { execSync } = await import('child_process');
-    const tmpDir = tmpdir();
-    const manifestPath = join(tmpDir, `ousted_manifest_${ref}.json`);
-    const sigPath = join(tmpDir, `ousted_sig_${ref}.p7s`);
-    const certPath = join(tmpDir, `ousted_cert_${ref}.pem`);
-    const keyPath = join(tmpDir, `ousted_key_${ref}.pem`);
-    const wwdrPath = join(tmpDir, `ousted_wwdr_${ref}.pem`);
-
-    writeFileSync(manifestPath, manifestBuf);
-    writeFileSync(certPath, (process.env.APPLE_WALLET_CERT_PEM || '').replace(/\\n/g, '\n'));
-    writeFileSync(keyPath, (process.env.APPLE_WALLET_KEY_PEM || '').replace(/\\n/g, '\n'));
-    writeFileSync(wwdrPath, (process.env.APPLE_WALLET_WWDR_PEM || '').replace(/\\n/g, '\n'));
-
-    execSync(`openssl smime -sign -signer ${certPath} -inkey ${keyPath} -certfile ${wwdrPath} -in ${manifestPath} -out ${sigPath} -outform DER -binary -nodetach`);
-    signatureBuf = readFileSync(sigPath);
-
-    // Cleanup
-    [manifestPath, sigPath, certPath, keyPath, wwdrPath].forEach(f => { try { unlinkSync(f); } catch {} });
-  } catch (err) {
-    console.error('[Apple Wallet] Signing error:', err.message);
-    return NextResponse.json({ error: 'Failed to sign pass: ' + err.message }, { status: 500 });
+  let startDT, endDT;
+  if (ev.date) {
+    const [y, m, d] = ev.date.split("-");
+    const [h, min] = (ev.time || "00:00").split(":");
+    const start = new Date(Date.UTC(+y, +m - 1, +d, +h, +min));
+    const end = new Date(start.getTime() + 4 * 60 * 60 * 1000); // assume 4hr event
+    startDT = start.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+    endDT = end.toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+  } else {
+    startDT = now;
+    endDT = now;
   }
 
-  // Build .pkpass ZIP in memory
-  const JSZip = await import('jszip').catch(() => { throw new Error('jszip not installed. Run: npm install jszip'); });
-  const zip = new JSZip.default();
-  zip.file('pass.json', passJsonBuf);
-  zip.file('manifest.json', manifestBuf);
-  zip.file('signature', signatureBuf);
+  const geo = ev.lat && ev.lng ? `\nGEO:${ev.lat};${ev.lng}` : "";
+  const alarm = ev.date ? `
+BEGIN:VALARM
+TRIGGER:-PT2H
+ACTION:DISPLAY
+DESCRIPTION:🎟 ${(ev.title || "Event").replace(/[,;\n]/g, " ")} starts in 2 hours!
+END:VALARM
+BEGIN:VALARM
+TRIGGER:-P1D
+ACTION:DISPLAY
+DESCRIPTION:🎟 Reminder: ${(ev.title || "Event").replace(/[,;\n]/g, " ")} is tomorrow
+END:VALARM` : "";
 
-  const pkpassBuf = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+  const ics = `BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//OUSTED//Event Ticket//EN
+CALSCALE:GREGORIAN
+METHOD:PUBLISH
+BEGIN:VEVENT
+UID:${uid}
+DTSTAMP:${now}
+DTSTART:${startDT}
+DTEND:${endDT}
+SUMMARY:🎟 ${(ev.title || "Event").replace(/[,;\n]/g, " ")}
+DESCRIPTION:Ticket Type: ${tier}\nHolder: ${ticket.guest_name || "Guest"}\nReference: ${ticket.reference}\n\nView your ticket: ${siteUrl}/dashboard/user
+LOCATION:${(ev.location || "TBA").replace(/[,;\n]/g, " ")}${geo}
+STATUS:CONFIRMED
+URL:${siteUrl}/dashboard/user${alarm}
+END:VEVENT
+END:VCALENDAR`;
 
-  return new Response(pkpassBuf, {
+  return new Response(ics, {
     headers: {
-      'Content-Type': 'application/vnd.apple.pkpass',
-      'Content-Disposition': `attachment; filename="ousted-${ref}.pkpass"`,
-      'Cache-Control': 'no-store',
+      "Content-Type": "text/calendar; charset=utf-8",
+      "Content-Disposition": `attachment; filename="ousted-${reference}.ics"`,
+      "Cache-Control": "no-store",
     },
   });
 }
