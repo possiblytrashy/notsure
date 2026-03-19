@@ -742,12 +742,15 @@ const handleEditSubmit = async (e) => {
   <div style={fadeAnim}>
     <div style={viewHeader}>
       <h2 style={viewTitle}>Event Management</h2>
-      <button 
-      style={addBtn} 
-      onClick={() => router.push('/dashboard/organizer/create')}
-    >
-      <Plus size={18}/> NEW EVENT
-    </button>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <button style={{ ...addBtn, background: 'rgba(205,164,52,.12)', color: '#CDA434', border: '1px solid rgba(205,164,52,.2)' }}
+          onClick={() => router.push('/dashboard/organizer/blog')}>
+          ✍️ Blog
+        </button>
+        <button style={addBtn} onClick={() => router.push('/dashboard/organizer/create')}>
+          <Plus size={18}/> NEW EVENT
+        </button>
+      </div>
     </div>
 <style>{`
   @keyframes modalSlideUp {

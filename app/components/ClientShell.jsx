@@ -28,6 +28,9 @@ export default function ClientShell({ children }) {
       <nav className="nav glass" aria-label="Main navigation">
         <a href="/" className="logo" aria-label="OUSTED Home">OUSTED<span style={{ color: '#e73c7e' }}>.</span></a>
         <div className="nav-actions">
+          <a href="/blog" className="btn btn-outline hide-mobile" aria-label="Read the blog" style={{ fontSize: '10px' }}>
+            ✍️ <span>BLOG</span>
+          </a>
           <a href="/voting" className="btn btn-vote" aria-label="Vote for candidates">
             <Vote size={14} aria-hidden="true" />
             <span>VOTE</span>
@@ -70,6 +73,7 @@ export default function ClientShell({ children }) {
           <a href="/" className="footer-link"><Ticket size={15} aria-hidden="true" /> All Events</a>
           <a href="/login" className="footer-link"><Sparkles size={15} aria-hidden="true" /> Host an Event</a>
           <a href="/tickets/find" className="footer-link"><ScanLine size={15} aria-hidden="true" /> Find My Ticket</a>
+            <a href="/blog" className="footer-link">✍️ Blog</a>
           <div style={{ marginTop: '20px' }}>
             <h4>Legal</h4>
             <a href="/legal/terms" className="footer-link" style={{ fontSize: '12px', opacity: 0.7 }}>Terms & Conditions</a>

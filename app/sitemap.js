@@ -10,8 +10,12 @@ export default async function sitemap() {
   const staticPages = [
     { url: SITE_URL, lastModified: new Date(), changeFrequency: 'daily', priority: 1.0 },
     { url: `${SITE_URL}/voting`, lastModified: new Date(), changeFrequency: 'hourly', priority: 0.9 },
+    { url: `${SITE_URL}/blog`, lastModified: new Date(), changeFrequency: 'daily', priority: 0.8 },
     { url: `${SITE_URL}/login`, lastModified: new Date(), changeFrequency: 'monthly', priority: 0.3 },
     { url: `${SITE_URL}/tickets/find`, lastModified: new Date(), changeFrequency: 'monthly', priority: 0.4 },
+    { url: `${SITE_URL}/legal/terms`, lastModified: new Date(), changeFrequency: 'yearly', priority: 0.2 },
+    { url: `${SITE_URL}/legal/privacy`, lastModified: new Date(), changeFrequency: 'yearly', priority: 0.2 },
+    { url: `${SITE_URL}/legal/user-agreement`, lastModified: new Date(), changeFrequency: 'yearly', priority: 0.2 },
   ];
 
   // Dynamic event pages
@@ -42,5 +46,22 @@ export default async function sitemap() {
     });
   } catch {}
 
-  return [...staticPages, ...eventPages];
+  // Blog post pages
+  let blogPages = [];
+  try {
+    const { data: posts } = await supabase
+      .from('blog_posts')
+      .select('slug,updated_at,published_at')
+      .eq('status', 'published')
+      .order('published_at', { ascending: false })
+      .limit(500);
+    blogPages = (posts || []).map(p => ({
+      url: `${SITE_URL}/blog/${p.slug}`,
+      lastModified: p.updated_at ? new Date(p.updated_at) : new Date(),
+      changeFrequency: 'weekly',
+      priority: 0.7,
+    }));
+  } catch {}
+
+  return [...staticPages, ...eventPages, ...blogPages];
 }

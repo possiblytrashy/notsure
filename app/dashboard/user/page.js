@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../../../lib/supabase';
 import { useRouter } from 'next/navigation';
 import { LogOut, QrCode, Navigation, Share2, Copy, Check, Search, X, Plus, ArrowRight, RefreshCcw, Loader2, ShieldCheck, AlertTriangle, MapPin, ChevronRight } from 'lucide-react';
@@ -7,7 +7,7 @@ import { LogOut, QrCode, Navigation, Share2, Copy, Check, Search, X, Plus, Arrow
 function PaymentBanner({ reference, onDone }) {
   const [state, setState] = useState('polling');
   const [msg, setMsg] = useState('Confirming your payment...');
-  const [payType, setPayType] = useState(null); // 'TICKET' | 'VOTE' | null
+  const [payType, setPayType] = useState(null); // 'ticket' | 'vote' | null
 
   useEffect(() => {
     if (!reference) return;
@@ -17,7 +17,7 @@ function PaymentBanner({ reference, onDone }) {
       try {
         const r = await fetch(`/api/payment/status?reference=${encodeURIComponent(reference)}`);
         const d = await r.json();
-        if (d.type) setPayType(d.type);
+        if (d.type) setPayType(d.type?.toLowerCase());
         setMsg(d.message || 'Verifying...');
         if (d.status === 'confirmed') { setState('confirmed'); setTimeout(onDone, 2000); return; }
         if (d.status === 'failed') { setState('failed'); return; }
@@ -34,11 +34,11 @@ function PaymentBanner({ reference, onDone }) {
   const col = palette[state] || '#f59e0b';
 
   // Confirmed message depends on payment type
-  const confirmedMsg = payType === 'VOTE'
+  const confirmedMsg = payType === 'vote'
     ? '🗳️ Votes confirmed! Results will update shortly.'
     : '🎉 Ticket confirmed! Appearing in your vault...';
 
-  const slowMsg = payType === 'VOTE'
+  const slowMsg = payType === 'vote'
     ? 'Payment received — votes being recorded. Ref: ' + reference
     : 'Payment received — ticket arriving shortly. Ref: ' + reference;
 
@@ -57,7 +57,7 @@ function PaymentBanner({ reference, onDone }) {
   );
 }
 
-function TicketCard({ ticket, onQR, onNav, onShare }) {
+function TicketCard({ ticket, onQR, onNav, onShare, onGoogleWallet, onAppleWallet, onCalendar, onNFC }) {
   const ev = ticket.events || {};
   const tier = ticket.ticket_tiers?.name || ticket.tier_name || 'GENERAL';
   const isPast = ev.date ? new Date(ev.date) < new Date() : false;
@@ -91,10 +91,26 @@ function TicketCard({ ticket, onQR, onNav, onShare }) {
             <div key={l}><p style={{ margin: '0 0 2px', fontSize: 8, color: '#444', fontWeight: 900, letterSpacing: '1.5px' }}>{l}</p><p style={{ margin: 0, fontSize: 12, fontWeight: 800, color: '#ccc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v}</p></div>
           ))}
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        {/* Primary row */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
           <button onClick={() => onQR(ticket)} style={{ flex: 1, background: '#fff', color: '#000', border: 'none', padding: '13px 0', borderRadius: 14, fontWeight: 900, fontSize: 12, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}><QrCode size={14} /> SHOW QR</button>
           {ev.lat && ev.lng && <button onClick={() => onNav(ticket)} style={iconBtn}><Navigation size={15} /></button>}
           <button onClick={() => onShare(ticket)} style={iconBtn}><Share2 size={15} /></button>
+        </div>
+        {/* Wallet + NFC row */}
+        <div style={{ display: 'flex', gap: 7 }}>
+          <button onClick={() => onGoogleWallet(ticket)} style={{ flex: 1, background: '#1a1a2e', border: '1px solid rgba(255,255,255,.08)', color: '#fff', padding: '10px 0', borderRadius: 12, fontWeight: 800, fontSize: 10, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, letterSpacing: '.3px' }}>
+            <span style={{ fontSize: 12 }}>🎫</span> G-WALLET
+          </button>
+          <button onClick={() => onAppleWallet(ticket)} style={{ flex: 1, background: '#0d0d0d', border: '1px solid rgba(255,255,255,.12)', color: '#fff', padding: '10px 0', borderRadius: 12, fontWeight: 800, fontSize: 10, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, letterSpacing: '.3px' }}>
+            <span style={{ fontSize: 12 }}>🍎</span> A-WALLET
+          </button>
+          <button onClick={() => onCalendar(ticket)} style={{ flex: 1, background: 'rgba(59,130,246,.1)', border: '1px solid rgba(59,130,246,.2)', color: '#60a5fa', padding: '10px 0', borderRadius: 12, fontWeight: 800, fontSize: 10, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, letterSpacing: '.3px' }}>
+            <span style={{ fontSize: 12 }}>📅</span> CALENDAR
+          </button>
+          <button onClick={() => onNFC(ticket)} style={{ width: 44, background: 'rgba(99,102,241,.1)', border: '1px solid rgba(99,102,241,.2)', color: '#818cf8', padding: '10px 0', borderRadius: 12, fontWeight: 900, fontSize: 8, cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2, flexShrink: 0 }}>
+            <span style={{ fontSize: 13 }}>📡</span>NFC
+          </button>
         </div>
       </div>
     </div>
@@ -170,6 +186,115 @@ function TransportSheet({ ticket, onClose }) {
   );
 }
 
+
+/* ─────────── NFC WRITE MODAL ─────────── */
+function NFCModal({ ticket, userEmail, onClose }) {
+  const [status, setStatus] = useState('idle'); // idle | writing | done | error | unsupported
+  const [msg, setMsg] = useState('');
+  const ev = ticket.events || {};
+
+  const isSupported = typeof window !== 'undefined' && 'NDEFReader' in window;
+
+  const writeNFC = async () => {
+    if (!isSupported) { setStatus('unsupported'); return; }
+    setStatus('writing');
+    setMsg('Hold your phone to an NFC tag...');
+    try {
+      // Get signed payload from server
+      const r = await fetch(`/api/nfc/write?ref=${encodeURIComponent(ticket.reference)}&email=${encodeURIComponent(userEmail || '')}`);
+      const d = await r.json();
+      if (!d.nfc_payload) throw new Error(d.error || 'Could not generate NFC data');
+
+      const ndef = new window.NDEFReader();
+      await ndef.write({
+        records: [
+          { recordType: 'text', data: d.nfc_payload },   // for OUSTED gate scanner
+          { recordType: 'url',  data: d.deep_link },       // fallback for non-gate phones
+        ]
+      });
+      setStatus('done');
+      setMsg('NFC tag written! Your ticket is now on the tag.');
+    } catch (err) {
+      if (err.name === 'NotAllowedError') {
+        setStatus('error');
+        setMsg('NFC permission denied. Allow NFC in your browser permissions.');
+      } else if (err.name === 'NotSupportedError') {
+        setStatus('unsupported');
+      } else {
+        setStatus('error');
+        setMsg(err.message || 'NFC write failed. Try again.');
+      }
+    }
+  };
+
+  const colors = { idle: '#818cf8', writing: '#f59e0b', done: '#22c55e', error: '#ef4444', unsupported: '#64748b' };
+  const col = colors[status] || '#818cf8';
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.92)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: '#0d0d0d', borderRadius: 28, padding: '28px 22px', width: '100%', maxWidth: 340, border: '1px solid rgba(255,255,255,.08)', textAlign: 'center' }}>
+        <button onClick={onClose} style={{ position: 'absolute', top: 16, right: 16, background: 'rgba(255,255,255,.07)', border: 'none', color: '#fff', width: 36, height: 36, borderRadius: 10, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>✕</button>
+
+        {/* Icon */}
+        <div style={{ fontSize: 52, marginBottom: 14, filter: `drop-shadow(0 0 20px ${col})` }}>📡</div>
+
+        <h3 style={{ color: '#fff', fontWeight: 950, fontSize: 20, margin: '0 0 6px', letterSpacing: '-.5px' }}>Write to NFC Tag</h3>
+        <p style={{ color: '#555', fontSize: 12, fontWeight: 700, margin: '0 0 20px' }}>{ev.title || 'Event Ticket'}</p>
+
+        {status === 'unsupported' ? (
+          <div style={{ background: 'rgba(100,116,139,.1)', border: '1px solid rgba(100,116,139,.2)', borderRadius: 16, padding: '16px', marginBottom: 18 }}>
+            <p style={{ margin: '0 0 6px', fontSize: 13, fontWeight: 800, color: '#94a3b8' }}>NFC not supported</p>
+            <p style={{ margin: 0, fontSize: 11, color: '#555', fontWeight: 600 }}>Web NFC requires Chrome on Android with NFC enabled. Use your QR code instead — it works everywhere.</p>
+          </div>
+        ) : status === 'done' ? (
+          <div style={{ background: 'rgba(34,197,94,.08)', border: '1px solid rgba(34,197,94,.2)', borderRadius: 16, padding: '16px', marginBottom: 18 }}>
+            <p style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 900, color: '#22c55e' }}>✓ Tag written successfully</p>
+            <p style={{ margin: 0, fontSize: 11, color: '#555', fontWeight: 600 }}>Tap any NFC-enabled Android phone to your tag to check in at the gate.</p>
+          </div>
+        ) : status === 'error' ? (
+          <div style={{ background: 'rgba(239,68,68,.08)', border: '1px solid rgba(239,68,68,.2)', borderRadius: 16, padding: '16px', marginBottom: 18 }}>
+            <p style={{ margin: '0 0 4px', fontSize: 13, fontWeight: 800, color: '#ef4444' }}>Write failed</p>
+            <p style={{ margin: 0, fontSize: 11, color: '#555', fontWeight: 600 }}>{msg}</p>
+          </div>
+        ) : (
+          <div style={{ background: 'rgba(129,140,248,.08)', border: '1px solid rgba(129,140,248,.15)', borderRadius: 16, padding: '16px', marginBottom: 18 }}>
+            <p style={{ margin: '0 0 4px', fontSize: 12, fontWeight: 800, color: '#818cf8' }}>
+              {status === 'writing' ? '⏳ ' + msg : 'Write your ticket to a physical NFC tag'}
+            </p>
+            <p style={{ margin: 0, fontSize: 11, color: '#555', fontWeight: 600 }}>
+              {status === 'idle' ? 'Works with any NDEF-compatible NFC sticker or card. The tag will work at the gate scanner just like your QR code.' : ''}
+            </p>
+          </div>
+        )}
+
+        {/* How it works */}
+        {status === 'idle' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 20, textAlign: 'left' }}>
+            {[['1', 'Tap "Write Tag" below', '#818cf8'], ['2', 'Hold your phone to a blank NFC sticker', '#818cf8'], ['3', 'At the event, tap the sticker at the gate', '#22c55e']].map(([n, t, col]) => (
+              <div key={n} style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                <div style={{ width: 22, height: 22, borderRadius: 8, background: `${col}20`, border: `1px solid ${col}40`, color: col, fontSize: 11, fontWeight: 900, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>{n}</div>
+                <span style={{ fontSize: 12, color: '#888', fontWeight: 600 }}>{t}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <button
+          onClick={writeNFC}
+          disabled={status === 'writing' || status === 'done'}
+          style={{ width: '100%', background: status === 'done' ? '#22c55e20' : status === 'writing' ? '#333' : 'linear-gradient(135deg,#818cf8,#6366f1)', color: status === 'done' ? '#22c55e' : '#fff', border: 'none', padding: '14px', borderRadius: 16, fontWeight: 900, fontSize: 14, cursor: status === 'writing' || status === 'done' ? 'not-allowed' : 'pointer' }}
+        >
+          {status === 'done' ? '✓ Tag Written' : status === 'writing' ? 'Hold to NFC tag...' : status === 'error' ? 'Try Again' : 'Write Tag'}
+        </button>
+
+        {status !== 'unsupported' && (
+          <p style={{ marginTop: 12, fontSize: 10, color: '#333', fontWeight: 700 }}>Requires Chrome on Android · NFC must be enabled</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function UserDashboard() {
   const router = useRouter();
   const [user, setUser] = useState(null);
@@ -180,6 +305,7 @@ export default function UserDashboard() {
   const [resellerEarnings, setResellerEarnings] = useState(null);
   const [qrTicket, setQrTicket] = useState(null);
   const [navTicket, setNavTicket] = useState(null);
+  const [nfcModal, setNfcModal] = useState(null);
   const [filter, setFilter] = useState('upcoming');
   const [search, setSearch] = useState('');
   const [pendingRef, setPendingRef] = useState(null);
@@ -210,6 +336,56 @@ export default function UserDashboard() {
 
   const refresh = async () => { if (!user || refreshing) return; setRefreshing(true); await loadTickets(user); };
   const handleShare = (t) => { const text = `🎟️ I'm going to ${t.events?.title}!`; navigator.share ? navigator.share({ title: t.events?.title, text }) : navigator.clipboard.writeText(text); };
+
+  const handleWallet = async (t, provider) => {
+    const email = user?.email;
+    if (!email) return;
+    if (provider === 'google') {
+      const res = await fetch(`/api/wallet/google?ref=${encodeURIComponent(t.reference)}&email=${encodeURIComponent(email)}`);
+      const d = await res.json();
+      if (d.url) window.open(d.url, '_blank');
+      else if (d.instructions) alert('Google Wallet setup needed. Check Vercel env vars.');
+      else alert(d.error || 'Google Wallet unavailable');
+    } else {
+      const res = await fetch(`/api/wallet/apple?ref=${encodeURIComponent(t.reference)}&email=${encodeURIComponent(email)}`);
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = `ousted-${t.reference}.pkpass`; a.click();
+        URL.revokeObjectURL(url);
+      } else {
+        const d = await res.json();
+        if (d.instructions) alert('Apple Wallet needs setup:\n' + d.instructions.join('\n'));
+        else alert(d.error || 'Apple Wallet unavailable');
+      }
+    }
+  };
+
+  const handleGoogleWallet = async (t) => {
+    try {
+      const r = await fetch(`/api/wallet/google?ref=${encodeURIComponent(t.reference)}&email=${encodeURIComponent(user?.email || t.guest_email || '')}`);
+      const d = await r.json();
+      if (d.url) window.open(d.url, '_blank');
+      else alert(d.error || 'Google Wallet not configured yet. Add GOOGLE_WALLET_ISSUER_ID and GOOGLE_WALLET_KEY_FILE_JSON to your Vercel env vars.');
+    } catch { alert('Could not generate Google Wallet pass. Please try again.'); }
+  };
+
+  const handleAppleWallet = (t) => {
+    // Triggers .ics download (calendar event) or .pkpass if Apple certs configured
+    const url = `/api/wallet/apple?ref=${encodeURIComponent(t.reference)}&email=${encodeURIComponent(user?.email || t.guest_email || '')}`;
+    window.open(url, '_blank');
+  };
+
+  const handleCalendar = (t) => {
+    // Same as Apple Wallet fallback — downloads .ics
+    const url = `/api/wallet/apple?ref=${encodeURIComponent(t.reference)}&email=${encodeURIComponent(user?.email || t.guest_email || '')}`;
+    const a = document.createElement('a');
+    a.href = url; a.download = `ousted-${t.reference}.ics`; a.click();
+  };
+
+  const handleNFC = (t) => {
+    setNfcModal(t);
+  };
 
   const now = new Date();
   const filtered = tickets.filter(t => {
@@ -335,7 +511,7 @@ export default function UserDashboard() {
           </div>
         ) : (
           <>
-            {filtered.map(t => <TicketCard key={t.id} ticket={t} onQR={setQrTicket} onNav={setNavTicket} onShare={handleShare} />)}
+            {filtered.map(t => <TicketCard key={t.id} ticket={t} onQR={setQrTicket} onNav={setNavTicket} onShare={handleShare} onGoogleWallet={handleGoogleWallet} onAppleWallet={handleAppleWallet} onCalendar={handleCalendar} onNFC={handleNFC} />)}
             <button onClick={() => router.push('/')} style={{ width: '100%', padding: 14, background: 'none', border: '1px dashed rgba(255,255,255,.07)', borderRadius: 18, color: '#333', fontSize: 11, fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7 }}>
               <Plus size={12} /> Browse more events
             </button>
@@ -345,6 +521,7 @@ export default function UserDashboard() {
 
       {qrTicket && <QRModal ticket={qrTicket} userEmail={user?.email} onClose={() => setQrTicket(null)} />}
       {navTicket && <TransportSheet ticket={navTicket} onClose={() => setNavTicket(null)} />}
+      {nfcModal && <NFCModal ticket={nfcModal} userEmail={user?.email} onClose={() => setNfcModal(null)} />}
     </div>
   );
 }

@@ -7,6 +7,54 @@ import {
   Filter, Tag, ShieldCheck, ShieldX, AlertTriangle, Loader2
 } from 'lucide-react';
 
+
+function NFCButton({ onScan, eventId }) {
+  const [reading, setReading] = useState(false);
+  const [err, setErr] = useState('');
+
+  const startNFC = async () => {
+    if (reading) return;
+    setReading(true); setErr('');
+    try {
+      const ndef = new window.NDEFReader();
+      await ndef.scan();
+      ndef.onreadingerror = () => { setErr('NFC read error — try again'); setReading(false); };
+      ndef.onreading = ({ message }) => {
+        for (const record of message.records) {
+          if (record.recordType === 'text') {
+            const decoder = new TextDecoder(record.encoding || 'utf-8');
+            const data = decoder.decode(record.data);
+            onScan(data);
+            setReading(false);
+            return;
+          }
+          if (record.recordType === 'url') {
+            const decoder = new TextDecoder();
+            onScan(decoder.decode(record.data));
+            setReading(false);
+            return;
+          }
+        }
+        setErr('No readable ticket data on NFC tag');
+        setReading(false);
+      };
+    } catch (e) {
+      setErr('NFC not available: ' + e.message);
+      setReading(false);
+    }
+  };
+
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <button onClick={startNFC} disabled={reading} style={{ width: '100%', padding: '13px', background: reading ? '#1e40af' : '#1d4ed8', color: '#fff', border: 'none', borderRadius: 14, fontWeight: 900, fontSize: 13, cursor: reading ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+        <span style={{ fontSize: 16 }}>📱</span>
+        {reading ? 'Tap NFC ticket to phone...' : 'Scan via NFC Tag'}
+      </button>
+      {err && <p style={{ margin: '6px 0 0', fontSize: 11, color: '#ef4444', fontWeight: 700, textAlign: 'center' }}>{err}</p>}
+    </div>
+  );
+}
+
 export default function GateScanner() {
   const [events, setEvents] = useState([]);
   const [selectedEvent, setSelectedEvent] = useState(null);
@@ -136,7 +184,7 @@ export default function GateScanner() {
       )}
 
       {/* Manual entry */}
-      <div style={{ position: 'relative', display: 'flex', alignItems: 'center', marginBottom: 14 }}>
+      <div style={{ position: 'relative', display: 'flex', alignItems: 'center', marginBottom: 10 }}>
         <Search size={16} style={{ position: 'absolute', left: 14, color: '#94a3b8' }} />
         <input
           style={{ width: '100%', padding: '13px 14px 13px 42px', borderRadius: 14, border: '1px solid #e2e8f0', fontSize: 13, outline: 'none', background: '#fff' }}
@@ -147,6 +195,11 @@ export default function GateScanner() {
         />
         {manualRef && <button onClick={() => verifyQR(manualRef, true)} style={{ position: 'absolute', right: 10, background: '#000', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: 8, fontSize: 11, fontWeight: 900, cursor: 'pointer' }}>CHECK</button>}
       </div>
+
+      {/* NFC button — Web NFC API (Android Chrome only) */}
+      {typeof window !== 'undefined' && 'NDEFReader' in window && (
+        <NFCButton onScan={verifyQR} eventId={selectedEvent?.id} />
+      )}
 
       {/* Status card */}
       <div style={{ background: cfg.bg, border: `2px solid ${cfg.accent}33`, borderRadius: 28, padding: '36px 20px 28px', color: '#fff', textAlign: 'center', marginBottom: 14, position: 'relative', overflow: 'hidden' }}>
