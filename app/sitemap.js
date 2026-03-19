@@ -11,6 +11,7 @@ export default async function sitemap() {
     { url: SITE_URL, lastModified: new Date(), changeFrequency: 'daily', priority: 1.0 },
     { url: `${SITE_URL}/voting`, lastModified: new Date(), changeFrequency: 'hourly', priority: 0.9 },
     { url: `${SITE_URL}/blog`, lastModified: new Date(), changeFrequency: 'daily', priority: 0.8 },
+    { url: `${SITE_URL}/compare`, lastModified: new Date(), changeFrequency: 'monthly', priority: 0.7 },
     { url: `${SITE_URL}/login`, lastModified: new Date(), changeFrequency: 'monthly', priority: 0.3 },
     { url: `${SITE_URL}/tickets/find`, lastModified: new Date(), changeFrequency: 'monthly', priority: 0.4 },
     { url: `${SITE_URL}/legal/terms`, lastModified: new Date(), changeFrequency: 'yearly', priority: 0.2 },
