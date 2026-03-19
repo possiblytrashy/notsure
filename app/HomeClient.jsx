@@ -254,12 +254,12 @@ function AutomationsSection() {
   ];
 
   const automations = [
-    { emoji: '🎟️', title: 'Instant ticket delivery', body: "Ticket appears in buyer"s vault the moment payment clears. No manual processing, no delay.' },
+    { emoji: '🎟️', title: 'Instant ticket delivery', body: "Ticket appears in the buyer's vault the moment payment clears. No manual processing, no delay." },
     { emoji: '📊', title: 'Live check-in dashboard', body: "Gate staff see arrivals in real time. Organizers see check-in rate from anywhere." },
-    { emoji: '💰', title: 'Automatic payout tracking', body: "Every sale logs what's owed to whom. Admin sees a clear ledger — no spreadsheets." },
+    { emoji: '💰', title: 'Automatic payout tracking', body: "Every sale logs what is owed to whom. Admin sees a clear ledger — no spreadsheets." },
     { emoji: '🔔', title: 'Scarcity alerts', body: "Buyers see live ticket counts. When stock drops below 10%, urgency warnings fire automatically." },
     { emoji: '🏆', title: 'Live vote leaderboards', body: "Competition results update in real time. No manual counting, no result disputes." },
-    { emoji: '🔗', title: 'Reseller link tracking', body: "Each reseller"s unique link tracks clicks, conversions, and commission earned automatically.' },
+    { emoji: '🔗', title: 'Reseller link tracking', body: "Each reseller's unique link tracks clicks, conversions, and commission earned automatically." },
   ];
 
   return (
