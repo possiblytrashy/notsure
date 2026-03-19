@@ -133,10 +133,10 @@ function FeaturedCard({ event, proof }) {
 /* ──────────── HOW IT WORKS ──────────── */
 function HowItWorks() {
   const steps = [
-    { n:'01', emoji:'🔍', title:'Discover', body:'Browse upcoming events curated for every taste — concerts, parties, galas, talent shows. Filter by category, date, or vibe. Real buyer counts show you what's hot right now.' },
-    { n:'02', emoji:'🎟️', title:'Buy Instantly', body:'Pick your tier, enter your name and email. Pay in seconds via Paystack — card, mobile money, or bank transfer. No account required for buyers.' },
-    { n:'03', emoji:'📲', title:'Your Ticket Lives Here', body:'Your ticket lands in your personal Vault instantly. Cryptographically signed QR — impossible to forge. Add it to Google Wallet, download to calendar, or write it to an NFC tag.' },
-    { n:'04', emoji:'⚡', title:'Walk In Effortlessly', body:'At the gate, our scanner verifies your QR or NFC tap in under a second. No printing, no queues, no "my phone died" anxiety — your ticket is always online and always verifiable.' },
+    { n:'01', emoji:'🔍', title:'Discover', body:"Browse upcoming events curated for every taste — concerts, parties, galas, talent shows. Filter by category, date, or vibe. Real buyer counts show you what's hot right now." },
+    { n:'02', emoji:'🎟️', title:'Buy Instantly', body:"Pick your tier, enter your name and email. Pay in seconds via Paystack — card, mobile money, or bank transfer. No account required for buyers." },
+    { n:'03', emoji:'📲', title:'Your Ticket Lives Here', body:"Your ticket lands in your personal Vault instantly. Cryptographically signed QR — impossible to forge. Add it to Google Wallet, download to calendar, or write it to an NFC tag." },
+    { n:'04', emoji:'⚡', title:'Walk In Effortlessly', body:"At the gate, our scanner verifies your QR or NFC tap in under a second. No printing, no queues, no \"my phone died\" anxiety — your ticket is always online and always verifiable." },
   ];
   return (
     <section style={{ margin: '100px 0 0', padding: '0 4px' }}>
@@ -256,7 +256,7 @@ function AutomationsSection() {
   const automations = [
     { emoji: '🎟️', title: 'Instant ticket delivery', body: 'Ticket appears in buyer's vault the moment payment clears. No manual processing, no delay.' },
     { emoji: '📊', title: 'Live check-in dashboard', body: 'Gate staff see arrivals in real time. Organizers see check-in rate from anywhere.' },
-    { emoji: '💰', title: 'Automatic payout tracking', body: 'Every sale logs what's owed to whom. Admin sees a clear ledger — no spreadsheets.' },
+    { emoji: '💰', title: 'Automatic payout tracking', body: "Every sale logs what's owed to whom. Admin sees a clear ledger — no spreadsheets." },
     { emoji: '🔔', title: 'Scarcity alerts', body: 'Buyers see live ticket counts. When stock drops below 10%, urgency warnings fire automatically.' },
     { emoji: '🏆', title: 'Live vote leaderboards', body: 'Competition results update in real time. No manual counting, no result disputes.' },
     { emoji: '🔗', title: 'Reseller link tracking', body: 'Each reseller's unique link tracks clicks, conversions, and commission earned automatically.' },
@@ -302,6 +302,97 @@ function AutomationsSection() {
               </div>
             </div>
           ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+
+/* ──────────── MAKE THE SWITCH ──────────── */
+function MakeTheSwitch() {
+  const compare = [
+    { topic: "Organizer revenue",     ousted: "100% of your set price",       them: "Platform takes 10–20% cut" },
+    { topic: "Fee transparency",       ousted: "Buyers see fee on checkout",   them: "Fees hidden until final screen" },
+    { topic: "Payout speed",           ousted: "Your ledger, you control it",  them: "Payout delays of 7–30 days" },
+    { topic: "Ticket security",        ousted: "Cryptographically signed QR",  them: "Plain barcodes, screenshot-prone" },
+    { topic: "Gate entry method",      ousted: "QR + NFC tap-to-enter",        them: "QR only" },
+    { topic: "Reseller network",       ousted: "Built-in, 10% commission",     them: "Not available" },
+    { topic: "Live competitions",      ousted: "Full voting portal included",  them: "Not available" },
+    { topic: "Webhook automations",    ousted: "Native, HMAC-signed",          them: "Paid Zapier tier required" },
+    { topic: "Calendar integration",   ousted: ".ics + Google Wallet built-in","them: "Manual or paid add-on" },
+    { topic: "Setup cost",             ousted: "Free — pay only when you sell","them: "Monthly subscription fees" },
+  ];
+
+  return (
+    <section style={{ margin: "100px 0 0" }}>
+      <div style={{ textAlign: "center", marginBottom: 48 }}>
+        <div style={{ display: "inline-flex", alignItems: "center", gap: 7, background: "rgba(231,60,126,.06)", border: "1px solid rgba(231,60,126,.2)", borderRadius: 100, padding: "5px 16px", marginBottom: 16 }}>
+          <span style={{ fontSize: 11, fontWeight: 900, color: "#e73c7e", letterSpacing: "1.5px" }}>WHY SWITCH</span>
+        </div>
+        <h2 style={{ fontSize: 42, fontWeight: 950, letterSpacing: "-2.5px", margin: "0 0 14px", lineHeight: 1 }}>
+          Other platforms work for them.<br/>
+          <span style={{ color: "#e73c7e" }}>OUSTED works for you.</span>
+        </h2>
+        <p style={{ color: "#64748b", fontSize: 15, fontWeight: 600, maxWidth: 440, margin: "0 auto" }}>
+          Most ticketing platforms were built to extract maximum fee from both buyers and organizers. We built OUSTED differently.
+        </p>
+      </div>
+
+      {/* Comparison table */}
+      <div style={{ borderRadius: 28, overflow: "hidden", border: "1px solid #e2e8f0", background: "#fff" }}>
+        {/* Header */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", background: "#000" }}>
+          <div style={{ padding: "16px 20px" }}><p style={{ margin: 0, fontSize: 11, fontWeight: 900, color: "rgba(255,255,255,.35)", letterSpacing: "1.5px" }}>FEATURE</p></div>
+          <div style={{ padding: "16px 20px", borderLeft: "1px solid rgba(255,255,255,.08)" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+              <span style={{ fontSize: 14 }}>🖤</span>
+              <p style={{ margin: 0, fontSize: 13, fontWeight: 950, color: "#fff", letterSpacing: "-.3px" }}>OUSTED</p>
+            </div>
+          </div>
+          <div style={{ padding: "16px 20px", borderLeft: "1px solid rgba(255,255,255,.08)" }}>
+            <p style={{ margin: 0, fontSize: 11, fontWeight: 900, color: "rgba(255,255,255,.3)", letterSpacing: "1px" }}>THE OTHERS</p>
+          </div>
+        </div>
+
+        {compare.map(({ topic, ousted, them }, i) => (
+          <div key={topic} style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", borderTop: "1px solid #f1f5f9", background: i % 2 === 0 ? "#fff" : "#fafafa" }}>
+            <div style={{ padding: "15px 20px" }}>
+              <p style={{ margin: 0, fontSize: 13, fontWeight: 700, color: "#334155" }}>{topic}</p>
+            </div>
+            <div style={{ padding: "15px 20px", borderLeft: "1px solid #f1f5f9" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                <div style={{ width: 18, height: 18, borderRadius: 6, background: "#f0fdf4", border: "1px solid #86efac", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                  <span style={{ fontSize: 10 }}>✓</span>
+                </div>
+                <p style={{ margin: 0, fontSize: 12, fontWeight: 800, color: "#15803d" }}>{ousted}</p>
+              </div>
+            </div>
+            <div style={{ padding: "15px 20px", borderLeft: "1px solid #f1f5f9" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                <div style={{ width: 18, height: 18, borderRadius: 6, background: "#fef2f2", border: "1px solid #fecaca", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, flexShrink: 0 }}>
+                  <span style={{ fontSize: 10 }}>✗</span>
+                </div>
+                <p style={{ margin: 0, fontSize: 12, fontWeight: 600, color: "#94a3b8" }}>{them}</p>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Bottom CTA */}
+      <div style={{ marginTop: 36, background: "linear-gradient(135deg,#000 0%,#1a0010 100%)", borderRadius: 28, padding: "40px 40px", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 20 }}>
+        <div>
+          <h3 style={{ fontSize: 26, fontWeight: 950, color: "#fff", margin: "0 0 8px", letterSpacing: "-1px" }}>Ready to make the switch?</h3>
+          <p style={{ margin: 0, fontSize: 14, color: "rgba(255,255,255,.45)", fontWeight: 600 }}>Set up your first event in under 5 minutes. No monthly fees, no contracts.</p>
+        </div>
+        <div style={{ display: "flex", gap: 12 }}>
+          <a href="/login" style={{ background: "#e73c7e", color: "#fff", padding: "15px 28px", borderRadius: 16, fontWeight: 900, textDecoration: "none", fontSize: 13, display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+            Start Free →
+          </a>
+          <a href="/blog" style={{ background: "rgba(255,255,255,.08)", color: "#fff", padding: "15px 24px", borderRadius: 16, fontWeight: 900, textDecoration: "none", fontSize: 13, flexShrink: 0, border: "1px solid rgba(255,255,255,.1)" }}>
+            Read Our Story
+          </a>
         </div>
       </div>
     </section>
@@ -481,7 +572,7 @@ export default function Home() {
       </section>
 
       <HowItWorks/>
-      <AutomationsSection/>
+      <MakeTheSwitch/>
       <EventVideos events={events}/>
       <OrganizerCTA/>
     </div>

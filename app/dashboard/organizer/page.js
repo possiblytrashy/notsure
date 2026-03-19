@@ -747,6 +747,10 @@ const handleEditSubmit = async (e) => {
           onClick={() => router.push('/dashboard/organizer/blog')}>
           ✍️ Blog
         </button>
+        <button style={{ ...addBtn, background: 'rgba(99,102,241,.1)', color: '#818cf8', border: '1px solid rgba(99,102,241,.2)' }}
+          onClick={() => router.push('/dashboard/organizer/automations')}>
+          ⚡ Automations
+        </button>
         <button style={addBtn} onClick={() => router.push('/dashboard/organizer/create')}>
           <Plus size={18}/> NEW EVENT
         </button>
