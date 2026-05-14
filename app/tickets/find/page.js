@@ -1,139 +1,222 @@
 "use client";
-import { useState } from 'react';
-import { supabase } from '../../../lib/supabase';
-import { Mail, Hash, Loader2, Search, Download, ArrowLeft, Ticket } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { createClient } from '@supabase/supabase-js';
+import { Search, QrCode, ShieldCheck, Loader2, AlertTriangle, Check, Copy, Calendar, MapPin } from 'lucide-react';
 
-export default function FindTicketPage() {
-  const [email, setEmail] = useState('');
-  const [reference, setReference] = useState('');
-  const [ticket, setTicket] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+// Public client — RLS will restrict what's visible
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+);
 
-  const handleSearch = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setError('');
+function QRDisplay({ reference }) {
+  const [qrData, setQrData] = useState(reference);
+  const [loading, setLoading] = useState(true);
+  const [copied, setCopied] = useState(false);
 
-    // We join the events table to get the title for the ticket display
-    const { data, error: dbError } = await supabase
-      .from('tickets')
-      .select('*, events(title, location, date)')
-      .eq('guest_email', email.trim())
-      .eq('reference', reference.trim())
-      .single();
+  useEffect(() => {
+    // Fetch signed QR from server
+    fetch(`/api/tickets/qr-data?ref=${encodeURIComponent(reference)}&email=ussd`)
+      .then(r => r.json())
+      .then(d => { setQrData(d.qr_data || reference); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, [reference]);
 
-    if (dbError || !data) {
-      setError("Ticket not found. Please ensure the Email and Reference ID are correct.");
-      setLoading(false);
-    } else {
-      setTicket(data);
-      setLoading(false);
-    }
-  };
-
-  if (ticket) {
-    const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${ticket.reference}`;
-    
-    return (
-      <div className="printable-ticket" style={{ maxWidth: '500px', margin: '40px auto', padding: '20px' }}>
-        <style>{`
-          @media print {
-            body * { visibility: hidden; }
-            .printable-ticket, .printable-ticket * { visibility: visible; }
-            .printable-ticket { position: absolute; left: 0; top: 0; width: 100%; }
-            .no-print { display: none !important; }
-          }
-        `}</style>
-        
-        <div style={ticketCard}>
-          <div className="no-print" style={{ textAlign: 'left', marginBottom: '20px' }}>
-            <button onClick={() => setTicket(null)} style={backBtn}><ArrowLeft size={16}/> Back</button>
-          </div>
-
-          <Ticket size={40} style={{ marginBottom: '10px' }} />
-          <h2 style={{ fontSize: '24px', fontWeight: 900, margin: '0' }}>YOUR TICKET</h2>
-          <p style={{ color: '#64748b', marginBottom: '25px' }}>{ticket.events?.title}</p>
-
-          <div style={blackBox}>
-             <div style={{ marginBottom: '15px' }}>
-                <p style={label}>ATTENDEE</p>
-                <p style={value}>{ticket.guest_name || "Guest"}</p>
-             </div>
-             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <div>
-                  <p style={label}>TIER</p>
-                  <p style={value}>{ticket.tier_name}</p>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <p style={label}>PRICE</p>
-                  <p style={value}>GHS {ticket.amount}</p>
-                </div>
-             </div>
-          </div>
-
-          <div style={{ margin: '20px 0' }}>
-            <img src={qrUrl} alt="QR Code" style={{ width: '200px', height: '200px', borderRadius: '12px' }} />
-            <p style={{ marginTop: '15px', fontSize: '12px', fontWeight: 800, color: '#94a3b8' }}>ID: {ticket.reference}</p>
-          </div>
-
-          <button onClick={() => window.print()} style={downloadBtn} className="no-print">
-            <Download size={18} style={{ marginRight: '8px' }} /> SAVE AS PDF
-          </button>
-        </div>
-      </div>
-    );
-  }
+  const copy = () => { navigator.clipboard.writeText(reference); setCopied(true); setTimeout(() => setCopied(false), 2000); };
 
   return (
-    <div style={{ maxWidth: '500px', margin: '100px auto', padding: '20px' }}>
-      <div style={{ background: '#fff', padding: '40px', borderRadius: '32px', boxShadow: '0 10px 40px rgba(0,0,0,0.05)' }}>
-        <h1 style={{ fontSize: '32px', fontWeight: 900, marginBottom: '10px', letterSpacing: '-1px' }}>Find Ticket</h1>
-        <p style={{ color: '#64748b', marginBottom: '30px' }}>Enter the details used during checkout.</p>
-
-        <form onSubmit={handleSearch} style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
-          <div style={inputBox}>
-            <Mail size={18} color="#94a3b8" />
-            <input 
-              type="email" 
-              placeholder="Email Address" 
-              value={email} 
-              onChange={(e) => setEmail(e.target.value)} 
-              required 
-              style={inputField} 
-            />
-          </div>
-          
-          <div style={inputBox}>
-            <Hash size={18} color="#94a3b8" />
-            <input 
-              type="text" 
-              placeholder="Paystack Reference" 
-              value={reference} 
-              onChange={(e) => setReference(e.target.value)} 
-              required 
-              style={inputField} 
-            />
-          </div>
-
-          {error && <p style={{ color: '#ef4444', fontSize: '14px', fontWeight: 600 }}>{error}</p>}
-
-          <button type="submit" disabled={loading} style={submitBtn}>
-            {loading ? <Loader2 className="animate-spin" /> : <><Search size={18} style={{marginRight: '8px'}}/> LOCATE TICKET</>}
-          </button>
-        </form>
+    <div style={{ textAlign: 'center' }}>
+      <div style={{ background: '#fff', borderRadius: 24, padding: 20, display: 'inline-block', boxShadow: '0 8px 30px rgba(0,0,0,.1)', marginBottom: 16 }}>
+        {loading
+          ? <div style={{ width: 200, height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Loader2 size={28} color="#CDA434" style={{ animation: 'spin .8s linear infinite' }} />
+            </div>
+          : <img src={`https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrData)}&bgcolor=ffffff&color=000000&qzone=2`}
+              alt="Ticket QR Code" style={{ width: 200, height: 200, display: 'block' }} />
+        }
       </div>
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <code style={{ background: '#f1f5f9', padding: '6px 12px', borderRadius: 8, fontSize: 12, fontWeight: 700, color: '#334155' }}>{reference}</code>
+        <button onClick={copy} style={{ background: copied ? '#f0fdf4' : '#f8fafc', border: `1px solid ${copied ? '#86efac' : '#e2e8f0'}`, borderRadius: 8, padding: '6px 10px', cursor: 'pointer', color: copied ? '#16a34a' : '#64748b', display: 'flex', alignItems: 'center', gap: 4 }}>
+          {copied ? <Check size={13} /> : <Copy size={13} />}
+        </button>
+      </div>
+      <p style={{ fontSize: 11, color: '#94a3b8', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+        <ShieldCheck size={11} color="#22c55e" /> Cryptographically signed · Show at entry gate
+      </p>
     </div>
   );
 }
 
-// STYLES
-const ticketCard = { textAlign: 'center', padding: '40px', background: '#fff', borderRadius: '32px', boxShadow: '0 20px 50px rgba(0,0,0,0.1)', border: '1px solid #f1f5f9' };
-const blackBox = { background: '#000', color: '#fff', padding: '25px', borderRadius: '24px', textAlign: 'left', marginBottom: '25px' };
-const label = { margin: '0 0 4px 0', fontSize: '10px', opacity: 0.6, fontWeight: 700, letterSpacing: '1px' };
-const value = { margin: 0, fontWeight: 800, fontSize: '16px' };
-const inputBox = { display: 'flex', alignItems: 'center', gap: '12px', background: '#f8fafc', padding: '18px 20px', borderRadius: '20px', border: '1px solid #e2e8f0' };
-const inputField = { border: 'none', background: 'transparent', outline: 'none', width: '100%', fontWeight: 600 };
-const submitBtn = { width: '100%', background: '#000', color: '#fff', padding: '20px', borderRadius: '20px', border: 'none', fontWeight: 900, fontSize: '16px', cursor: 'pointer', display: 'flex', justifyContent: 'center', alignItems: 'center' };
-const downloadBtn = { width: '100%', background: '#f1f5f9', color: '#000', padding: '18px', borderRadius: '18px', border: 'none', fontWeight: 800, cursor: 'pointer', display: 'flex', justifyContent: 'center', alignItems: 'center' };
-const backBtn = { background: 'none', border: 'none', color: '#64748b', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '5px' };
+export default function FindTicketPage() {
+  const searchParams = useSearchParams();
+  const [reference, setReference] = useState('');
+  const [phone, setPhone] = useState('');
+  const [tickets, setTickets] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [searched, setSearched] = useState(false);
+
+  // Pre-fill from USSD SMS link: ?ref=XXXX
+  useEffect(() => {
+    const ref = searchParams.get('ref');
+    if (ref) {
+      setReference(ref);
+      // Auto-search when ref is in URL
+      autoSearch(ref);
+    }
+  }, [searchParams]);
+
+  const autoSearch = async (ref) => {
+    setLoading(true);
+    setError('');
+    const { data } = await supabase
+      .from('tickets')
+      .select('*, events!event_id(id,title,date,time,location,image_url), ticket_tiers:tier_id(name)')
+      .eq('reference', ref)
+      .eq('status', 'valid');
+    setLoading(false);
+    setSearched(true);
+    if (data?.length) {
+      setTickets(data);
+    } else {
+      setError('No valid tickets found for this reference. The payment may still be processing — check back in a minute.');
+    }
+  };
+
+  const handleSearch = async (e) => {
+    e.preventDefault();
+    if (!reference.trim() && !phone.trim()) { setError('Enter a reference or phone number'); return; }
+    setLoading(true); setError(''); setSearched(false);
+
+    let query = supabase.from('tickets')
+      .select('*, events!event_id(id,title,date,time,location,image_url), ticket_tiers:tier_id(name)')
+      .eq('status', 'valid');
+
+    if (reference.trim()) {
+      query = query.eq('reference', reference.trim().toUpperCase());
+    } else {
+      // Search by phone — USSD tickets stored as ussd-233XXXXXXXXX@ousted.live
+      const normalised = phone.trim().replace(/^0/, '233');
+      query = query.ilike('guest_email', `ussd-${normalised}%`);
+    }
+
+    const { data } = await query.limit(10);
+    setLoading(false);
+    setSearched(true);
+    if (data?.length) {
+      setTickets(data);
+    } else {
+      setError('No tickets found. If you just paid, please wait 1–2 minutes and try again.');
+    }
+  };
+
+  return (
+    <div style={{ maxWidth: 480, margin: '0 auto', padding: '32px 16px 80px', fontFamily: 'inherit' }}>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}`}</style>
+
+      <div style={{ textAlign: 'center', marginBottom: 32 }}>
+        <div style={{ width: 52, height: 52, background: '#000', borderRadius: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px', fontSize: 22 }}>🎟</div>
+        <h1 style={{ fontSize: 26, fontWeight: 950, margin: '0 0 8px', letterSpacing: '-1px' }}>Find My Ticket</h1>
+        <p style={{ margin: 0, fontSize: 14, color: '#64748b', fontWeight: 600 }}>Enter your reference from the SMS or your phone number to retrieve your tickets.</p>
+      </div>
+
+      {/* Search form */}
+      <form onSubmit={handleSearch} style={{ background: '#fff', borderRadius: 24, padding: '22px', border: '1px solid #e2e8f0', boxShadow: '0 4px 20px rgba(0,0,0,.05)', marginBottom: 24 }}>
+        <div style={{ marginBottom: 14 }}>
+          <label style={{ display: 'block', fontSize: 10, fontWeight: 900, color: '#94a3b8', letterSpacing: '1.5px', marginBottom: 7 }}>REFERENCE</label>
+          <input value={reference} onChange={e => setReference(e.target.value.toUpperCase())}
+            placeholder="e.g. USSD-M3X9K2-ABC123"
+            style={{ width: '100%', padding: '12px 14px', borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 13, fontWeight: 700, outline: 'none', boxSizing: 'border-box', letterSpacing: '0.5px' }} />
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '12px 0', color: '#94a3b8' }}>
+          <div style={{ flex: 1, height: 1, background: '#f1f5f9' }} />
+          <span style={{ fontSize: 11, fontWeight: 700 }}>or</span>
+          <div style={{ flex: 1, height: 1, background: '#f1f5f9' }} />
+        </div>
+        <div style={{ marginBottom: 18 }}>
+          <label style={{ display: 'block', fontSize: 10, fontWeight: 900, color: '#94a3b8', letterSpacing: '1.5px', marginBottom: 7 }}>PHONE NUMBER (USSD PURCHASES)</label>
+          <input value={phone} onChange={e => setPhone(e.target.value)}
+            placeholder="e.g. 0241234567"
+            type="tel"
+            style={{ width: '100%', padding: '12px 14px', borderRadius: 12, border: '1px solid #e2e8f0', fontSize: 13, fontWeight: 700, outline: 'none', boxSizing: 'border-box' }} />
+        </div>
+        {error && (
+          <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 12, padding: '10px 14px', marginBottom: 14, display: 'flex', gap: 8, alignItems: 'center' }}>
+            <AlertTriangle size={14} color="#ef4444" />
+            <p style={{ margin: 0, fontSize: 12, color: '#ef4444', fontWeight: 700 }}>{error}</p>
+          </div>
+        )}
+        <button type="submit" disabled={loading}
+          style={{ width: '100%', background: loading ? '#94a3b8' : '#000', color: '#fff', border: 'none', padding: '14px', borderRadius: 14, fontWeight: 900, fontSize: 14, cursor: loading ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+          {loading ? <><Loader2 size={15} style={{ animation: 'spin .8s linear infinite' }} /> Searching...</> : <><Search size={15} /> Find Tickets</>}
+        </button>
+      </form>
+
+      {/* Results */}
+      {tickets.map((ticket, i) => {
+        const ev = ticket.events || {};
+        const tier = ticket.ticket_tiers?.name || ticket.tier_name || 'General Admission';
+        return (
+          <div key={ticket.id} style={{ background: '#fff', borderRadius: 24, overflow: 'hidden', marginBottom: 20, border: '1px solid #e2e8f0', boxShadow: '0 4px 20px rgba(0,0,0,.06)', animation: 'fadeUp .4s ease' }}>
+            {/* Event image banner */}
+            {ev.image_url && (
+              <div style={{ height: 120, background: `url(${ev.image_url}) center/cover`, position: 'relative' }}>
+                <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(180deg,transparent 0%,rgba(0,0,0,.7) 100%)' }} />
+                <div style={{ position: 'absolute', bottom: 12, left: 14, right: 14 }}>
+                  <h3 style={{ color: '#fff', fontSize: 16, fontWeight: 950, margin: 0, letterSpacing: '-.3px' }}>{ev.title}</h3>
+                </div>
+              </div>
+            )}
+            <div style={{ padding: '18px' }}>
+              {!ev.image_url && <h3 style={{ fontSize: 17, fontWeight: 950, margin: '0 0 12px', letterSpacing: '-.3px' }}>{ev.title || 'Event'}</h3>}
+
+              {/* Ticket details */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 18 }}>
+                {[
+                  ['🎟 TIER', tier],
+                  ['💳 PAID', `GHS ${Number(ticket.base_amount || ticket.amount || 0).toFixed(2)}`],
+                  ['📅 DATE', ev.date ? new Date(ev.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : 'TBA'],
+                  ['📍 VENUE', ev.location || 'TBA'],
+                ].map(([l, v]) => (
+                  <div key={l} style={{ background: '#f8fafc', borderRadius: 12, padding: '10px 12px' }}>
+                    <p style={{ margin: '0 0 3px', fontSize: 8, color: '#94a3b8', fontWeight: 900, letterSpacing: '1.5px' }}>{l}</p>
+                    <p style={{ margin: 0, fontSize: 12, fontWeight: 800, color: '#334155', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Perforated divider */}
+              <div style={{ position: 'relative', margin: '0 -18px 18px', height: 14, background: '#f8fafc', display: 'flex', alignItems: 'center' }}>
+                <div style={{ position: 'absolute', left: -7, width: 14, height: 14, borderRadius: '50%', background: '#fff', border: '1px solid #e2e8f0' }} />
+                <div style={{ flex: 1, margin: '0 12px', borderTop: '2px dashed #e2e8f0' }} />
+                <div style={{ position: 'absolute', right: -7, width: 14, height: 14, borderRadius: '50%', background: '#fff', border: '1px solid #e2e8f0' }} />
+              </div>
+
+              {/* QR Code */}
+              <QRDisplay reference={ticket.reference} />
+
+              {/* Status */}
+              <div style={{ marginTop: 14, display: 'flex', justifyContent: 'center' }}>
+                <div style={{ background: ticket.is_scanned ? '#f8fafc' : '#f0fdf4', border: `1px solid ${ticket.is_scanned ? '#e2e8f0' : '#86efac'}`, borderRadius: 20, padding: '5px 14px', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div style={{ width: 7, height: 7, borderRadius: '50%', background: ticket.is_scanned ? '#94a3b8' : '#22c55e' }} />
+                  <span style={{ fontSize: 10, fontWeight: 900, color: ticket.is_scanned ? '#94a3b8' : '#16a34a', letterSpacing: '1px' }}>
+                    {ticket.is_scanned ? 'USED' : 'VALID — READY FOR ENTRY'}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+
+      {searched && !tickets.length && !loading && !error && (
+        <div style={{ textAlign: 'center', padding: '40px 20px', color: '#94a3b8' }}>
+          <div style={{ fontSize: 36, marginBottom: 12 }}>🔍</div>
+          <p style={{ fontWeight: 700 }}>No tickets found</p>
+        </div>
+      )}
+    </div>
+  );
+}
