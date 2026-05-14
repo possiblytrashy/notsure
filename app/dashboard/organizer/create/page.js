@@ -828,7 +828,7 @@ export default function CreateEvent() {
     
     <MapLogic lat={eventData.lat} lng={eventData.lng} setEventData={setEventData} />
     
-    {eventData.lat && eventData.lng && <Marker position={[eventData.lat, eventData.lng]} icon={getLuxuryIcon()} />
+    {eventData.lat && eventData.lng && <Marker position={[eventData.lat, eventData.lng]} icon={getLuxuryIcon()} />}
   </MapContainer>
   
   {/* Coordinates Overlay */}

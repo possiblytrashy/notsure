@@ -447,6 +447,7 @@ export default function AdminDashboard() {
         </div>
 
         {tab === 'overview' ? (
+
           /* ── EVENT BREAKDOWN TABLE ── */
           <div>
             <h2 style={{ fontSize: 16, fontWeight: 950, margin: '0 0 14px', color: '#0f172a' }}>Revenue by Event</h2>
@@ -471,6 +472,47 @@ export default function AdminDashboard() {
             ))}
             {eventBreakdown.length === 0 && <p style={{ textAlign: 'center', color: '#94a3b8', padding: 40, fontWeight: 700 }}>No revenue data yet</p>}
           </div>
+
+        ) : tab === 'ussd' ? (
+          /* ── USSD PURCHASES TAB ── */
+          <div>
+            <h2 style={{ fontSize: 16, fontWeight: 950, margin: '0 0 8px', color: '#0f172a' }}>USSD Ticket Sales</h2>
+            <p style={{ margin: '0 0 18px', fontSize: 13, color: '#64748b', fontWeight: 600 }}>Tickets purchased via *USSD# shortcode. Payments go to your account; organizers tracked in payouts tab.</p>
+            {/* USSD stats */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, marginBottom: 20 }}>
+              {[
+                ['Total Sales', ussdPending.filter(u => u.status === 'completed').length],
+                ['Pending', ussdPending.filter(u => u.status === 'pending').length],
+                ['Revenue', 'GHS ' + ussdPending.filter(u => u.status === 'completed').reduce((s, u) => s + Number(u.total_amount || 0), 0).toFixed(2)],
+              ].map(([l, v]) => (
+                <div key={l} style={{ background: '#fff', borderRadius: 18, padding: '16px', border: '1px solid #e2e8f0', textAlign: 'center' }}>
+                  <p style={{ margin: '0 0 4px', fontSize: 20, fontWeight: 950, color: '#0f172a' }}>{v}</p>
+                  <p style={{ margin: 0, fontSize: 10, color: '#94a3b8', fontWeight: 900, letterSpacing: '1px' }}>{l.toUpperCase()}</p>
+                </div>
+              ))}
+            </div>
+            {ussdPending.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '50px 20px', background: '#f8fafc', borderRadius: 20, border: '1px dashed #e2e8f0' }}>
+                <div style={{ fontSize: 36, marginBottom: 12 }}>📱</div>
+                <p style={{ color: '#94a3b8', fontWeight: 700, margin: 0 }}>No USSD purchases yet</p>
+              </div>
+            ) : ussdPending.map(u => (
+              <div key={u.id} style={{ background: '#fff', borderRadius: 16, padding: '14px 16px', marginBottom: 10, border: '1px solid #e2e8f0', display: 'flex', gap: 14, alignItems: 'center' }}>
+                <div style={{ width: 40, height: 40, borderRadius: 12, background: u.status === 'completed' ? '#f0fdf4' : u.status === 'failed' ? '#fef2f2' : '#fffbeb', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>
+                  {u.status === 'completed' ? '✅' : u.status === 'failed' ? '❌' : '⏳'}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ margin: '0 0 3px', fontWeight: 900, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.event_title || 'Event'} — {u.tier_name}</p>
+                  <p style={{ margin: 0, fontSize: 11, color: '#94a3b8', fontWeight: 700 }}>{u.msisdn} · {u.momo_network?.toUpperCase()} · x{u.quantity}</p>
+                </div>
+                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                  <p style={{ margin: '0 0 3px', fontWeight: 950, fontSize: 15, color: '#0f172a' }}>GHS {Number(u.total_amount || 0).toFixed(2)}</p>
+                  <p style={{ margin: 0, fontSize: 10, fontWeight: 900, color: u.status === 'completed' ? '#22c55e' : u.status === 'failed' ? '#ef4444' : '#f59e0b', letterSpacing: '1px' }}>{(u.status || '').toUpperCase()}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+
         ) : (
           /* ── PAYOUTS VIEW ── */
           <div>
@@ -512,46 +554,8 @@ export default function AdminDashboard() {
               filtered.map(p => <PayoutRow key={p.id} entry={p} onMarkPaid={markPaid} />)
             )}
           </div>
-        ) : tab === 'ussd' ? (
-          /* ── USSD PURCHASES TAB ── */
-          <div>
-            <h2 style={{ fontSize: 16, fontWeight: 950, margin: '0 0 8px', color: '#0f172a' }}>USSD Ticket Sales</h2>
-            <p style={{ margin: '0 0 18px', fontSize: 13, color: '#64748b', fontWeight: 600 }}>Tickets purchased via *USSD# shortcode. Payments go to your account; organizers tracked in payouts tab.</p>
-            {/* USSD stats */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, marginBottom: 20 }}>
-              {[
-                ['Total Sales', ussdPending.filter(u => u.status === 'completed').length],
-                ['Pending', ussdPending.filter(u => u.status === 'pending').length],
-                ['Revenue', 'GHS ' + ussdPending.filter(u => u.status === 'completed').reduce((s, u) => s + Number(u.total_amount || 0), 0).toFixed(2)],
-              ].map(([l, v]) => (
-                <div key={l} style={{ background: '#fff', borderRadius: 18, padding: '16px', border: '1px solid #e2e8f0', textAlign: 'center' }}>
-                  <p style={{ margin: '0 0 4px', fontSize: 20, fontWeight: 950, color: '#0f172a' }}>{v}</p>
-                  <p style={{ margin: 0, fontSize: 10, color: '#94a3b8', fontWeight: 900, letterSpacing: '1px' }}>{l.toUpperCase()}</p>
-                </div>
-              ))}
-            </div>
-            {ussdPending.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '50px 20px', background: '#f8fafc', borderRadius: 20, border: '1px dashed #e2e8f0' }}>
-                <div style={{ fontSize: 36, marginBottom: 12 }}>📱</div>
-                <p style={{ color: '#94a3b8', fontWeight: 700, margin: 0 }}>No USSD purchases yet</p>
-              </div>
-            ) : ussdPending.map(u => (
-              <div key={u.id} style={{ background: '#fff', borderRadius: 16, padding: '14px 16px', marginBottom: 10, border: '1px solid #e2e8f0', display: 'flex', gap: 14, alignItems: 'center' }}>
-                <div style={{ width: 40, height: 40, borderRadius: 12, background: u.status === 'completed' ? '#f0fdf4' : u.status === 'failed' ? '#fef2f2' : '#fffbeb', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>
-                  {u.status === 'completed' ? '✅' : u.status === 'failed' ? '❌' : '⏳'}
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ margin: '0 0 3px', fontWeight: 900, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.event_title || 'Event'} — {u.tier_name}</p>
-                  <p style={{ margin: 0, fontSize: 11, color: '#94a3b8', fontWeight: 700 }}>{u.msisdn} · {u.momo_network?.toUpperCase()} · x{u.quantity}</p>
-                </div>
-                <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                  <p style={{ margin: '0 0 3px', fontWeight: 950, fontSize: 15, color: '#0f172a' }}>GHS {Number(u.total_amount || 0).toFixed(2)}</p>
-                  <p style={{ margin: 0, fontSize: 10, fontWeight: 900, color: u.status === 'completed' ? '#22c55e' : u.status === 'failed' ? '#ef4444' : '#f59e0b', letterSpacing: '1px' }}>{(u.status || '').toUpperCase()}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : null}
+
+        )}
       </div>
     </div>
   );
