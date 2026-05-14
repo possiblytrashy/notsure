@@ -1161,7 +1161,7 @@ const handleEditSubmit = async (e) => {
                   try {
                     for (const file of Array.from(e.target.files)) {
                       const ext = file.name.split('.').pop();
-                      const name = `${user?.id || 'u'}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+                      const name = `${data.profile?.id || 'u'}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
                       const { error: upErr } = await supabase.storage.from('event-images').upload(name, file);
                       if (upErr) throw upErr;
                       const { data: { publicUrl } } = supabase.storage.from('event-images').getPublicUrl(name);
