@@ -179,6 +179,7 @@ const [showContestModal, setShowContestModal] = useState(null);
   
 // Add these to your state definitions
 const [uploading, setUploading] = useState(false);
+  const editInputStyle = { width: '100%', padding: '16px', borderRadius: 16, border: '2px solid #f1f5f9', background: '#f8fafc', fontWeight: 600, fontSize: 15, outline: 'none', color: '#0f172a', boxSizing: 'border-box' };
 const [editImages, setEditImages] = useState([]);
 const [editTiers, setEditTiers] = useState([]);
 const [editMapModal, setEditMapModal] = useState(false);
@@ -1861,7 +1862,6 @@ function CategoryItem({
   if (!comp) return null;
 
 
-const editInputStyle = { width: '100%', padding: '16px', borderRadius: 16, border: '2px solid #f1f5f9', background: '#f8fafc', fontWeight: 600, fontSize: 15, outline: 'none', color: '#0f172a', boxSizing: 'border-box' };
 
   return (
     <div style={{ marginBottom: '20px', background: '#f8fafc', padding: '15px', borderRadius: '20px', border: '1px solid #f1f5f9' }}>
