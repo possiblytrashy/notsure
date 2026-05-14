@@ -242,7 +242,7 @@ const uploadToSupabase = async (file) => {
       // Note the nested select for competitions -> contests -> candidates
       const [profileRes, eventsRes, compsRes, ticketsRes] = await Promise.allSettled([
         supabase.from('profiles').select('*').eq('id', user.id).single(),
-        supabase.from('events').select('*').eq('organizer_id', user.id).order('created_at', { ascending: false }),
+        supabase.from('events').select('*, ticket_tiers(id,name,price,max_quantity)').eq('organizer_id', user.id).order('created_at', { ascending: false }),
         supabase.from('competitions').select(`
           *,
           contests (
@@ -416,41 +416,48 @@ const deleteEvent = async (eventId) => {
 const handleEditSubmit = async (e) => {
   e.preventDefault();
   const formData = new FormData(e.target);
+  const raw = Object.fromEntries(formData.entries());
 
-  // Merge form text with Map Coordinates
+  // Type coercions
   const updatedFields = {
-    ...Object.fromEntries(formData.entries()),
-    lat: mapCoords ? mapCoords[0] : (editingEvent?.lat || null),
-    lng: mapCoords ? mapCoords[1] : (editingEvent?.lng || null)
+    title:             raw.title?.trim() || '',
+    description:       raw.description?.trim() || '',
+    date:              raw.date || null,
+    time:              raw.time || null,
+    location:          raw.location?.trim() || '',
+    lat:               raw.lat ? parseFloat(raw.lat) : null,
+    lng:               raw.lng ? parseFloat(raw.lng) : null,
+    image_url:         raw.image_url?.trim() || null,
+    promo_video_url:   raw.promo_video_url?.trim() || null,
+    category:          raw.category || 'Entertainment',
+    allows_resellers:  raw.allows_resellers === 'true',
+    status:            raw.status || 'active',
+    updated_at:        new Date().toISOString(),
   };
 
   try {
     let error;
     if (editingEvent?.id) {
-      // Update existing
       const res = await supabase.from('events').update(updatedFields).eq('id', editingEvent.id);
       error = res.error;
     } else {
-      // Create new (Handle the logic if you use this modal for creation too)
       const { data: userData } = await supabase.auth.getUser();
       const res = await supabase.from('events').insert([{
         ...updatedFields,
         organizer_id: userData.user.id,
-        status: 'active'
       }]);
       error = res.error;
     }
 
     if (error) throw error;
 
-    // Refresh Data
     loadDashboardData(true);
     setShowEventModal(false);
     setEditingEvent(null);
     setMapCoords(null);
-  } catch (error) {
-    console.error("Update error:", error);
-    alert("Failed to save event.");
+  } catch (err) {
+    console.error('Save event error:', err);
+    alert('Failed to save event: ' + (err.message || 'Unknown error'));
   }
 };
   // Add Candidate
@@ -742,19 +749,12 @@ const handleEditSubmit = async (e) => {
   <div style={fadeAnim}>
     <div style={viewHeader}>
       <h2 style={viewTitle}>Event Management</h2>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button style={{ ...addBtn, background: 'rgba(205,164,52,.12)', color: '#CDA434', border: '1px solid rgba(205,164,52,.2)' }}
-          onClick={() => router.push('/dashboard/organizer/blog')}>
-          ✍️ Blog
-        </button>
-        <button style={{ ...addBtn, background: 'rgba(99,102,241,.1)', color: '#818cf8', border: '1px solid rgba(99,102,241,.2)' }}
-          onClick={() => router.push('/dashboard/organizer/automations')}>
-          ⚡ Automations
-        </button>
-        <button style={addBtn} onClick={() => router.push('/dashboard/organizer/create')}>
-          <Plus size={18}/> NEW EVENT
-        </button>
-      </div>
+      <button 
+      style={addBtn} 
+      onClick={() => router.push('/dashboard/organizer/create')}
+    >
+      <Plus size={18}/> NEW EVENT
+    </button>
     </div>
 <style>{`
   @keyframes modalSlideUp {
@@ -790,7 +790,7 @@ const handleEditSubmit = async (e) => {
   onClick={() => {
     setEditingEvent(event); 
     // Load existing coordinates or default to 
-    setMapCoords(event.lat && event.lng ? [event.lat, event.lng] : [0, 0]); 
+    setMapCoords(event.lat && event.lng ? [event.lat, event.lng] : null); 
     setShowEventModal(true);
   }}
 >
@@ -1027,59 +1027,159 @@ const handleEditSubmit = async (e) => {
         </div>
       )}
 {showEventModal && (
-  <div style={modalOverlay}>
-    <div style={luxuryModal}>
-      <div style={modalHeader}>
-        <h2 style={viewTitle}>{editingEvent ? 'EDIT EVENT' : 'CREATE NEW EVENT'}</h2>
-        <button onClick={() => { setShowEventModal(false); setEditingEvent(null); }} style={circleAction}><X /></button>
+  <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}
+    onClick={() => { setShowEventModal(false); setEditingEvent(null); }}>
+    <div style={{ background: '#fff', borderRadius: 28, width: '100%', maxWidth: 680, maxHeight: '90vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}
+      onClick={e => e.stopPropagation()}>
+
+      {/* Header */}
+      <div style={{ padding: '22px 28px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+        <div>
+          <h2 style={{ margin: '0 0 3px', fontSize: 20, fontWeight: 950, letterSpacing: '-0.5px' }}>
+            {editingEvent ? 'Edit Event' : 'New Event'}
+          </h2>
+          <p style={{ margin: 0, fontSize: 12, color: '#94a3b8', fontWeight: 600 }}>
+            {editingEvent ? `Editing: ${editingEvent.title}` : 'Fill in the details below'}
+          </p>
+        </div>
+        <button onClick={() => { setShowEventModal(false); setEditingEvent(null); }}
+          style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12, width: 40, height: 40, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b', fontSize: 18 }}>
+          ✕
+        </button>
       </div>
 
-      <form onSubmit={handleEditSubmit} style={{ marginTop: '20px' }}>
-        <div style={inputStack}>
-          <label style={fieldLabel}>EVENT TITLE</label>
-          <input 
-            name="title"
-            style={modalInput} 
-            defaultValue={editingEvent?.title || ''} 
-            placeholder="e.g. Luxury Gala 2025"
-            required
-          />
-        </div>
+      {/* Scrollable body */}
+      <div style={{ overflowY: 'auto', padding: '24px 28px', flex: 1 }}>
+        <form onSubmit={handleEditSubmit} id="event-edit-form">
 
-        <div style={twoColumnGrid}>
+          {/* Title */}
           <div style={inputStack}>
-            <label style={fieldLabel}>LOCATION</label>
-            <input 
-              name="location"
-              style={modalInput} 
-              defaultValue={editingEvent?.location || ''} 
-              placeholder="Venue Name"
-            />
+            <label style={fieldLabel}>EVENT TITLE *</label>
+            <input name="title" style={modalInput} required
+              defaultValue={editingEvent?.title || ''}
+              placeholder="e.g. Afro Night 2025" />
           </div>
+
+          {/* Date + Time */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 16 }}>
+            <div style={inputStack}>
+              <label style={fieldLabel}>DATE *</label>
+              <input name="date" type="date" style={modalInput} required
+                defaultValue={editingEvent?.date || ''} />
+            </div>
+            <div style={inputStack}>
+              <label style={fieldLabel}>TIME</label>
+              <input name="time" type="time" style={modalInput}
+                defaultValue={editingEvent?.time || ''} />
+            </div>
+            <div style={inputStack}>
+              <label style={fieldLabel}>STATUS</label>
+              <select name="status" style={modalInput} defaultValue={editingEvent?.status || 'active'}>
+                <option value="active">Active</option>
+                <option value="draft">Draft</option>
+                <option value="cancelled">Cancelled</option>
+                <option value="completed">Completed</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Location */}
           <div style={inputStack}>
-            <label style={fieldLabel}>DATE</label>
-            <input 
-              name="date"
-              type="date" 
-              style={modalInput} 
-              defaultValue={editingEvent?.date || ''} 
-            />
+            <label style={fieldLabel}>VENUE / LOCATION</label>
+            <input name="location" style={modalInput}
+              defaultValue={editingEvent?.location || ''}
+              placeholder="Venue name and city" />
           </div>
-        </div>
 
-        <div style={inputStack}>
-          <label style={fieldLabel}>DESCRIPTION</label>
-          <textarea 
-            name="description"
-            style={{ ...modalInput, height: '100px', resize: 'none' }} 
-            defaultValue={editingEvent?.description || ''}
-          />
-        </div>
+          {/* Lat / Lng */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+            <div style={inputStack}>
+              <label style={fieldLabel}>LATITUDE</label>
+              <input name="lat" type="number" step="any" style={modalInput}
+                defaultValue={editingEvent?.lat || ''}
+                placeholder="e.g. 5.6037" />
+            </div>
+            <div style={inputStack}>
+              <label style={fieldLabel}>LONGITUDE</label>
+              <input name="lng" type="number" step="any" style={modalInput}
+                defaultValue={editingEvent?.lng || ''}
+                placeholder="e.g. -0.1870" />
+            </div>
+          </div>
 
-        <button type="submit" style={actionBtnFull}>
-          {editingEvent ? 'SAVE CHANGES' : 'PUBLISH EVENT'}
+          {/* Description */}
+          <div style={inputStack}>
+            <label style={fieldLabel}>DESCRIPTION</label>
+            <textarea name="description" rows={4}
+              style={{ ...modalInput, resize: 'vertical', minHeight: 90 }}
+              defaultValue={editingEvent?.description || ''}
+              placeholder="Describe the event experience..." />
+          </div>
+
+          {/* Cover Image URL */}
+          <div style={inputStack}>
+            <label style={fieldLabel}>COVER IMAGE URL</label>
+            <input name="image_url" style={modalInput}
+              defaultValue={editingEvent?.image_url || ''}
+              placeholder="https://..." />
+          </div>
+
+          {/* Promo Video URL */}
+          <div style={inputStack}>
+            <label style={fieldLabel}>PROMO VIDEO URL (optional)</label>
+            <input name="promo_video_url" style={modalInput}
+              defaultValue={editingEvent?.promo_video_url || ''}
+              placeholder="https://... (MP4 or YouTube)" />
+          </div>
+
+          {/* Category */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+            <div style={inputStack}>
+              <label style={fieldLabel}>CATEGORY</label>
+              <select name="category" style={modalInput} defaultValue={editingEvent?.category || 'Entertainment'}>
+                {['Entertainment','Music','Arts','Sports','Food & Drink','Business','Education','Other'].map(cat =>
+                  <option key={cat} value={cat}>{cat}</option>
+                )}
+              </select>
+            </div>
+            <div style={inputStack}>
+              <label style={fieldLabel}>ALLOW RESELLERS</label>
+              <select name="allows_resellers" style={modalInput} defaultValue={String(editingEvent?.allows_resellers ?? true)}>
+                <option value="true">Yes — resellers can sell tickets</option>
+                <option value="false">No — direct sales only</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Ticket Tiers section (existing tiers read-only summary, edit via separate flow) */}
+          {editingEvent?.ticket_tiers?.length > 0 && (
+            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 16, padding: '14px 16px', marginBottom: 16 }}>
+              <p style={{ margin: '0 0 10px', fontSize: 10, fontWeight: 900, color: '#94a3b8', letterSpacing: '1.5px' }}>TICKET TIERS</p>
+              {editingEvent.ticket_tiers.map((tier, i) => (
+                <div key={tier.id || i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: i < editingEvent.ticket_tiers.length - 1 ? '1px solid #f1f5f9' : 'none' }}>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: '#334155' }}>{tier.name}</span>
+                  <span style={{ fontSize: 13, fontWeight: 900, color: '#0f172a' }}>GHS {Number(tier.price).toFixed(2)}</span>
+                </div>
+              ))}
+              <p style={{ margin: '10px 0 0', fontSize: 11, color: '#94a3b8', fontWeight: 600 }}>
+                Edit tiers from the event card → Manage Tiers
+              </p>
+            </div>
+          )}
+
+        </form>
+      </div>
+
+      {/* Footer */}
+      <div style={{ padding: '16px 28px', borderTop: '1px solid #f1f5f9', display: 'flex', gap: 10, flexShrink: 0 }}>
+        <button type="submit" form="event-edit-form" style={{ flex: 1, background: '#000', color: '#fff', border: 'none', padding: '14px', borderRadius: 14, fontWeight: 900, fontSize: 14, cursor: 'pointer' }}>
+          {editingEvent ? '💾 Save Changes' : '🚀 Publish Event'}
         </button>
-      </form>
+        <button type="button" onClick={() => { setShowEventModal(false); setEditingEvent(null); }}
+          style={{ padding: '14px 20px', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 14, fontWeight: 800, fontSize: 13, cursor: 'pointer', color: '#64748b' }}>
+          Cancel
+        </button>
+      </div>
     </div>
   </div>
 )}

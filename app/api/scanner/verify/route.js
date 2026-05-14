@@ -110,25 +110,6 @@ export async function POST(req) {
     return NextResponse.json({ valid: false, reason: 'RACE_CONDITION', message: 'Ticket was just scanned by another gate — deny entry' });
   }
 
-  // Fire check-in automation (non-blocking)
-  fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/automations/trigger`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.INTERNAL_WEBHOOK_KEY || 'ousted-internal' },
-    body: JSON.stringify({
-      event_type: 'ticket.checked_in',
-      event_id: ticket.event_id,
-      data: {
-        reference,
-        event_name: eventTitle,
-        tier: tierName,
-        guest_name: ticket.guest_name,
-        guest_email: ticket.guest_email,
-        scanned_at: new Date().toISOString(),
-        scanned_by: scanner_id || 'gate',
-      },
-    }),
-  }).catch(() => {});
-
   return NextResponse.json({
     valid: true, reason: 'ACCESS_GRANTED', message: 'ACCESS GRANTED',
     event_name: eventTitle,

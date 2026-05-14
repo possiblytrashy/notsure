@@ -1,5 +1,6 @@
 // OUSTED WEBHOOK ENGINE v3.0
 // Handles: charge.success for TICKET and VOTE purchases
+// USSD purchases are routed to processUSSDPayment when meta.channel === 'USSD'
 // Idempotent, timing-safe HMAC verification, records base_price correctly
 
 import { NextResponse } from 'next/server';
@@ -56,7 +57,11 @@ export async function POST(req) {
   const startTime = Date.now();
 
   try {
-    if (meta.type === 'TICKET') {
+    if (meta.type === 'TICKET' && meta.channel === 'USSD') {
+      // USSD ticket purchase — use dedicated handler that also sends SMS
+      const { processUSSDPayment } = await import('../../ussd/payment-callback/handler.js');
+      await processUSSDPayment(event.data.reference, event.data);
+    } else if (meta.type === 'TICKET') {
       await processTicket(supabase, event.data, meta);
     } else if (meta.type === 'VOTE') {
       await processVote(supabase, event.data, meta);
@@ -162,54 +167,6 @@ async function processTicket(supabase, data, meta) {
   }).catch(() => {});
 
   console.log(`[WEBHOOK] ✅ ${qty} ticket(s) created for ${guest_email} | ref: ${data.reference}`);
-
-  // Fire automation triggers (non-blocking — don't await)
-  const automationPayload = {
-    event_type: 'ticket.purchased',
-    event_id,
-    organizer_id: meta.organizer_id || null,
-    data: {
-      reference: data.reference,
-      ticket_number: tickets[0]?.ticket_number,
-      event_title: tier?.events?.title || meta.event_title,
-      tier_name: tier?.name || meta.tier_name,
-      guest_name: guest_name || 'Guest',
-      guest_email: (guest_email || '').toLowerCase(),
-      amount_paid: data.amount / 100,
-      currency: 'GHS',
-      quantity: qty,
-      is_reseller_purchase: is_reseller_purchase || false,
-    },
-  };
-  fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/automations/trigger`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.INTERNAL_WEBHOOK_KEY || 'ousted-internal' },
-    body: JSON.stringify(automationPayload),
-  }).catch(() => {});
-
-  // Check low inventory — fire alert if > 90% sold
-  if (tier?.max_quantity > 0) {
-    const supabaseCheck = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, { auth: { autoRefreshToken: false, persistSession: false } });
-    const { count } = await supabaseCheck.from('tickets').select('id', { count: 'exact', head: true }).eq('tier_id', tier_id).eq('status', 'valid').catch(() => ({ count: 0 }));
-    const soldPct = Math.round(((count || 0) / tier.max_quantity) * 100);
-    if (soldPct >= 90) {
-      fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/automations/trigger`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.INTERNAL_WEBHOOK_KEY || 'ousted-internal' },
-        body: JSON.stringify({
-          event_type: soldPct >= 100 ? 'event.sold_out' : 'event.low_inventory',
-          event_id,
-          organizer_id: meta.organizer_id || null,
-          data: {
-            tier_name: tier.name,
-            tickets_remaining: tier.max_quantity - (count || 0),
-            tickets_total: tier.max_quantity,
-            sold_pct: soldPct,
-          },
-        }),
-      }).catch(() => {});
-    }
-  }
 }
 
 async function processVote(supabase, data, meta) {  // meta passed through for ledger
@@ -269,23 +226,4 @@ async function processVote(supabase, data, meta) {  // meta passed through for l
   }).catch(() => {});
 
   console.log(`[WEBHOOK] ✅ ${votes} vote(s) for ${candidate_name} | ref: ${data.reference}`);
-
-  // Fire vote automation trigger (non-blocking)
-  fetch(`${process.env.NEXT_PUBLIC_BASE_URL}/api/automations/trigger`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.INTERNAL_WEBHOOK_KEY || 'ousted-internal' },
-    body: JSON.stringify({
-      event_type: 'vote.cast',
-      event_id: null,
-      organizer_id: meta.organizer_id || null,
-      data: {
-        reference: data.reference,
-        candidate_name,
-        contest_id,
-        vote_count: votes,
-        amount_paid: data.amount / 100,
-        currency: 'GHS',
-      },
-    }),
-  }).catch(() => {});
 }

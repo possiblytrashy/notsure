@@ -77,8 +77,8 @@ function PayoutRow({ entry, onMarkPaid }) {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, margin: '12px 0' }}>
             {[
               ['TYPE', entry.recipient_type],
-              ['PAYMENT', entry.payment_display || entry.account_number || 'Not on file'],
-              ['NAME', entry.account_name || entry.recipient_name || '—'],
+              ['ACCOUNT', entry.account_number || 'Not on file'],
+              ['BANK/MoMo', entry.bank_name || entry.mobile_money_provider || 'N/A'],
               ['PLATFORM KEEPS', `GHS ${Number(entry.platform_total).toFixed(2)}`],
             ].map(([l, v]) => (
               <div key={l} style={{ background: '#f8fafc', borderRadius: 12, padding: '10px 12px' }}>
@@ -89,17 +89,17 @@ function PayoutRow({ entry, onMarkPaid }) {
           </div>
 
           {/* Account details for transfer */}
-          {(entry.account_number || entry.payment_display) && (
+          {entry.account_number && (
             <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 14, padding: '12px 14px', marginBottom: 12 }}>
               <p style={{ margin: '0 0 6px', fontSize: 9, fontWeight: 900, color: '#0369a1', letterSpacing: '1.5px' }}>TRANSFER DETAILS</p>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ margin: '0 0 2px', fontSize: 13, fontWeight: 900, color: '#0f172a' }}>{entry.account_name || entry.recipient_name}</p>
-                  <p style={{ margin: 0, fontSize: 12, color: '#0369a1', fontWeight: 800 }}>{entry.payment_display || `${entry.bank_name || entry.mobile_money_provider || ''} · ${entry.account_number || ''}`}</p>
+                <div>
+                  <p style={{ margin: '0 0 2px', fontSize: 12, fontWeight: 800, color: '#0f172a' }}>{entry.account_name || entry.recipient_name}</p>
+                  <p style={{ margin: 0, fontSize: 11, color: '#64748b', fontWeight: 700 }}>{entry.bank_name || entry.mobile_money_provider} · {entry.account_number}</p>
                 </div>
-                {entry.account_number && <CopyBtn text={entry.account_number} />}
+                <CopyBtn text={entry.account_number} />
               </div>
-              <p style={{ margin: 0, fontSize: 14, fontWeight: 950, color: '#0369a1' }}>Amount to send: GHS {Number(entry.amount_owed).toFixed(2)}</p>
+              <p style={{ margin: 0, fontSize: 13, fontWeight: 950, color: '#0369a1' }}>Amount: GHS {Number(entry.amount_owed).toFixed(2)}</p>
             </div>
           )}
 
@@ -143,90 +143,56 @@ export default function AdminDashboard() {
   const [eventBreakdown, setEventBreakdown] = useState([]);
 
   const load = useCallback(async () => {
+    // Get session token to send to our server-side API
     const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+
     const res = await fetch('/api/admin/data', {
-      headers: { 'Authorization': `Bearer ${session?.access_token}` }
+      headers: { 'Authorization': `Bearer ${token}` }
     });
-    if (!res.ok) { setLoading(false); setRefreshing(false); return; }
 
-    const {
-      tickets, votes, organizers, resellers, eventResellers,
-      resellerSales, events, candidates, contests, competitions, ledger
-    } = await res.json();
+    if (!res.ok) {
+      console.error('Admin data fetch failed:', res.status);
+      setLoading(false); setRefreshing(false);
+      return;
+    }
 
-    // ── LOOKUP MAPS ───────────────────────────────────────────
+    const { tickets, votes, organizers, resellerLinks, ledger, events, candidates } = await res.json();
+
+    // Build lookup maps
     const eventMap = {};
     (events || []).forEach(e => { eventMap[e.id] = e; });
 
-    // Organizers keyed by user_id (that's the FK events.organizer_id points to)
     const orgByUserId = {};
     (organizers || []).forEach(o => { orgByUserId[o.user_id] = o; });
 
-    // Resellers keyed by their id (event_resellers.reseller_id)
-    const resellerById = {};
-    (resellers || []).forEach(r => { resellerById[r.id] = r; });
+    const resellerMap = {};
+    (resellerLinks || []).forEach(l => { resellerMap[l.id] = l; });
 
-    // event_resellers keyed by id
-    const erById = {};
-    (eventResellers || []).forEach(er => { erById[er.id] = er; });
+    const candidateMap = {};
+    (candidates || []).forEach(c => { candidateMap[c.id] = c; });
 
-    const contestMap = {};
-    (contests || []).forEach(ct => { contestMap[ct.id] = ct; });
-    const compMap = {};
-    (competitions || []).forEach(cp => { compMap[cp.id] = cp; });
-    const candMap = {};
-    (candidates || []).forEach(c => { candMap[c.id] = c; });
-
-    // reseller_sales grouped by event_reseller_id
-    const salesByEr = {};
-    (resellerSales || []).forEach(s => {
-      if (!salesByEr[s.event_reseller_id]) salesByEr[s.event_reseller_id] = [];
-      salesByEr[s.event_reseller_id].push(s);
-    });
-
+    // Track which references are already in the ledger
     const ledgerRefs = new Set((ledger || []).map(r => r.reference));
 
-    // ── HELPER: payment display ───────────────────────────────
-    const paymentInfo = (entity) => {
-      // entity can be an organizer or reseller row
-      if (entity?.mobile_money_number) {
-        return {
-          display: `${entity.mobile_money_provider || 'MoMo'}: ${entity.mobile_money_number}`,
-          account: entity.mobile_money_number,
-          method: entity.mobile_money_provider || 'Mobile Money',
-        };
-      }
-      if (entity?.account_number) {
-        return {
-          display: `${entity.bank_code || entity.bank_name || 'Bank'}: ${entity.account_number}`,
-          account: entity.account_number,
-          method: entity.bank_code || entity.bank_name || 'Bank Transfer',
-        };
-      }
-      return { display: 'Payment details not on file', account: null, method: null };
-    };
-
-    // ── BUILD PAYOUT ENTRIES ──────────────────────────────────
     const orgMap = {};
     const resMap = {};
 
-    const getOrg = (orgUserId, eventId, txType) => {
-      const key = `${orgUserId}||${eventId || 'votes'}`;
+    const getOrgEntry = (orgUserId, eventId, txType) => {
+      const key = `${orgUserId}|${eventId || 'vote'}`;
       if (!orgMap[key]) {
-        const o = orgByUserId[orgUserId] || {};
+        const orgInfo = orgByUserId[orgUserId] || {};
         const ev = eventMap[eventId] || {};
-        const pi = paymentInfo(o);
         orgMap[key] = {
           id: key, recipient_type: 'ORGANIZER',
           organizer_id: orgUserId, event_id: eventId,
           event_title: ev.title || (txType === 'VOTE' ? 'Vote Revenue' : 'Unknown Event'),
           transaction_type: txType,
-          recipient_name: o.business_name || o.name || '—',
-          payment_display: pi.display,
-          account_number: pi.account,
-          bank_name: pi.method,
-          mobile_money_provider: o.mobile_money_provider || null,
-          account_name: o.name || o.business_name || null,
+          recipient_name: orgInfo.business_name || orgInfo.name || '—',
+          account_number: orgInfo.mobile_money_number || orgInfo.account_number || null,
+          bank_name: orgInfo.bank_code || null,
+          mobile_money_provider: orgInfo.mobile_money_provider || null,
+          account_name: orgInfo.name || null,
           amount_owed: 0, platform_total: 0, ticket_count: 0,
           status: 'pending', transactions: []
         };
@@ -234,103 +200,86 @@ export default function AdminDashboard() {
       return orgMap[key];
     };
 
-    const getRes = (erLinkId, eventId) => {
-      if (!resMap[erLinkId]) {
-        const er = erById[erLinkId] || {};
-        // reseller_id on event_resellers points to resellers.id
-        const r = resellerById[er.reseller_id] || {};
-        const ev = eventMap[eventId] || {};
-        const pi = paymentInfo(r);
-        resMap[erLinkId] = {
-          id: erLinkId, recipient_type: 'RESELLER', event_reseller_id: erLinkId,
-          reseller_id: er.reseller_id,
-          event_id: eventId, event_title: ev.title || '—', transaction_type: 'TICKET',
-          recipient_name: r.name || '—',
-          payment_display: pi.display,
-          account_number: pi.account,
-          bank_name: pi.method,
-          mobile_money_provider: r.mobile_money_provider || null,
-          account_name: r.account_name || r.name || null,
-          amount_owed: 0, platform_total: 0, ticket_count: 0,
-          status: 'pending', transactions: []
-        };
-      }
-      return resMap[erLinkId];
-    };
-
-    // Process ledger rows (already computed splits)
+    // Process ledger rows (most accurate)
     (ledger || []).forEach(row => {
-      if (row.organizer_id && Number(row.organizer_owes) > 0) {
-        const e = getOrg(row.organizer_id, row.event_id, row.transaction_type);
-        e.amount_owed += Number(row.organizer_owes);
-        e.platform_total += Number(row.platform_keeps || 0);
-        e.ticket_count++;
-        e.transactions.push({ reference: row.reference, organizer_owes: row.organizer_owes, created_at: row.created_at });
-        if (row.organizer_paid) e.status = 'paid';
+      const ev = eventMap[row.event_id] || {};
+      const orgUserId = row.organizer_id;
+      if (orgUserId) {
+        const entry = getOrgEntry(orgUserId, row.event_id, row.transaction_type);
+        entry.event_title = ev.title || entry.event_title;
+        entry.amount_owed += Number(row.organizer_owes || 0);
+        entry.platform_total += Number(row.platform_keeps || 0);
+        entry.ticket_count += 1;
+        entry.transactions.push({ reference: row.reference, organizer_owes: row.organizer_owes, created_at: row.created_at });
+        if (row.organizer_paid) entry.status = 'paid';
       }
       if (row.event_reseller_id && Number(row.reseller_owes) > 0) {
-        const r = getRes(row.event_reseller_id, row.event_id);
-        r.amount_owed += Number(row.reseller_owes);
-        r.ticket_count++;
-        r.transactions.push({ reference: row.reference, reseller_owes: row.reseller_owes, created_at: row.created_at });
-        if (row.reseller_paid) r.status = 'paid';
+        const rl = resellerMap[row.event_reseller_id];
+        const key = row.event_reseller_id;
+        if (!resMap[key]) {
+          resMap[key] = {
+            id: key, recipient_type: 'RESELLER', event_reseller_id: key,
+            event_id: row.event_id, event_title: ev.title || '—', transaction_type: 'TICKET',
+            recipient_name: rl?.resellers?.name || '—',
+            account_number: rl?.resellers?.mobile_money_number || rl?.resellers?.account_number,
+            bank_name: rl?.resellers?.bank_code, mobile_money_provider: rl?.resellers?.mobile_money_provider,
+            account_name: rl?.resellers?.name, amount_owed: 0, platform_total: 0,
+            ticket_count: 0, status: 'pending', transactions: []
+          };
+        }
+        resMap[key].amount_owed += Number(row.reseller_owes || 0);
+        resMap[key].ticket_count += 1;
+        resMap[key].transactions.push({ reference: row.reference, reseller_owes: row.reseller_owes });
+        if (row.reseller_paid) resMap[key].status = 'paid';
       }
     });
 
-    // Process tickets not yet in ledger
+    // Process tickets not in ledger
     (tickets || []).filter(t => !ledgerRefs.has(t.reference)).forEach(t => {
       const ev = eventMap[t.event_id] || {};
       const orgUserId = ev.organizer_id;
       if (!orgUserId) return;
       const base = Number(t.base_amount || t.amount || 0);
       const fee = Number(t.platform_fee || base * 0.05);
-      const e = getOrg(orgUserId, t.event_id, 'TICKET');
-      e.amount_owed += base;
-      e.platform_total += fee;
-      e.ticket_count++;
-      e.transactions.push({ reference: t.reference, organizer_owes: base, created_at: t.created_at });
+      const entry = getOrgEntry(orgUserId, t.event_id, 'TICKET');
+      entry.amount_owed += base;
+      entry.platform_total += fee;
+      entry.ticket_count += 1;
+      entry.transactions.push({ reference: t.reference, organizer_owes: base, created_at: t.created_at });
 
       if (t.is_reseller_purchase && t.event_reseller_id) {
+        const rl = resellerMap[t.event_reseller_id];
         const markup = base * 0.10;
-        const r = getRes(t.event_reseller_id, t.event_id);
-        r.amount_owed += markup;
-        r.ticket_count++;
-        r.transactions.push({ reference: t.reference, reseller_owes: markup, created_at: t.created_at });
+        const key = t.event_reseller_id;
+        if (!resMap[key]) {
+          resMap[key] = {
+            id: key, recipient_type: 'RESELLER', event_reseller_id: key,
+            event_id: t.event_id, event_title: ev.title || '—', transaction_type: 'TICKET',
+            recipient_name: rl?.resellers?.name || '—',
+            account_number: rl?.resellers?.mobile_money_number || rl?.resellers?.account_number,
+            bank_name: rl?.resellers?.bank_code, mobile_money_provider: rl?.resellers?.mobile_money_provider,
+            account_name: rl?.resellers?.name, amount_owed: 0, platform_total: 0,
+            ticket_count: 0, status: 'pending', transactions: []
+          };
+        }
+        resMap[key].amount_owed += markup;
+        resMap[key].ticket_count += 1;
+        resMap[key].transactions.push({ reference: t.reference, reseller_owes: markup });
       }
     });
 
-    // Process reseller_sales (the dedicated commission table)
-    // This is the most reliable source for reseller payouts
-    (resellerSales || []).forEach(sale => {
-      const er = erById[sale.event_reseller_id] || {};
-      if (!er.id) return;
-      // Check if this sale's ticket is already accounted for above
-      const alreadyCounted = Object.values(resMap).some(r =>
-        r.transactions.some(t => t.reference === sale.ticket_ref)
-      );
-      if (alreadyCounted) return;
-      const r = getRes(sale.event_reseller_id, er.event_id);
-      const commission = Number(sale.commission_earned || 0);
-      r.amount_owed += commission;
-      r.ticket_count++;
-      r.transactions.push({ reference: sale.ticket_ref, reseller_owes: commission, created_at: sale.created_at });
-      if (sale.paid) r.status = 'paid';
-    });
-
-    // Votes not in ledger
+    // Process votes not in ledger
     (votes || []).filter(v => !ledgerRefs.has(v.reference)).forEach(v => {
-      const cand = candMap[v.candidate_id] || {};
-      const contest = contestMap[cand.contest_id || v.contest_id] || {};
-      const comp = compMap[contest.competition_id || v.competition_id] || {};
-      const orgUserId = comp.organizer_id || contest.organizer_id;
+      const cand = candidateMap[v.candidate_id];
+      const orgUserId = cand?.contests?.competitions?.organizer_id || cand?.contests?.organizer_id;
       if (!orgUserId) return;
       const owed = Number(v.vote_price || 0) * Number(v.vote_count || 1);
       const fee = Number(v.platform_fee || 0) * Number(v.vote_count || 1);
-      const e = getOrg(orgUserId, null, 'VOTE');
-      e.amount_owed += owed;
-      e.platform_total += fee;
-      e.ticket_count++;
-      e.transactions.push({ reference: v.reference, organizer_owes: owed, created_at: v.created_at });
+      const entry = getOrgEntry(orgUserId, null, 'VOTE');
+      entry.amount_owed += owed;
+      entry.platform_total += fee;
+      entry.ticket_count += 1;
+      entry.transactions.push({ reference: v.reference, organizer_owes: owed, created_at: v.created_at });
     });
 
     const allPayouts = [...Object.values(orgMap), ...Object.values(resMap)]
@@ -338,46 +287,48 @@ export default function AdminDashboard() {
       .sort((a, b) => b.amount_owed - a.amount_owed);
     setPayouts(allPayouts);
 
-    // ── TOTALS ────────────────────────────────────────────────
-    const tktRevenue = (tickets || []).reduce((s, t) => {
-      const b = Number(t.base_amount || t.amount || 0);
-      return s + b + (b * 0.05) + (t.is_reseller_purchase ? b * 0.10 : 0);
+    // Totals from raw sources
+    const totalTicketRevenue = (tickets || []).reduce((s, t) => {
+      const base = Number(t.base_amount || t.amount || 0);
+      return s + base * (t.is_reseller_purchase ? 1.15 : 1.05);
     }, 0);
-    const voteRevenue = (votes || []).reduce((s, v) => s + Number(v.amount_paid || 0), 0);
-    const collected = tktRevenue + voteRevenue;
+    const totalVoteRevenue = (votes || []).reduce((s, v) => s + Number(v.amount_paid || 0), 0);
+    const totalCollected = totalTicketRevenue + totalVoteRevenue;
     const owedOrg = Object.values(orgMap).reduce((s, p) => s + p.amount_owed, 0);
     const owedRes = Object.values(resMap).reduce((s, p) => s + p.amount_owed, 0);
+
     setTotals({
-      collected, owed_org: owedOrg, owed_res: owedRes,
-      platform: collected - owedOrg - owedRes,
+      collected: totalCollected,
+      owed_org: owedOrg,
+      owed_res: owedRes,
+      platform: totalCollected - owedOrg - owedRes,
       pending_count: allPayouts.filter(p => p.status !== 'paid').length
     });
 
-    // ── EVENT BREAKDOWN ───────────────────────────────────────
-    const evBreak = {};
+    // Event breakdown
+    const evMap2 = {};
     (tickets || []).forEach(t => {
       const ev = eventMap[t.event_id] || {};
       const k = t.event_id || 'other';
-      if (!evBreak[k]) evBreak[k] = { title: ev.title || 'Unknown', collected: 0, owed_org: 0, owed_res: 0, platform: 0, tx: 0 };
-      const b = Number(t.base_amount || t.amount || 0);
-      evBreak[k].collected += b * (t.is_reseller_purchase ? 1.15 : 1.05);
-      evBreak[k].owed_org += b;
-      evBreak[k].owed_res += t.is_reseller_purchase ? b * 0.10 : 0;
-      evBreak[k].platform += b * 0.05;
-      evBreak[k].tx++;
-    });
-    (votes || []).forEach(() => {
-      if (!evBreak['votes']) evBreak['votes'] = { title: 'Vote Revenue', collected: 0, owed_org: 0, owed_res: 0, platform: 0, tx: 0 };
+      if (!evMap2[k]) evMap2[k] = { title: ev.title || 'Unknown', collected: 0, owed_org: 0, owed_res: 0, platform: 0, tx: 0 };
+      const base = Number(t.base_amount || t.amount || 0);
+      evMap2[k].collected += base * (t.is_reseller_purchase ? 1.15 : 1.05);
+      evMap2[k].owed_org += base;
+      evMap2[k].owed_res += t.is_reseller_purchase ? base * 0.10 : 0;
+      evMap2[k].platform += base * 0.05;
+      evMap2[k].tx++;
     });
     (votes || []).forEach(v => {
-      evBreak['votes'].collected += Number(v.amount_paid || 0);
-      evBreak['votes'].owed_org += Number(v.vote_price || 0) * Number(v.vote_count || 1);
-      evBreak['votes'].platform += Number(v.platform_fee || 0) * Number(v.vote_count || 1);
-      evBreak['votes'].tx++;
+      if (!evMap2['votes']) evMap2['votes'] = { title: 'Vote Revenue', collected: 0, owed_org: 0, owed_res: 0, platform: 0, tx: 0 };
+      evMap2['votes'].collected += Number(v.amount_paid || 0);
+      evMap2['votes'].owed_org += Number(v.vote_price || 0) * Number(v.vote_count || 1);
+      evMap2['votes'].platform += Number(v.platform_fee || 0) * Number(v.vote_count || 1);
+      evMap2['votes'].tx++;
     });
-    setEventBreakdown(Object.values(evBreak).filter(e => e.tx > 0).sort((a, b) => b.collected - a.collected));
+    setEventBreakdown(Object.values(evMap2).sort((a, b) => b.collected - a.collected));
 
-    setLoading(false); setRefreshing(false);
+    setLoading(false);
+    setRefreshing(false);
   }, []);
 
   useEffect(() => {
@@ -490,7 +441,7 @@ export default function AdminDashboard() {
 
         {/* Tabs */}
         <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
-          {[['payouts', '💸 Payouts'], ['overview', '📊 By Event']].map(([v, l]) => (
+          {[['payouts', '💸 Payouts'], ['overview', '📊 By Event'], ['ussd', '📱 USSD']].map(([v, l]) => (
             <button key={v} onClick={() => setTab(v)} style={{ padding: '9px 18px', borderRadius: 20, border: 'none', background: tab === v ? '#0f172a' : '#fff', color: tab === v ? '#fff' : '#64748b', fontSize: 12, fontWeight: 900, cursor: 'pointer', boxShadow: tab === v ? '0 4px 14px rgba(0,0,0,.15)' : 'none' }}>{l}</button>
           ))}
         </div>
@@ -561,7 +512,46 @@ export default function AdminDashboard() {
               filtered.map(p => <PayoutRow key={p.id} entry={p} onMarkPaid={markPaid} />)
             )}
           </div>
-        )}
+        ) : tab === 'ussd' ? (
+          /* ── USSD PURCHASES TAB ── */
+          <div>
+            <h2 style={{ fontSize: 16, fontWeight: 950, margin: '0 0 8px', color: '#0f172a' }}>USSD Ticket Sales</h2>
+            <p style={{ margin: '0 0 18px', fontSize: 13, color: '#64748b', fontWeight: 600 }}>Tickets purchased via *USSD# shortcode. Payments go to your account; organizers tracked in payouts tab.</p>
+            {/* USSD stats */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, marginBottom: 20 }}>
+              {[
+                ['Total Sales', ussdPending.filter(u => u.status === 'completed').length],
+                ['Pending', ussdPending.filter(u => u.status === 'pending').length],
+                ['Revenue', 'GHS ' + ussdPending.filter(u => u.status === 'completed').reduce((s, u) => s + Number(u.total_amount || 0), 0).toFixed(2)],
+              ].map(([l, v]) => (
+                <div key={l} style={{ background: '#fff', borderRadius: 18, padding: '16px', border: '1px solid #e2e8f0', textAlign: 'center' }}>
+                  <p style={{ margin: '0 0 4px', fontSize: 20, fontWeight: 950, color: '#0f172a' }}>{v}</p>
+                  <p style={{ margin: 0, fontSize: 10, color: '#94a3b8', fontWeight: 900, letterSpacing: '1px' }}>{l.toUpperCase()}</p>
+                </div>
+              ))}
+            </div>
+            {ussdPending.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '50px 20px', background: '#f8fafc', borderRadius: 20, border: '1px dashed #e2e8f0' }}>
+                <div style={{ fontSize: 36, marginBottom: 12 }}>📱</div>
+                <p style={{ color: '#94a3b8', fontWeight: 700, margin: 0 }}>No USSD purchases yet</p>
+              </div>
+            ) : ussdPending.map(u => (
+              <div key={u.id} style={{ background: '#fff', borderRadius: 16, padding: '14px 16px', marginBottom: 10, border: '1px solid #e2e8f0', display: 'flex', gap: 14, alignItems: 'center' }}>
+                <div style={{ width: 40, height: 40, borderRadius: 12, background: u.status === 'completed' ? '#f0fdf4' : u.status === 'failed' ? '#fef2f2' : '#fffbeb', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>
+                  {u.status === 'completed' ? '✅' : u.status === 'failed' ? '❌' : '⏳'}
+                </div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ margin: '0 0 3px', fontWeight: 900, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.event_title || 'Event'} — {u.tier_name}</p>
+                  <p style={{ margin: 0, fontSize: 11, color: '#94a3b8', fontWeight: 700 }}>{u.msisdn} · {u.momo_network?.toUpperCase()} · x{u.quantity}</p>
+                </div>
+                <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                  <p style={{ margin: '0 0 3px', fontWeight: 950, fontSize: 15, color: '#0f172a' }}>GHS {Number(u.total_amount || 0).toFixed(2)}</p>
+                  <p style={{ margin: 0, fontSize: 10, fontWeight: 900, color: u.status === 'completed' ? '#22c55e' : u.status === 'failed' ? '#ef4444' : '#f59e0b', letterSpacing: '1px' }}>{(u.status || '').toUpperCase()}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </div>
     </div>
   );
