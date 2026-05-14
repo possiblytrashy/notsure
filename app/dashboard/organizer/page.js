@@ -179,14 +179,6 @@ const [showContestModal, setShowContestModal] = useState(null);
   
 // Add these to your state definitions
 const [uploading, setUploading] = useState(false);
-  const editInputStyle = { width: '100%', padding: '16px', borderRadius: 16, border: '2px solid #f1f5f9', background: '#f8fafc', fontWeight: 600, fontSize: 15, outline: 'none', color: '#0f172a', boxSizing: 'border-box' };
-const [editImages, setEditImages] = useState([]);
-const [editTiers, setEditTiers] = useState([]);
-const [editMapModal, setEditMapModal] = useState(false);
-const [editSearchQuery, setEditSearchQuery] = useState('');
-const [editIsSearching, setEditIsSearching] = useState(false);
-const [editForm, setEditForm] = useState({});
-const editFileInputRef = typeof window !== 'undefined' ? require('react').createRef() : { current: null };
 
   const uploadImage = async (file, bucket = 'competition-images') => {
   try {
@@ -250,7 +242,7 @@ const uploadToSupabase = async (file) => {
       // Note the nested select for competitions -> contests -> candidates
       const [profileRes, eventsRes, compsRes, ticketsRes] = await Promise.allSettled([
         supabase.from('profiles').select('*').eq('id', user.id).single(),
-        supabase.from('events').select('*, ticket_tiers(id,name,price,max_quantity)').eq('organizer_id', user.id).order('created_at', { ascending: false }),
+        supabase.from('events').select('*').eq('organizer_id', user.id).order('created_at', { ascending: false }),
         supabase.from('competitions').select(`
           *,
           contests (
@@ -423,71 +415,42 @@ const deleteEvent = async (eventId) => {
 };
 const handleEditSubmit = async (e) => {
   e.preventDefault();
-  setIsProcessing(true);
+  const formData = new FormData(e.target);
+
+  // Merge form text with Map Coordinates
+  const updatedFields = {
+    ...Object.fromEntries(formData.entries()),
+    lat: mapCoords ? mapCoords[0] : (editingEvent?.lat || null),
+    lng: mapCoords ? mapCoords[1] : (editingEvent?.lng || null)
+  };
 
   try {
-    // Build time string
-    const timeStr = `${editForm.hour || '08'}:${editForm.minute || '00'} ${editForm.period || 'PM'}`;
-
-    const updatedFields = {
-      title:            editForm.title?.trim() || '',
-      description:      editForm.description?.trim() || '',
-      date:             editForm.date || null,
-      time:             timeStr,
-      location:         editForm.location?.trim() || '',
-      lat:              mapCoords ? mapCoords[0] : (editForm.lat || null),
-      lng:              mapCoords ? mapCoords[1] : (editForm.lng || null),
-      images:           editImages,
-      image_url:        editImages[0] || null,
-      promo_video_url:  editForm.promo_video_url?.trim() || null,
-      category:         editForm.category || 'Entertainment',
-      allows_resellers: editForm.allows_resellers !== false,
-      status:           editForm.status || 'active',
-      updated_at:       new Date().toISOString(),
-    };
-
-    let eventId = editingEvent?.id;
-
-    if (eventId) {
-      const { error } = await supabase.from('events').update(updatedFields).eq('id', eventId);
-      if (error) throw error;
+    let error;
+    if (editingEvent?.id) {
+      // Update existing
+      const res = await supabase.from('events').update(updatedFields).eq('id', editingEvent.id);
+      error = res.error;
     } else {
+      // Create new (Handle the logic if you use this modal for creation too)
       const { data: userData } = await supabase.auth.getUser();
-      const { data: newEvent, error } = await supabase.from('events')
-        .insert([{ ...updatedFields, organizer_id: userData.user.id }])
-        .select().single();
-      if (error) throw error;
-      eventId = newEvent.id;
+      const res = await supabase.from('events').insert([{
+        ...updatedFields,
+        organizer_id: userData.user.id,
+        status: 'active'
+      }]);
+      error = res.error;
     }
 
-    // Upsert ticket tiers
-    for (const tier of editTiers) {
-      if (!tier.name?.trim()) continue;
-      const tierData = {
-        event_id:     eventId,
-        name:         tier.name.trim(),
-        price:        parseFloat(tier.price) || 0,
-        max_quantity: parseInt(tier.max_quantity || tier.capacity) || 0,
-        description:  tier.description || '',
-      };
-      if (tier.id) {
-        await supabase.from('ticket_tiers').update(tierData).eq('id', tier.id);
-      } else {
-        await supabase.from('ticket_tiers').insert(tierData);
-      }
-    }
+    if (error) throw error;
 
+    // Refresh Data
     loadDashboardData(true);
     setShowEventModal(false);
     setEditingEvent(null);
     setMapCoords(null);
-    setEditImages([]);
-    setEditTiers([]);
-  } catch (err) {
-    console.error('Save event error:', err);
-    alert('Failed to save: ' + (err.message || 'Unknown error'));
-  } finally {
-    setIsProcessing(false);
+  } catch (error) {
+    console.error("Update error:", error);
+    alert("Failed to save event.");
   }
 };
   // Add Candidate
@@ -779,12 +742,19 @@ const handleEditSubmit = async (e) => {
   <div style={fadeAnim}>
     <div style={viewHeader}>
       <h2 style={viewTitle}>Event Management</h2>
-      <button 
-      style={addBtn} 
-      onClick={() => router.push('/dashboard/organizer/create')}
-    >
-      <Plus size={18}/> NEW EVENT
-    </button>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <button style={{ ...addBtn, background: 'rgba(205,164,52,.12)', color: '#CDA434', border: '1px solid rgba(205,164,52,.2)' }}
+          onClick={() => router.push('/dashboard/organizer/blog')}>
+          ✍️ Blog
+        </button>
+        <button style={{ ...addBtn, background: 'rgba(99,102,241,.1)', color: '#818cf8', border: '1px solid rgba(99,102,241,.2)' }}
+          onClick={() => router.push('/dashboard/organizer/automations')}>
+          ⚡ Automations
+        </button>
+        <button style={addBtn} onClick={() => router.push('/dashboard/organizer/create')}>
+          <Plus size={18}/> NEW EVENT
+        </button>
+      </div>
     </div>
 <style>{`
   @keyframes modalSlideUp {
@@ -818,31 +788,9 @@ const handleEditSubmit = async (e) => {
                  <button 
   style={circleAction} 
   onClick={() => {
-    // Populate all edit state from existing event data
-    setEditingEvent(event);
-    setMapCoords(event.lat && event.lng ? [event.lat, event.lng] : null);
-    setEditForm({
-      title:            event.title || '',
-      description:      event.description || '',
-      date:             event.date || '',
-      hour:             event.time ? event.time.split(':')[0] : '08',
-      minute:           event.time ? event.time.split(':')[1]?.split(' ')[0] : '00',
-      period:           event.time?.includes('PM') ? 'PM' : 'AM',
-      location:         event.location || '',
-      lat:              event.lat || null,
-      lng:              event.lng || null,
-      category:         event.category || 'Entertainment',
-      allows_resellers: event.allows_resellers !== false,
-      status:           event.status || 'active',
-      promo_video_url:  event.promo_video_url || '',
-    });
-    setEditImages(event.images || (event.image_url ? [event.image_url] : []));
-    // Load tiers
-    if (event.ticket_tiers?.length) {
-      setEditTiers(event.ticket_tiers.map(t => ({ ...t, _id: t.id })));
-    } else {
-      setEditTiers([{ _id: crypto.randomUUID(), id: null, name: 'General Admission', price: '', max_quantity: '', description: '' }]);
-    }
+    setEditingEvent(event); 
+    // Load existing coordinates or default to 
+    setMapCoords(event.lat && event.lng ? [event.lat, event.lng] : [0, 0]); 
     setShowEventModal(true);
   }}
 >
@@ -1079,34 +1027,26 @@ const handleEditSubmit = async (e) => {
         </div>
       )}
 {showEventModal && (
-  <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.92)', backdropFilter: 'blur(12px)', zIndex: 2000, overflowY: 'auto' }}>
-    <div style={{ maxWidth: 1100, margin: '0 auto', padding: '32px 20px 80px' }}>
-
-      {/* ── HEADER ── */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 36 }}>
-        <div>
-          <button onClick={() => { setShowEventModal(false); setEditingEvent(null); }}
-            style={{ background: 'rgba(255,255,255,.1)', border: 'none', color: '#94a3b8', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, letterSpacing: '.05em', borderRadius: 10, padding: '8px 14px', marginBottom: 16 }}>
-            ← BACK TO DASHBOARD
-          </button>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-            <h1 style={{ fontSize: 36, fontWeight: 950, letterSpacing: '-0.05em', margin: 0, color: '#fff' }}>
-              {editingEvent ? 'Edit Experience' : 'Create Experience'}
-            </h1>
-            <div style={{ background: '#fff', color: '#000', padding: '6px 14px', borderRadius: 100, fontSize: 10, fontWeight: 900, letterSpacing: '.05em' }}>
-              ✦ PREMIUM
-            </div>
-          </div>
-        </div>
-        <button onClick={() => { setShowEventModal(false); setEditingEvent(null); }}
-          style={{ background: 'rgba(255,255,255,.1)', border: '1px solid rgba(255,255,255,.15)', color: '#fff', width: 44, height: 44, borderRadius: 14, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0 }}>
-          ✕
-        </button>
+  <div style={modalOverlay}>
+    <div style={luxuryModal}>
+      <div style={modalHeader}>
+        <h2 style={viewTitle}>{editingEvent ? 'EDIT EVENT' : 'CREATE NEW EVENT'}</h2>
+        <button onClick={() => { setShowEventModal(false); setEditingEvent(null); }} style={circleAction}><X /></button>
       </div>
 
-      {/* ── FORM GRID ── */}
-      <form onSubmit={handleEditSubmit} style={{ display: 'grid', gridTemplateColumns: '1.8fr 1fr', gap: 36, alignItems: 'start' }}>
+      <form onSubmit={handleEditSubmit} style={{ marginTop: '20px' }}>
+        <div style={inputStack}>
+          <label style={fieldLabel}>EVENT TITLE</label>
+          <input 
+            name="title"
+            style={modalInput} 
+            defaultValue={editingEvent?.title || ''} 
+            placeholder="e.g. Luxury Gala 2025"
+            required
+          />
+        </div>
 
+<<<<<<< Updated upstream
         {/* LEFT COLUMN */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
 
@@ -1172,298 +1112,46 @@ const handleEditSubmit = async (e) => {
                   finally { setUploading(false); }
                 }} />
             </div>
+=======
+        <div style={twoColumnGrid}>
+          <div style={inputStack}>
+            <label style={fieldLabel}>LOCATION</label>
+            <input 
+              name="location"
+              style={modalInput} 
+              defaultValue={editingEvent?.location || ''} 
+              placeholder="Venue Name"
+            />
+>>>>>>> Stashed changes
           </div>
-
-          {/* ── SECTION: EXPERIENCE INFO ── */}
-          <div style={{ background: '#fff', borderRadius: 28, padding: 28, border: '1px solid #f1f5f9' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 28 }}>
-              <div style={{ width: 42, height: 42, borderRadius: 14, background: '#0ea5e910', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>📋</div>
-              <div>
-                <h2 style={{ fontSize: 18, fontWeight: 900, margin: 0, color: '#0f172a' }}>Experience Info</h2>
-                <p style={{ margin: 0, fontSize: 12, color: '#94a3b8', fontWeight: 600 }}>Details and logistics of your event</p>
-              </div>
-            </div>
-
-            {/* Title */}
-            <div style={{ marginBottom: 24 }}>
-              <label style={{ fontSize: 11, fontWeight: 900, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 10, display: 'block' }}>EXPERIENCE TITLE</label>
-              <input style={editInputStyle} placeholder="Enter a name that commands attention..."
-                value={editForm.title || ''} onChange={e => setEditForm(f => ({ ...f, title: e.target.value }))} required />
-            </div>
-
-            {/* Location */}
-            <div style={{ marginBottom: 24 }}>
-              <label style={{ fontSize: 11, fontWeight: 900, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 10, display: 'block' }}>VENUE LOCATION</label>
-              <div style={{ display: 'flex', gap: 10, alignItems: 'center', background: '#f8fafc', padding: '8px 8px 8px 16px', borderRadius: 18, border: '2px solid #f1f5f9' }}>
-                <span style={{ color: '#0ea5e9', fontSize: 16 }}>📍</span>
-                <input style={{ background: 'none', border: 'none', outline: 'none', flex: 1, fontWeight: 700, fontSize: 15, color: '#0f172a' }}
-                  placeholder="Enter venue name..."
-                  value={editForm.location || ''} onChange={e => setEditForm(f => ({ ...f, location: e.target.value }))} />
-                <button type="button" onClick={() => setEditMapModal(true)}
-                  style={{ background: '#000', color: '#fff', border: 'none', padding: '10px 18px', borderRadius: 14, fontWeight: 900, cursor: 'pointer', fontSize: 12, display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                  🗺 PICK ON MAP
-                </button>
-              </div>
-            </div>
-
-            {/* Date + Time */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 24 }}>
-              <div>
-                <label style={{ fontSize: 11, fontWeight: 900, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 10, display: 'block' }}>EVENT DATE</label>
-                <div style={{ position: 'relative' }}>
-                  <span style={{ position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }}>📅</span>
-                  <input type="date" style={{ ...editInputStyle, paddingLeft: 44 }}
-                    value={editForm.date || ''} onChange={e => setEditForm(f => ({ ...f, date: e.target.value }))} />
-                </div>
-              </div>
-              <div>
-                <label style={{ fontSize: 11, fontWeight: 900, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 10, display: 'block' }}>START TIME</label>
-                <div style={{ display: 'flex', gap: 10 }}>
-                  <div style={{ display: 'flex', flex: 1, background: '#f8fafc', border: '2px solid #f1f5f9', borderRadius: 16, padding: '4px 8px', alignItems: 'center' }}>
-                    <input style={{ width: '100%', border: 'none', background: 'none', textAlign: 'center', fontWeight: 800, fontSize: 15, outline: 'none' }} maxLength={2}
-                      value={editForm.hour || '08'} onChange={e => setEditForm(f => ({ ...f, hour: e.target.value }))} />
-                    <span style={{ fontWeight: 950, color: '#cbd5e1' }}>:</span>
-                    <input style={{ width: '100%', border: 'none', background: 'none', textAlign: 'center', fontWeight: 800, fontSize: 15, outline: 'none' }} maxLength={2}
-                      value={editForm.minute || '00'} onChange={e => setEditForm(f => ({ ...f, minute: e.target.value }))} />
-                  </div>
-                  <button type="button" onClick={() => setEditForm(f => ({ ...f, period: f.period === 'AM' ? 'PM' : 'AM' }))}
-                    style={{ background: '#0f172a', color: '#fff', border: 'none', borderRadius: 14, width: 64, fontWeight: 900, cursor: 'pointer', fontSize: 13, letterSpacing: '.1em' }}>
-                    {editForm.period || 'PM'}
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Description */}
-            <div style={{ marginBottom: 24 }}>
-              <label style={{ fontSize: 11, fontWeight: 900, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 10, display: 'block' }}>DESCRIPTION & PROGRAM</label>
-              <textarea style={{ ...editInputStyle, height: 160, resize: 'none', lineHeight: 1.6 }}
-                placeholder="Describe the exclusivity, schedule, or dress code..."
-                value={editForm.description || ''} onChange={e => setEditForm(f => ({ ...f, description: e.target.value }))} />
-            </div>
-
-            {/* Promo Video */}
-            <div style={{ marginBottom: 24 }}>
-              <label style={{ fontSize: 11, fontWeight: 900, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 10, display: 'block' }}>🎬 PROMO VIDEO URL (optional)</label>
-              <input style={editInputStyle} placeholder="https://... (direct MP4 link)"
-                value={editForm.promo_video_url || ''} onChange={e => setEditForm(f => ({ ...f, promo_video_url: e.target.value }))} />
-            </div>
-
-            {/* Category + Status + Resellers */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
-              <div>
-                <label style={{ fontSize: 11, fontWeight: 900, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 10, display: 'block' }}>CATEGORY</label>
-                <select style={editInputStyle} value={editForm.category || 'Entertainment'}
-                  onChange={e => setEditForm(f => ({ ...f, category: e.target.value }))}>
-                  {['Entertainment','Music','Arts','Sports','Food & Drink','Business','Education','Other'].map(cat =>
-                    <option key={cat} value={cat}>{cat}</option>
-                  )}
-                </select>
-              </div>
-              <div>
-                <label style={{ fontSize: 11, fontWeight: 900, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 10, display: 'block' }}>STATUS</label>
-                <select style={editInputStyle} value={editForm.status || 'active'}
-                  onChange={e => setEditForm(f => ({ ...f, status: e.target.value }))}>
-                  <option value="active">Active</option>
-                  <option value="draft">Draft</option>
-                  <option value="cancelled">Cancelled</option>
-                  <option value="completed">Completed</option>
-                </select>
-              </div>
-              <div>
-                <label style={{ fontSize: 11, fontWeight: 900, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 10, display: 'block' }}>RESELLERS</label>
-                <select style={editInputStyle} value={String(editForm.allows_resellers !== false)}
-                  onChange={e => setEditForm(f => ({ ...f, allows_resellers: e.target.value === 'true' }))}>
-                  <option value="true">Allowed</option>
-                  <option value="false">Disabled</option>
-                </select>
-              </div>
-            </div>
+          <div style={inputStack}>
+            <label style={fieldLabel}>DATE</label>
+            <input 
+              name="date"
+              type="date" 
+              style={modalInput} 
+              defaultValue={editingEvent?.date || ''} 
+            />
           </div>
         </div>
 
-        {/* RIGHT COLUMN — TIERS */}
-        <div style={{ position: 'sticky', top: 32 }}>
-          <div style={{ background: '#fff', borderRadius: 28, padding: 28, border: '1px solid #f1f5f9' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 24 }}>
-              <div style={{ width: 42, height: 42, borderRadius: 14, background: '#f59e0b10', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>🎟</div>
-              <div>
-                <h2 style={{ fontSize: 18, fontWeight: 900, margin: 0, color: '#0f172a' }}>Access Tiers</h2>
-                <p style={{ margin: 0, fontSize: 12, color: '#94a3b8', fontWeight: 600 }}>Manage ticket types and pricing</p>
-              </div>
-            </div>
-
-            <div style={{ maxHeight: 460, overflowY: 'auto', paddingRight: 4, marginBottom: 20 }}>
-              {editTiers.map((tier, index) => (
-                <div key={tier._id || index} style={{ background: '#f8fafc', padding: 20, borderRadius: 22, marginBottom: 16, border: '1px solid #f1f5f9' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <div style={{ width: 8, height: 8, borderRadius: '50%', background: index === 0 ? '#10b981' : '#f59e0b' }} />
-                      <span style={{ fontSize: 11, fontWeight: 900, color: '#64748b', letterSpacing: '.05em' }}>TIER {index + 1}</span>
-                    </div>
-                    <button type="button" onClick={() => setEditTiers(editTiers.filter((_, i) => i !== index))}
-                      disabled={editTiers.length <= 1}
-                      style={{ background: '#fee2e2', border: 'none', color: '#ef4444', width: 28, height: 28, borderRadius: 8, cursor: editTiers.length > 1 ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: editTiers.length <= 1 ? .4 : 1 }}>
-                      🗑
-                    </button>
-                  </div>
-                  <input style={{ ...editInputStyle, padding: 13, fontSize: 14, marginBottom: 12, border: '1px solid #e2e8f0' }}
-                    placeholder="Tier name (e.g. VIP Access)"
-                    value={tier.name || ''} onChange={e => setEditTiers(editTiers.map((t, i) => i === index ? { ...t, name: e.target.value } : t))} />
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
-                    <div style={{ position: 'relative' }}>
-                      <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', fontWeight: 900, fontSize: 13, color: '#94a3b8' }}>GH₵</span>
-                      <input style={{ ...editInputStyle, padding: '13px 13px 13px 42px', fontSize: 14, border: '1px solid #e2e8f0' }}
-                        type="number" placeholder="Price" min="0" step="0.01"
-                        value={tier.price || ''} onChange={e => setEditTiers(editTiers.map((t, i) => i === index ? { ...t, price: e.target.value } : t))} />
-                    </div>
-                    <div style={{ position: 'relative' }}>
-                      <span style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', fontSize: 13, color: '#94a3b8' }}>🎟</span>
-                      <input style={{ ...editInputStyle, padding: '13px 13px 13px 36px', fontSize: 14, border: '1px solid #e2e8f0' }}
-                        type="number" placeholder="Qty" min="0"
-                        value={tier.max_quantity || ''} onChange={e => setEditTiers(editTiers.map((t, i) => i === index ? { ...t, max_quantity: e.target.value } : t))} />
-                    </div>
-                  </div>
-                  <textarea style={{ ...editInputStyle, height: 60, padding: 11, fontSize: 13, border: '1px solid #e2e8f0', resize: 'none' }}
-                    placeholder="Benefits included..."
-                    value={tier.description || ''} onChange={e => setEditTiers(editTiers.map((t, i) => i === index ? { ...t, description: e.target.value } : t))} />
-                </div>
-              ))}
-            </div>
-
-            <button type="button" onClick={() => setEditTiers([...editTiers, { _id: crypto.randomUUID(), id: null, name: '', price: '', max_quantity: '', description: '' }])}
-              style={{ width: '100%', padding: 16, borderRadius: 18, border: '2px dashed #cbd5e1', background: 'none', fontWeight: 800, color: '#64748b', cursor: 'pointer', marginBottom: 24, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-              + ADD ACCESS TIER
-            </button>
-
-            {/* Submit button */}
-            <div style={{ background: '#0f172a', borderRadius: 24, padding: 24, color: '#fff' }}>
-              <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', marginBottom: 20 }}>
-                <div style={{ width: 38, height: 38, borderRadius: 12, background: 'rgba(74,222,128,.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#4ade80', flexShrink: 0 }}>✓</div>
-                <div>
-                  <h4 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 900 }}>Smart Payout Active</h4>
-                  <p style={{ margin: 0, fontSize: 12, color: '#94a3b8', lineHeight: 1.5, fontWeight: 500 }}>Your revenue is tracked and logged for every sale.</p>
-                </div>
-              </div>
-              <button type="submit" disabled={isProcessing}
-                style={{ width: '100%', background: isProcessing ? '#334155' : '#fff', color: '#000', border: 'none', padding: 18, borderRadius: 18, fontWeight: 900, fontSize: 16, cursor: isProcessing ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10 }}>
-                {isProcessing ? '⏳ SAVING...' : (editingEvent ? '💾 SAVE CHANGES' : '🚀 PUBLISH EVENT')}
-              </button>
-            </div>
-          </div>
+        <div style={inputStack}>
+          <label style={fieldLabel}>DESCRIPTION</label>
+          <textarea 
+            name="description"
+            style={{ ...modalInput, height: '100px', resize: 'none' }} 
+            defaultValue={editingEvent?.description || ''}
+          />
         </div>
+
+        <button type="submit" style={actionBtnFull}>
+          {editingEvent ? 'SAVE CHANGES' : 'PUBLISH EVENT'}
+        </button>
       </form>
     </div>
-
-    {/* ── MAP MODAL (inside edit overlay) ── */}
-    {editMapModal && (
-      <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.95)', backdropFilter: 'blur(12px)', zIndex: 3000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}
-        onClick={() => setEditMapModal(false)}>
-        <div style={{ background: '#fff', width: '100%', maxWidth: 960, borderRadius: 36, overflow: 'hidden', boxShadow: '0 30px 80px rgba(0,0,0,.4)' }}
-          onClick={e => e.stopPropagation()}>
-          <div style={{ padding: '24px 32px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <h3 style={{ margin: '0 0 4px', fontWeight: 950, fontSize: 22, letterSpacing: '-.02em' }}>Pin Your Venue</h3>
-              <p style={{ margin: 0, fontSize: 13, color: '#94a3b8', fontWeight: 600 }}>Search or click the map to set exact coordinates</p>
-            </div>
-            <button onClick={() => setEditMapModal(false)}
-              style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 14, width: 46, height: 46, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>
-              ✕
-            </button>
-          </div>
-          <div style={{ padding: '24px 32px' }}>
-            {/* Search bar */}
-            <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
-              <input style={{ ...editInputStyle, flex: 1 }} placeholder="Search for venue or address..."
-                value={editSearchQuery} onChange={e => setEditSearchQuery(e.target.value)}
-                onKeyDown={async (e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    if (!editSearchQuery.trim()) return;
-                    setEditIsSearching(true);
-                    try {
-                      const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(editSearchQuery)}&format=json&limit=1`,
-                        { headers: { 'Accept-Language': 'en', 'User-Agent': 'OUSTED/1.0' } });
-                      const d = await res.json();
-                      if (d[0]) {
-                        const lat = parseFloat(d[0].lat), lng = parseFloat(d[0].lon);
-                        setMapCoords([lat, lng]);
-                        setEditForm(f => ({ ...f, location: d[0].display_name, lat, lng }));
-                      }
-                    } catch {} finally { setEditIsSearching(false); }
-                  }
-                }} />
-              <button type="button" onClick={async () => {
-                if (!editSearchQuery.trim()) return;
-                setEditIsSearching(true);
-                try {
-                  const res = await fetch(`https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(editSearchQuery)}&format=json&limit=1`,
-                    { headers: { 'Accept-Language': 'en', 'User-Agent': 'OUSTED/1.0' } });
-                  const d = await res.json();
-                  if (d[0]) {
-                    const lat = parseFloat(d[0].lat), lng = parseFloat(d[0].lon);
-                    setMapCoords([lat, lng]);
-                    setEditForm(f => ({ ...f, location: d[0].display_name, lat, lng }));
-                  }
-                } catch {} finally { setEditIsSearching(false); }
-              }} style={{ background: '#000', color: '#fff', border: 'none', padding: '0 22px', borderRadius: 14, fontWeight: 900, cursor: 'pointer', fontSize: 13, flexShrink: 0 }}>
-                {editIsSearching ? '...' : '🔍 SEARCH'}
-              </button>
-            </div>
-
-            {/* Map */}
-            <div style={{ height: 460, borderRadius: 24, overflow: 'hidden', border: '1px solid #f1f5f9', position: 'relative' }}>
-              {typeof window !== 'undefined' && (() => {
-                const MC = require('react-leaflet').MapContainer;
-                const TL = require('react-leaflet').TileLayer;
-                const MK = require('react-leaflet').Marker;
-                const { useMapEvents: UME } = require('react-leaflet');
-                const center = mapCoords || [editForm.lat || 5.6, editForm.lng || -0.2];
-                const ClickHandler = () => {
-                  UME({ click(e) {
-                    setMapCoords([e.latlng.lat, e.latlng.lng]);
-                    setEditForm(f => ({ ...f, lat: e.latlng.lat, lng: e.latlng.lng }));
-                  }});
-                  return null;
-                };
-                return (
-                  <MC center={center} zoom={mapCoords ? 15 : 7} style={{ height: '100%', width: '100%' }}>
-                    <TL url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" attribution="© CARTO" />
-                    <ClickHandler />
-                    {(mapCoords || (editForm.lat && editForm.lng)) && (() => {
-                      const pos = mapCoords || [editForm.lat, editForm.lng];
-                      try { return <MK position={pos} icon={getLuxuryIcon()} />; } catch { return null; }
-                    })()}
-                  </MC>
-                );
-              })()}
-              {/* Coords overlay */}
-              {(mapCoords || editForm.lat) && (
-                <div style={{ position: 'absolute', bottom: 16, left: 16, right: 16, background: 'rgba(255,255,255,.95)', backdropFilter: 'blur(10px)', padding: '12px 18px', borderRadius: 18, display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid #f1f5f9', zIndex: 1000 }}>
-                  <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                    <span style={{ fontSize: 16 }}>📍</span>
-                    <div>
-                      <p style={{ margin: 0, fontSize: 10, fontWeight: 900, color: '#94a3b8' }}>COORDINATES LOCKED</p>
-                      <p style={{ margin: 0, fontSize: 13, fontWeight: 800, color: '#0f172a' }}>
-                        {(mapCoords?.[0] || editForm.lat)?.toFixed(5)}, {(mapCoords?.[1] || editForm.lng)?.toFixed(5)}
-                      </p>
-                    </div>
-                  </div>
-                  <p style={{ margin: 0, fontSize: 12, color: '#64748b', fontWeight: 600 }}>Click to reposition</p>
-                </div>
-              )}
-            </div>
-
-            <button type="button" onClick={() => setEditMapModal(false)}
-              style={{ width: '100%', background: '#000', color: '#fff', border: 'none', padding: 18, borderRadius: 18, fontWeight: 900, fontSize: 15, cursor: 'pointer', marginTop: 16 }}>
-              ✓ CONFIRM THIS POSITION
-            </button>
-          </div>
-        </div>
-      </div>
-    )}
   </div>
 )}
+
       {showCandidateModal && (
         <div style={overlay} onClick={() => setShowCandidateModal(null)}>
           <div style={modal} onClick={e => e.stopPropagation()}>
@@ -1860,8 +1548,6 @@ function CategoryItem({
 
   // Safety check to prevent ReferenceError if comp is missing
   if (!comp) return null;
-
-
 
   return (
     <div style={{ marginBottom: '20px', background: '#f8fafc', padding: '15px', borderRadius: '20px', border: '1px solid #f1f5f9' }}>

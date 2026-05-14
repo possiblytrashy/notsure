@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 
 // CSS Imports
+import 'mapbox-gl/dist/mapbox-gl.css';
 
 // --- LEAFLET CSS ---
 import 'leaflet/dist/leaflet.css';
@@ -34,6 +35,7 @@ if (typeof window !== 'undefined') {
   OpenStreetMapProvider = GeoSearch.OpenStreetMapProvider;
 }
 
+const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN;
 
 // Custom Luxury Icon
 const getLuxuryIcon = () => {
@@ -153,8 +155,8 @@ export default function CreateEvent() {
     minute: '00',
     period: 'PM',
     location: '', 
-    lat: null, // Set when user picks location
-    lng: null,
+    lat: 0, // Default center — user will pick their location
+    lng: 0,
     category: 'Entertainment',
     images: [], 
     is_published: true
@@ -197,13 +199,6 @@ export default function CreateEvent() {
     initialize();
   }, [router]);
 
-  // Close map modal on Escape key
-  useEffect(() => {
-    const handler = (e) => { if (e.key === 'Escape') setShowMapModal(false); };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, []);
-
   // --- 3. LOCATION LOGIC ---
   const handleMapClick = (e) => {
     const { lng, lat } = e.lngLat;
@@ -211,28 +206,25 @@ export default function CreateEvent() {
   };
 
   const handleManualSearch = async () => {
-    if (!searchQuery.trim()) return;
+    if (!searchQuery) return;
     setIsSearching(true);
-    setFormError(null);
     try {
-      // Nominatim — free OpenStreetMap geocoding, no API key needed
       const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(searchQuery)}&format=json&limit=1&addressdetails=1`,
-        { headers: { 'Accept-Language': 'en', 'User-Agent': 'OUSTED/1.0 (ousted.live)' } }
+        `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(searchQuery)}.json?access_token=${MAPBOX_TOKEN}&limit=1`
       );
       const data = await res.json();
-      if (data && data.length > 0) {
-        const result = data[0];
-        const lat = parseFloat(result.lat);
-        const lng = parseFloat(result.lon);
-        const displayName = result.display_name;
-        setEventData(prev => ({ ...prev, location: displayName, lat, lng }));
-      } else {
-        setFormError('Location not found. Try a more specific search.');
+      if (data.features && data.features.length > 0) {
+        const [lng, lat] = data.features[0].center;
+        setEventData(prev => ({
+          ...prev,
+          location: data.features[0].place_name,
+          lat,
+          lng
+        }));
       }
     } catch (err) {
-      console.error('Geocoding error:', err);
-      setFormError('Search unavailable. Click the map to set location manually.');
+      console.error("Geocoding error:", err);
+      setFormError("Could not find that location on the map.");
     } finally {
       setIsSearching(false);
     }
@@ -793,8 +785,8 @@ export default function CreateEvent() {
 
       {/* --- MAP MODAL SYSTEM --- */}
       {showMapModal && (
-        <div style={styles.mapModalOverlay} onClick={() => setShowMapModal(false)}>
-          <div style={styles.mapModalContent} onClick={e => e.stopPropagation()}>
+        <div style={styles.mapModalOverlay}>
+          <div style={styles.mapModalContent}>
             {/* Modal Header */}
             <div style={{ padding: '30px 40px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fff' }}>
               <div>
@@ -815,7 +807,7 @@ export default function CreateEvent() {
 
 <div style={{ height: '520px', borderRadius: '32px', overflow: 'hidden', border: '1px solid #f1f5f9', position: 'relative' }}>
   <MapContainer 
-    center={[eventData.lat || 5.6, eventData.lng || -0.2]} 
+    center={[eventData.lat, eventData.lng]} 
     zoom={15} 
     style={{ height: '100%', width: '100%' }}
     zoomControl={false}
@@ -828,7 +820,7 @@ export default function CreateEvent() {
     
     <MapLogic lat={eventData.lat} lng={eventData.lng} setEventData={setEventData} />
     
-    {eventData.lat && eventData.lng && <Marker position={[eventData.lat, eventData.lng]} icon={getLuxuryIcon()} />}
+    <Marker position={[eventData.lat, eventData.lng]} icon={getLuxuryIcon()} />
   </MapContainer>
   
   {/* Coordinates Overlay */}
