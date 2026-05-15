@@ -1,17 +1,4 @@
 // OUSTED USSD Ticket Purchase — Arkesel USSD API
-//
-// Arkesel sends POST requests to this endpoint.
-// We respond with JSON: { sessionID, userID, msisdn, message, continueSession }
-// continueSession: true  = show menu and wait for input
-// continueSession: false = display final message and close session
-//
-// Full purchase flow:
-//   Main Menu → Browse Events → Pick Tier → Quantity → MoMo Network → Phone → Confirm
-//   → Paystack MoMo charge → webhook → tickets created → Arkesel SMS sent
-//
-// ALL money lands in your Paystack account.
-// payout_ledger tracks what you owe each organizer.
-
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
@@ -35,14 +22,13 @@ function db() {
   );
 }
 
-// ─── ENTRY POINT ─────────────────────────────────────────────
 export async function POST(req) {
   let body;
   try { body = await req.json(); }
   catch { return NextResponse.json({ message: 'Invalid request', continueSession: false }, { status: 400 }); }
 
-  // Arkesel request shape:
-  // { sessionID, userID, newSession, msisdn, userData, network }
+  console.log('[USSD] body:', JSON.stringify(body));
+
   const {
     sessionID,
     userID,
@@ -59,8 +45,8 @@ export async function POST(req) {
   const supabase = db();
   const input    = String(userData).trim();
 
-  // ── NEW SESSION: reset state ──────────────────────────────
-  if (newSession === true) {
+  // Arkesel may send newSession as boolean true or string "true"
+  if (newSession === true || newSession === 'true') {
     try { await supabase.from('ussd_sessions').delete().eq('session_id', sessionID); } catch {}
     try {
       await supabase.from('ussd_sessions').insert({
@@ -74,7 +60,6 @@ export async function POST(req) {
     return respond(sessionID, userID, msisdn, mainMenu(), true);
   }
 
-  // ── RESUME SESSION ────────────────────────────────────────
   const { data: sess } = await supabase
     .from('ussd_sessions')
     .select('*')
@@ -82,14 +67,11 @@ export async function POST(req) {
     .maybeSingle();
 
   if (!sess) {
-    // Session expired — restart gracefully
-    return respond(sessionID, userID, msisdn,
-      'Session expired.\n' + mainMenu(), true);
+    return respond(sessionID, userID, msisdn, 'Session expired.\n' + mainMenu(), true);
   }
 
   const session = { ...sess, data: sess.data || {} };
 
-  // Run state machine
   const { nextState, nextData, message, end } =
     await transition(session, input, msisdn, supabase);
 
@@ -98,30 +80,28 @@ export async function POST(req) {
     return respond(sessionID, userID, msisdn, message, false);
   }
 
-  await supabase.from('ussd_sessions')
-    .update({ state: nextState, data: nextData, updated_at: new Date().toISOString() })
-    .eq('session_id', sessionID);
+  try {
+    await supabase.from('ussd_sessions')
+      .update({ state: nextState, data: nextData, updated_at: new Date().toISOString() })
+      .eq('session_id', sessionID);
+  } catch {}
 
   return respond(sessionID, userID, msisdn, message, true);
 }
 
-// ─── RESPONSE BUILDER ────────────────────────────────────────
 function respond(sessionID, userID, msisdn, message, continueSession) {
   return NextResponse.json({ sessionID, userID, msisdn, message, continueSession });
 }
 
-// ─── MENUS ───────────────────────────────────────────────────
 function mainMenu(prefix = '') {
   return `${prefix}OUSTED - Event Tickets\n1. Buy Tickets\n2. My Tickets\n0. Exit`;
 }
 
-// ─── STATE MACHINE ───────────────────────────────────────────
 async function transition(session, input, msisdn, supabase) {
   const { state, data } = session;
 
   switch (state) {
 
-    // ── MAIN MENU ─────────────────────────────────────────
     case 'MAIN_MENU': {
       if (input === '1') {
         const menu = await buildEventsMenu(supabase);
@@ -137,7 +117,6 @@ async function transition(session, input, msisdn, supabase) {
       return { nextState: 'MAIN_MENU', nextData: data, message: mainMenu('Invalid option.\n') };
     }
 
-    // ── BROWSE EVENTS ─────────────────────────────────────
     case 'BROWSE_EVENTS': {
       if (input === '0') {
         return { nextState: 'MAIN_MENU', nextData: {}, message: mainMenu() };
@@ -157,7 +136,6 @@ async function transition(session, input, msisdn, supabase) {
       };
     }
 
-    // ── SELECT TIER ───────────────────────────────────────
     case 'SELECT_TIER': {
       if (input === '0') {
         const menu = await buildEventsMenu(supabase);
@@ -180,7 +158,6 @@ async function transition(session, input, msisdn, supabase) {
       };
     }
 
-    // ── SELECT QUANTITY ───────────────────────────────────
     case 'SELECT_QTY': {
       if (input === '0') {
         const menu = await buildTiersMenu({ id: data.event_id, title: data.event_title }, supabase);
@@ -198,7 +175,6 @@ async function transition(session, input, msisdn, supabase) {
       };
     }
 
-    // ── SELECT MOMO NETWORK ───────────────────────────────
     case 'SELECT_NETWORK': {
       if (input === '0') {
         return {
@@ -218,7 +194,6 @@ async function transition(session, input, msisdn, supabase) {
       };
     }
 
-    // ── ENTER PHONE ───────────────────────────────────────
     case 'ENTER_PHONE': {
       if (input === '0') {
         return {
@@ -239,7 +214,6 @@ async function transition(session, input, msisdn, supabase) {
       };
     }
 
-    // ── CONFIRM & PAY ─────────────────────────────────────
     case 'CONFIRM': {
       if (input === '2' || input === '0') {
         return { nextState: 'MAIN_MENU', nextData: {}, message: mainMenu('Order cancelled.\n') };
@@ -247,7 +221,6 @@ async function transition(session, input, msisdn, supabase) {
       if (input !== '1') {
         return { nextState: 'CONFIRM', nextData: data, message: '1. Confirm\n2. Cancel' };
       }
-
       const result = await initiatePayment(data, msisdn, supabase);
       if (result.success) {
         return {
@@ -266,7 +239,6 @@ async function transition(session, input, msisdn, supabase) {
   }
 }
 
-// ─── DATA HELPERS ─────────────────────────────────────────────
 async function getEvents(supabase) {
   const today = new Date().toISOString().split('T')[0];
   const { data } = await supabase
@@ -287,7 +259,6 @@ async function buildEventsMenu(supabase, prefix = '') {
     const dateStr = e.date
       ? new Date(e.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
       : '';
-    // Keep under 160 chars total — truncate long titles
     const title = e.title.length > 18 ? e.title.substring(0, 17) + '.' : e.title;
     return `${i + 1}. ${title}${dateStr ? ' ' + dateStr : ''}`;
   }).join('\n');
@@ -335,11 +306,10 @@ async function myTicketsMenu(msisdn, supabase) {
   return `Your Tickets:\n${lines}\n\nFull details:\nousted.live/tickets/find\n0. Back`;
 }
 
-// ─── PAYSTACK MOMO CHARGE ─────────────────────────────────────
 async function initiatePayment(data, msisdn, supabase) {
-  const reference    = `USSD-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
-  const pesewas      = Math.round(data.total_amount * 100);
-  const guestEmail   = `ussd-${data.momo_phone}@ousted.live`;
+  const reference  = `USSD-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+  const pesewas    = Math.round(data.total_amount * 100);
+  const guestEmail = `ussd-${data.momo_phone}@ousted.live`;
 
   try {
     const res = await fetch('https://api.paystack.co/charge', {
@@ -349,17 +319,17 @@ async function initiatePayment(data, msisdn, supabase) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        email:        PLATFORM_EMAIL,     // all money to platform account
+        email:        PLATFORM_EMAIL,
         amount:       pesewas,
         currency:     'GHS',
         mobile_money: {
           phone:    data.momo_phone,
-          provider: data.momo_code,       // mtn | vod | atl
+          provider: data.momo_code,
         },
         reference,
         metadata: {
           type:                 'TICKET',
-          channel:              'USSD',   // flags webhook to use USSD handler
+          channel:              'USSD',
           event_id:             data.event_id,
           tier_id:              data.tier_id,
           tier_name:            data.tier_name,
@@ -386,21 +356,21 @@ async function initiatePayment(data, msisdn, supabase) {
       return { success: false, error: ps.message || 'Payment service unavailable.' };
     }
 
-    // Store pending purchase so webhook can create tickets + send SMS
-    await supabase.from('ussd_pending').insert({
-      reference,
-      msisdn:       data.momo_phone,
-      event_id:     data.event_id,
-      tier_id:      data.tier_id,
-      tier_name:    data.tier_name,
-      event_title:  data.event_title,
-      quantity:     data.quantity,
-      base_price:   data.base_price,
-      total_amount: data.total_amount,
-      momo_phone:   data.momo_phone,
-      momo_network: data.momo_code,
-      status:       'pending',
-    });
+    try {
+      await supabase.from('ussd_pending').insert({
+        reference,
+        msisdn:       data.momo_phone,
+        event_id:     data.event_id,
+        tier_id:      data.tier_id,
+        tier_name:    data.tier_name,
+        event_title:  data.event_title,
+        quantity:     data.quantity,
+        base_price:   data.base_price,
+        total_amount: data.total_amount,
+        momo_phone:   data.momo_phone,
+        momo_network: data.momo_code,
+        status:       'pending',
+      });
     } catch {}
 
     return { success: true, reference };
@@ -411,11 +381,10 @@ async function initiatePayment(data, msisdn, supabase) {
   }
 }
 
-// ─── UTILITY ──────────────────────────────────────────────────
 function normalisePhone(input) {
   if (!input) return null;
   let p = String(input).replace(/[\s\-()]/g, '');
-  if (/^0[2-9]\d{8}$/.test(p))    p = '233' + p.slice(1);   // 0XX → 233XX
-  if (/^\+233[2-9]\d{8}$/.test(p)) p = p.slice(1);           // +233 → 233
+  if (/^0[2-9]\d{8}$/.test(p))     p = '233' + p.slice(1);
+  if (/^\+233[2-9]\d{8}$/.test(p)) p = p.slice(1);
   return /^233[2-9]\d{8}$/.test(p) ? p : null;
 }
