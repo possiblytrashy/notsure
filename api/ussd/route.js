@@ -41,8 +41,6 @@ export async function POST(req) {
   try { body = await req.json(); }
   catch { return NextResponse.json({ message: 'Invalid request', continueSession: false }, { status: 400 }); }
 
-  // Arkesel request shape:
-  // { sessionID, userID, newSession, msisdn, userData, network }
   const {
     sessionID,
     userID,
@@ -70,7 +68,9 @@ export async function POST(req) {
         state: 'MAIN_MENU',
         data: {},
       });
-    } catch (e) {}
+    } catch (err) {
+      console.error('[USSD] Error resetting session:', err);
+    }
     return respond(sessionID, userID, msisdn, mainMenu(), true);
   }
 
@@ -82,9 +82,7 @@ export async function POST(req) {
     .maybeSingle();
 
   if (!sess) {
-    // Session expired — restart gracefully
-    return respond(sessionID, userID, msisdn,
-      'Session expired.\n' + mainMenu(), true);
+    return respond(sessionID, userID, msisdn, 'Session expired.\n' + mainMenu(), true);
   }
 
   const session = { ...sess, data: sess.data || {} };
@@ -96,7 +94,9 @@ export async function POST(req) {
   if (end || nextState === 'END') {
     try {
       await supabase.from('ussd_sessions').delete().eq('session_id', sessionID);
-    } catch (e) {}
+    } catch (err) {
+      console.error('[USSD] Error ending session:', err);
+    }
     return respond(sessionID, userID, msisdn, message, false);
   }
 
@@ -104,7 +104,9 @@ export async function POST(req) {
     await supabase.from('ussd_sessions')
       .update({ state: nextState, data: nextData, updated_at: new Date().toISOString() })
       .eq('session_id', sessionID);
-  } catch (e) {}
+  } catch (err) {
+    console.error('[USSD] Error updating session:', err);
+  }
 
   return respond(sessionID, userID, msisdn, message, true);
 }
@@ -124,8 +126,6 @@ async function transition(session, input, msisdn, supabase) {
   const { state, data } = session;
 
   switch (state) {
-
-    // ── MAIN MENU ─────────────────────────────────────────
     case 'MAIN_MENU': {
       if (input === '1') {
         const menu = await buildEventsMenu(supabase);
@@ -141,7 +141,6 @@ async function transition(session, input, msisdn, supabase) {
       return { nextState: 'MAIN_MENU', nextData: data, message: mainMenu('Invalid option.\n') };
     }
 
-    // ── BROWSE EVENTS ─────────────────────────────────────
     case 'BROWSE_EVENTS': {
       if (input === '0') {
         return { nextState: 'MAIN_MENU', nextData: {}, message: mainMenu() };
@@ -161,7 +160,6 @@ async function transition(session, input, msisdn, supabase) {
       };
     }
 
-    // ── SELECT TIER ───────────────────────────────────────
     case 'SELECT_TIER': {
       if (input === '0') {
         const menu = await buildEventsMenu(supabase);
@@ -184,7 +182,6 @@ async function transition(session, input, msisdn, supabase) {
       };
     }
 
-    // ── SELECT QUANTITY ───────────────────────────────────
     case 'SELECT_QTY': {
       if (input === '0') {
         const menu = await buildTiersMenu({ id: data.event_id, title: data.event_title }, supabase);
@@ -202,7 +199,6 @@ async function transition(session, input, msisdn, supabase) {
       };
     }
 
-    // ── SELECT MOMO NETWORK ───────────────────────────────
     case 'SELECT_NETWORK': {
       if (input === '0') {
         return {
@@ -222,7 +218,6 @@ async function transition(session, input, msisdn, supabase) {
       };
     }
 
-    // ── ENTER PHONE ───────────────────────────────────────
     case 'ENTER_PHONE': {
       if (input === '0') {
         return {
@@ -243,7 +238,6 @@ async function transition(session, input, msisdn, supabase) {
       };
     }
 
-    // ── CONFIRM & PAY ─────────────────────────────────────
     case 'CONFIRM': {
       if (input === '2' || input === '0') {
         return { nextState: 'MAIN_MENU', nextData: {}, message: mainMenu('Order cancelled.\n') };
@@ -291,7 +285,6 @@ async function buildEventsMenu(supabase, prefix = '') {
     const dateStr = e.date
       ? new Date(e.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
       : '';
-    // Keep under 160 chars total — truncate long titles
     const title = e.title.length > 18 ? e.title.substring(0, 17) + '.' : e.title;
     return `${i + 1}. ${title}${dateStr ? ' ' + dateStr : ''}`;
   }).join('\n');
@@ -353,17 +346,17 @@ async function initiatePayment(data, msisdn, supabase) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        email:        PLATFORM_EMAIL,     // all money to platform account
+        email:        PLATFORM_EMAIL,
         amount:       pesewas,
         currency:     'GHS',
         mobile_money: {
           phone:    data.momo_phone,
-          provider: data.momo_code,       // mtn | vod | atl
+          provider: data.momo_code,
         },
         reference,
         metadata: {
           type:                 'TICKET',
-          channel:              'USSD',   // flags webhook to use USSD handler
+          channel:              'USSD',
           event_id:             data.event_id,
           tier_id:              data.tier_id,
           tier_name:            data.tier_name,
@@ -386,11 +379,9 @@ async function initiatePayment(data, msisdn, supabase) {
 
     const ps = await res.json();
     if (!ps.status) {
-      console.error('[USSD] Paystack charge failed:', ps.message);
       return { success: false, error: ps.message || 'Payment service unavailable.' };
     }
 
-    // Store pending purchase so webhook can create tickets + send SMS
     try {
       await supabase.from('ussd_pending').insert({
         reference,
@@ -406,12 +397,13 @@ async function initiatePayment(data, msisdn, supabase) {
         momo_network: data.momo_code,
         status:       'pending',
       });
-    } catch (e) {}
+    } catch (dbErr) {
+      console.error('[USSD] Error logging pending payment:', dbErr);
+    }
 
     return { success: true, reference };
 
   } catch (err) {
-    console.error('[USSD] Payment error:', err.message);
     return { success: false, error: 'Network error. Please try again.' };
   }
 }
@@ -420,7 +412,7 @@ async function initiatePayment(data, msisdn, supabase) {
 function normalisePhone(input) {
   if (!input) return null;
   let p = String(input).replace(/[\s\-()]/g, '');
-  if (/^0[2-9]\d{8}$/.test(p))    p = '233' + p.slice(1);   // 0XX → 233XX
-  if (/^\+233[2-9]\d{8}$/.test(p)) p = p.slice(1);           // +233 → 233
+  if (/^0[2-9]\d{8}$/.test(p))    p = '233' + p.slice(1);
+  if (/^\+233[2-9]\d{8}$/.test(p)) p = p.slice(1);
   return /^233[2-9]\d{8}$/.test(p) ? p : null;
 }
