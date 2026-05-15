@@ -1,11 +1,16 @@
-// OUSTED USSD Ticket Purchase System
-// Handles three API formats:
-//   - Wigal Smart USSD V1 (GET + pipe-delimited response)
-//   - Wigal Smart USSD V2 (POST + JSON response)
-//   - Frog USSD (POST + JSON with newSession/continueSession)
+// OUSTED USSD Ticket Purchase — Arkesel USSD API
 //
-// Full flow: Browse events → Pick tier → Quantity → MoMo payment → SMS ticket link
-// All payments go to platform account. Organizer owed amounts tracked in payout_ledger.
+// Arkesel sends POST requests to this endpoint.
+// We respond with JSON: { sessionID, userID, msisdn, message, continueSession }
+// continueSession: true  = show menu and wait for input
+// continueSession: false = display final message and close session
+//
+// Full purchase flow:
+//   Main Menu → Browse Events → Pick Tier → Quantity → MoMo Network → Phone → Confirm
+//   → Paystack MoMo charge → webhook → tickets created → Arkesel SMS sent
+//
+// ALL money lands in your Paystack account.
+// payout_ledger tracks what you owe each organizer.
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
@@ -13,18 +18,16 @@ import crypto from 'crypto';
 
 export const runtime = 'nodejs';
 
-// ─── CONSTANTS ───────────────────────────────────────────────
 const PLATFORM_EMAIL = process.env.PLATFORM_EMAIL || 'payments@ousted.live';
-const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || 'https://ousted.live';
+const BASE_URL       = process.env.NEXT_PUBLIC_BASE_URL || 'https://ousted.live';
 
-// MoMo network codes for Paystack
-const MOMO_NETWORKS = {
-  '1': { label: 'MTN MoMo',       code: 'mtn',  provider: 'MTN' },
-  '2': { label: 'Telecel Cash',   code: 'vod',  provider: 'Telecel' },
-  '3': { label: 'AirtelTigo',     code: 'atl',  provider: 'AirtelTigo' },
+const MOMO = {
+  '1': { label: 'MTN MoMo',     code: 'mtn' },
+  '2': { label: 'Telecel Cash', code: 'vod' },
+  '3': { label: 'AirtelTigo',   code: 'atl' },
 };
 
-function getDb() {
+function db() {
   return createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL,
     process.env.SUPABASE_SERVICE_ROLE_KEY,
@@ -32,296 +35,240 @@ function getDb() {
   );
 }
 
-// ─── ENTRY POINTS ────────────────────────────────────────────
-
-// Wigal V1 — GET request, pipe-delimited response
-export async function GET(req) {
-  const { searchParams } = new URL(req.url);
-  const params = {
-    network:   searchParams.get('network')   || '',
-    sessionid: searchParams.get('sessionid') || '',
-    mode:      (searchParams.get('mode') || 'start').toUpperCase(),
-    msisdn:    searchParams.get('msisdn')    || '',
-    userdata:  searchParams.get('userdata')  || '',
-    username:  searchParams.get('username')  || '',
-    trafficid: searchParams.get('trafficid') || '',
-    other:     searchParams.get('other')     || '',
-  };
-
-  const { responseMode, menuText, other } = await handleUSSD(params);
-
-  // V1 pipe-delimited response
-  // NETWORK|MODE|MSISDN|SESSIONID|USERDATA|USERNAME|TRAFFICID|OTHER
-  const response = [
-    params.network,
-    responseMode,
-    params.msisdn,
-    params.sessionid,
-    menuText,
-    params.username,
-    params.trafficid,
-    other || params.other,
-  ].join('|');
-
-  return new Response(response, { headers: { 'Content-Type': 'text/plain' } });
-}
-
-// Wigal V2 + Frog — POST request, JSON response
+// ─── ENTRY POINT ─────────────────────────────────────────────
 export async function POST(req) {
   let body;
-  try { body = await req.json(); } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+  try { body = await req.json(); }
+  catch { return NextResponse.json({ message: 'Invalid request', continueSession: false }, { status: 400 }); }
+
+  // Arkesel request shape:
+  // { sessionID, userID, newSession, msisdn, userData, network }
+  const {
+    sessionID,
+    userID,
+    newSession,
+    msisdn,
+    userData = '',
+    network  = '',
+  } = body;
+
+  if (!sessionID || !msisdn) {
+    return NextResponse.json({ message: 'Bad request', continueSession: false }, { status: 400 });
   }
 
-  // Detect format: Frog uses newSession, Wigal V2 uses mode
-  const isFrog = 'newSession' in body || 'continueSession' in body;
+  const supabase = db();
+  const input    = String(userData).trim();
 
-  let params;
-  if (isFrog) {
-    params = {
-      network:   body.network   || 'frog',
-      sessionid: body.sessionId || body.sessionid || '',
-      mode:      body.newSession ? 'START' : 'MORE',
-      msisdn:    body.msisdn    || body.phoneNumber || body.phonenumber || '',
-      userdata:  body.userData  || body.userdata    || '',
-      username:  body.username  || 'ousted',
-      trafficid: body.trafficId || body.trafficid   || '',
-      other:     body.other     || '',
-    };
-  } else {
-    // Wigal V2
-    params = {
-      network:   body.network      || '',
-      sessionid: body.sessionid    || '',
-      mode:      (body.mode || 'start').toUpperCase(),
-      msisdn:    body.phonenumber  || body.msisdn || '',
-      userdata:  body.userdata     || '',
-      username:  body.username     || '',
-      trafficid: body.trafficid    || '',
-      other:     body.other        || '',
-    };
-  }
-
-  const { responseMode, menuText, other } = await handleUSSD(params);
-  const isEnd = responseMode === 'END';
-
-  if (isFrog) {
-    // Frog format response
-    return NextResponse.json({
-      ...body,
-      userData: menuText,
-      continueSession: !isEnd,
-    });
-  }
-
-  // Wigal V2 JSON response — return same object with updated mode and userdata
-  return NextResponse.json({
-    network:    params.network,
-    sessionid:  params.sessionid,
-    mode:       responseMode,
-    phonenumber: params.msisdn,
-    userdata:   menuText,
-    username:   params.username,
-    trafficid:  params.trafficid,
-    other:      other || params.other,
-  });
-}
-
-// ─── CORE SESSION HANDLER ────────────────────────────────────
-async function handleUSSD({ network, sessionid, mode, msisdn, userdata, username, trafficid, other }) {
-  const db = getDb();
-
-  // Load or create session
-  let session = null;
-  if (mode === 'START') {
-    // Delete any existing session (user re-dialled)
-    await db.from('ussd_sessions').delete().eq('session_id', sessionid).catch(() => {});
-    await db.from('ussd_sessions').insert({
-      session_id: sessionid,
+  // ── NEW SESSION: reset state ──────────────────────────────
+  if (newSession === true) {
+    await supabase.from('ussd_sessions').delete().eq('session_id', sessionID).catch(() => {});
+    await supabase.from('ussd_sessions').insert({
+      session_id: sessionID,
       msisdn,
       network,
       state: 'MAIN_MENU',
       data: {},
     }).catch(() => {});
-    return buildMenu('MAIN_MENU', {});
+    return respond(sessionID, userID, msisdn, mainMenu(), true);
   }
 
-  // Load existing session
-  const { data: sess } = await db
+  // ── RESUME SESSION ────────────────────────────────────────
+  const { data: sess } = await supabase
     .from('ussd_sessions')
     .select('*')
-    .eq('session_id', sessionid)
+    .eq('session_id', sessionID)
     .maybeSingle();
 
   if (!sess) {
-    // Session expired — restart
-    await db.from('ussd_sessions').insert({
-      session_id: sessionid, msisdn, network,
-      state: 'MAIN_MENU', data: {},
-    }).catch(() => {});
-    return buildMenu('MAIN_MENU', {});
+    // Session expired — restart gracefully
+    return respond(sessionID, userID, msisdn,
+      'Session expired.\n' + mainMenu(), true);
   }
 
-  session = { ...sess, data: sess.data || {} };
-  const input = (userdata || '').trim();
+  const session = { ...sess, data: sess.data || {} };
 
-  // State machine
-  const { nextState, nextData, response } = await transition(session, input, msisdn, db);
+  // Run state machine
+  const { nextState, nextData, message, end } =
+    await transition(session, input, msisdn, supabase);
 
-  if (nextState === 'END') {
-    await db.from('ussd_sessions').delete().eq('session_id', sessionid).catch(() => {});
-    return { responseMode: 'END', menuText: response };
+  if (end || nextState === 'END') {
+    await supabase.from('ussd_sessions').delete().eq('session_id', sessionID).catch(() => {});
+    return respond(sessionID, userID, msisdn, message, false);
   }
 
-  // Update session state
-  await db.from('ussd_sessions')
+  await supabase.from('ussd_sessions')
     .update({ state: nextState, data: nextData, updated_at: new Date().toISOString() })
-    .eq('session_id', sessionid)
+    .eq('session_id', sessionID)
     .catch(() => {});
 
-  return { responseMode: 'MORE', menuText: response };
+  return respond(sessionID, userID, msisdn, message, true);
 }
 
-// ─── STATE MACHINE ────────────────────────────────────────────
-async function transition(session, input, msisdn, db) {
+// ─── RESPONSE BUILDER ────────────────────────────────────────
+function respond(sessionID, userID, msisdn, message, continueSession) {
+  return NextResponse.json({ sessionID, userID, msisdn, message, continueSession });
+}
+
+// ─── MENUS ───────────────────────────────────────────────────
+function mainMenu(prefix = '') {
+  return `${prefix}OUSTED - Event Tickets\n1. Buy Tickets\n2. My Tickets\n0. Exit`;
+}
+
+// ─── STATE MACHINE ───────────────────────────────────────────
+async function transition(session, input, msisdn, supabase) {
   const { state, data } = session;
 
   switch (state) {
 
+    // ── MAIN MENU ─────────────────────────────────────────
     case 'MAIN_MENU': {
-      if (input === '1') return { nextState: 'BROWSE_EVENTS', nextData: data, response: await getBrowseMenu(db) };
-      if (input === '2') return { nextState: 'MY_TICKETS', nextData: data, response: await getMyTickets(msisdn, db) };
-      if (input === '0') return { nextState: 'END', nextData: {}, response: 'Thank you for using OUSTED. Goodbye!' };
-      return { nextState: 'MAIN_MENU', nextData: data, response: mainMenu('Invalid option. ' ) };
+      if (input === '1') {
+        const menu = await buildEventsMenu(supabase);
+        return { nextState: 'BROWSE_EVENTS', nextData: data, message: menu };
+      }
+      if (input === '2') {
+        const msg = await myTicketsMenu(msisdn, supabase);
+        return { nextState: 'MAIN_MENU', nextData: data, message: msg };
+      }
+      if (input === '0') {
+        return { end: true, message: 'Thank you for using OUSTED.' };
+      }
+      return { nextState: 'MAIN_MENU', nextData: data, message: mainMenu('Invalid option.\n') };
     }
 
+    // ── BROWSE EVENTS ─────────────────────────────────────
     case 'BROWSE_EVENTS': {
-      if (input === '0') return { nextState: 'MAIN_MENU', nextData: {}, response: mainMenu() };
-      // input is event number
-      const events = await getUpcomingEvents(db);
-      const idx = parseInt(input, 10) - 1;
+      if (input === '0') {
+        return { nextState: 'MAIN_MENU', nextData: {}, message: mainMenu() };
+      }
+      const events = await getEvents(supabase);
+      const idx    = parseInt(input, 10) - 1;
       if (isNaN(idx) || idx < 0 || idx >= events.length) {
-        return { nextState: 'BROWSE_EVENTS', nextData: data, response: await getBrowseMenu(db, 'Invalid choice. ') };
+        const menu = await buildEventsMenu(supabase, 'Invalid choice.\n');
+        return { nextState: 'BROWSE_EVENTS', nextData: data, message: menu };
       }
-      const event = events[idx];
-      const tiersMenu = await getEventTiersMenu(event, db);
-      return { nextState: 'SELECT_TIER', nextData: { event_id: event.id, event_title: event.title }, response: tiersMenu };
-    }
-
-    case 'SELECT_TIER': {
-      if (input === '0') return { nextState: 'BROWSE_EVENTS', nextData: {}, response: await getBrowseMenu(db) };
-      const tiers = await getEventTiers(data.event_id, db);
-      const idx = parseInt(input, 10) - 1;
-      if (isNaN(idx) || idx < 0 || idx >= tiers.length) {
-        return { nextState: 'SELECT_TIER', nextData: data, response: await getEventTiersMenu({ id: data.event_id, title: data.event_title }, db, 'Invalid choice. ') };
-      }
-      const tier = tiers[idx];
-      const fee = (tier.price * 0.05);
-      const total = tier.price + fee;
+      const ev      = events[idx];
+      const tierMsg = await buildTiersMenu(ev, supabase);
       return {
-        nextState: 'SELECT_QTY',
-        nextData: { ...data, tier_id: tier.id, tier_name: tier.name, base_price: tier.price, fee, total_per_ticket: total },
-        response: `${data.event_title}^${tier.name}: GHS ${tier.price.toFixed(2)}^Platform fee: GHS ${fee.toFixed(2)}^Total/ticket: GHS ${total.toFixed(2)}^^Enter quantity (1-5):^0.Back`,
+        nextState: 'SELECT_TIER',
+        nextData:  { event_id: ev.id, event_title: ev.title },
+        message:   tierMsg,
       };
     }
 
+    // ── SELECT TIER ───────────────────────────────────────
+    case 'SELECT_TIER': {
+      if (input === '0') {
+        const menu = await buildEventsMenu(supabase);
+        return { nextState: 'BROWSE_EVENTS', nextData: {}, message: menu };
+      }
+      const tiers = await getTiers(data.event_id, supabase);
+      const idx   = parseInt(input, 10) - 1;
+      if (isNaN(idx) || idx < 0 || idx >= tiers.length) {
+        const menu = await buildTiersMenu({ id: data.event_id, title: data.event_title }, supabase, 'Invalid choice.\n');
+        return { nextState: 'SELECT_TIER', nextData: data, message: menu };
+      }
+      const tier  = tiers[idx];
+      const fee   = parseFloat((tier.price * 0.05).toFixed(2));
+      const total = parseFloat((tier.price + fee).toFixed(2));
+      const msg   = `${data.event_title}\n${tier.name}: GHS ${tier.price.toFixed(2)}\nFee: GHS ${fee.toFixed(2)}\nTotal/ticket: GHS ${total.toFixed(2)}\n\nEnter quantity (1-5):\n0. Back`;
+      return {
+        nextState: 'SELECT_QTY',
+        nextData:  { ...data, tier_id: tier.id, tier_name: tier.name, base_price: tier.price, fee, total_per_ticket: total },
+        message:   msg,
+      };
+    }
+
+    // ── SELECT QUANTITY ───────────────────────────────────
     case 'SELECT_QTY': {
       if (input === '0') {
-        const tiersMenu = await getEventTiersMenu({ id: data.event_id, title: data.event_title }, db);
-        return { nextState: 'SELECT_TIER', nextData: { event_id: data.event_id, event_title: data.event_title }, response: tiersMenu };
+        const menu = await buildTiersMenu({ id: data.event_id, title: data.event_title }, supabase);
+        return { nextState: 'SELECT_TIER', nextData: { event_id: data.event_id, event_title: data.event_title }, message: menu };
       }
       const qty = parseInt(input, 10);
       if (isNaN(qty) || qty < 1 || qty > 5) {
-        return { nextState: 'SELECT_QTY', nextData: data, response: `Enter quantity (1-5):^0.Back` };
+        return { nextState: 'SELECT_QTY', nextData: data, message: 'Enter quantity (1-5):\n0. Back' };
       }
-      const totalAmt = data.total_per_ticket * qty;
+      const totalAmt = parseFloat((data.total_per_ticket * qty).toFixed(2));
       return {
         nextState: 'SELECT_NETWORK',
-        nextData: { ...data, quantity: qty, total_amount: totalAmt },
-        response: `Total: GHS ${totalAmt.toFixed(2)} for ${qty} ticket(s)^^Select payment:^1.MTN MoMo^2.Telecel Cash^3.AirtelTigo^0.Back`,
+        nextData:  { ...data, quantity: qty, total_amount: totalAmt },
+        message:   `Total: GHS ${totalAmt.toFixed(2)} for ${qty} ticket(s)\n\nPay with:\n1. MTN MoMo\n2. Telecel Cash\n3. AirtelTigo\n0. Back`,
       };
     }
 
+    // ── SELECT MOMO NETWORK ───────────────────────────────
     case 'SELECT_NETWORK': {
       if (input === '0') {
-        const fee = data.base_price * 0.05;
-        const total = data.base_price + fee;
-        return { nextState: 'SELECT_QTY', nextData: { ...data, fee, total_per_ticket: total }, response: `${data.event_title}^${data.tier_name}: GHS ${data.base_price.toFixed(2)}^^Enter quantity (1-5):^0.Back` };
+        return {
+          nextState: 'SELECT_QTY',
+          nextData:  data,
+          message:   `${data.event_title}\n${data.tier_name}: GHS ${data.base_price.toFixed(2)}\n\nEnter quantity (1-5):\n0. Back`,
+        };
       }
-      if (!MOMO_NETWORKS[input]) {
-        return { nextState: 'SELECT_NETWORK', nextData: data, response: `Select payment:^1.MTN MoMo^2.Telecel Cash^3.AirtelTigo^0.Back` };
+      if (!MOMO[input]) {
+        return { nextState: 'SELECT_NETWORK', nextData: data, message: 'Choose network:\n1. MTN MoMo\n2. Telecel Cash\n3. AirtelTigo\n0. Back' };
       }
-      const net = MOMO_NETWORKS[input];
-      // Pre-fill phone number from MSISDN if same network
+      const net = MOMO[input];
       return {
         nextState: 'ENTER_PHONE',
-        nextData: { ...data, momo_network: net.code, momo_provider: net.label },
-        response: `${net.label} selected^^Enter MoMo number:^(e.g. 0241234567)^0.Back`,
+        nextData:  { ...data, momo_code: net.code, momo_label: net.label },
+        message:   `${net.label} selected.\n\nEnter MoMo number:\n(e.g. 0241234567)\n0. Back`,
       };
     }
 
+    // ── ENTER PHONE ───────────────────────────────────────
     case 'ENTER_PHONE': {
       if (input === '0') {
-        return { nextState: 'SELECT_NETWORK', nextData: data, response: `Select payment:^1.MTN MoMo^2.Telecel Cash^3.AirtelTigo^0.Back` };
+        return {
+          nextState: 'SELECT_NETWORK',
+          nextData:  data,
+          message:   `Pay with:\n1. MTN MoMo\n2. Telecel Cash\n3. AirtelTigo\n0. Back`,
+        };
       }
-      // Normalise phone number to 233XXXXXXXXX
       const phone = normalisePhone(input);
       if (!phone) {
-        return { nextState: 'ENTER_PHONE', nextData: data, response: `Invalid number.^Enter MoMo number:^(e.g. 0241234567)^0.Back` };
+        return { nextState: 'ENTER_PHONE', nextData: data, message: 'Invalid number.\nEnter MoMo number:\n(e.g. 0241234567)\n0. Back' };
       }
+      const msg = `Confirm order:\n${data.event_title}\n${data.tier_name} x${data.quantity}\nGHS ${data.total_amount.toFixed(2)}\nFrom: ${phone}\n(${data.momo_label})\n\n1. Confirm\n2. Cancel`;
       return {
-        nextState: 'CONFIRM_PAYMENT',
-        nextData: { ...data, momo_phone: phone },
-        response: `Confirm order:^${data.event_title}^${data.tier_name} x${data.quantity}^Pay: GHS ${data.total_amount.toFixed(2)}^From: ${phone}^(${data.momo_provider})^^1.Confirm^2.Cancel`,
+        nextState: 'CONFIRM',
+        nextData:  { ...data, momo_phone: phone },
+        message:   msg,
       };
     }
 
-    case 'CONFIRM_PAYMENT': {
+    // ── CONFIRM & PAY ─────────────────────────────────────
+    case 'CONFIRM': {
       if (input === '2' || input === '0') {
-        return { nextState: 'MAIN_MENU', nextData: {}, response: mainMenu('Order cancelled. ') };
+        return { nextState: 'MAIN_MENU', nextData: {}, message: mainMenu('Order cancelled.\n') };
       }
       if (input !== '1') {
-        return { nextState: 'CONFIRM_PAYMENT', nextData: data, response: `1.Confirm payment^2.Cancel` };
+        return { nextState: 'CONFIRM', nextData: data, message: '1. Confirm\n2. Cancel' };
       }
-      // Initiate payment
-      const payResult = await initiateUSSDPayment(data, msisdn, db);
-      if (payResult.success) {
+
+      const result = await initiatePayment(data, msisdn, supabase);
+      if (result.success) {
         return {
-          nextState: 'END',
-          nextData: {},
-          response: `Payment initiated!^Check your phone for MoMo prompt.^^Approve the GHS ${data.total_amount.toFixed(2)} payment to receive your ticket(s) by SMS.`,
+          end: true,
+          message: `Payment initiated!\nApprove the GHS ${data.total_amount.toFixed(2)} ${data.momo_label} prompt on your phone.\n\nYour ticket will be sent by SMS once confirmed.`,
         };
       }
       return {
-        nextState: 'END',
-        nextData: {},
-        response: `Payment failed.^${payResult.error || 'Please try again.'}^Dial again to retry.`,
+        end: true,
+        message: `Payment failed.\n${result.error}\n\nDial again to retry.`,
       };
     }
 
-    case 'MY_TICKETS': {
-      if (input === '0') return { nextState: 'MAIN_MENU', nextData: {}, response: mainMenu() };
-      return { nextState: 'MAIN_MENU', nextData: {}, response: mainMenu() };
-    }
-
     default:
-      return { nextState: 'MAIN_MENU', nextData: {}, response: mainMenu() };
+      return { nextState: 'MAIN_MENU', nextData: {}, message: mainMenu() };
   }
 }
 
-// ─── MENU BUILDERS ────────────────────────────────────────────
-function mainMenu(prefix = '') {
-  return `${prefix}Welcome to OUSTED^Ghana Event Tickets^^1.Buy Tickets^2.My Tickets^0.Exit`;
-}
-
-function buildMenu(state) {
-  if (state === 'MAIN_MENU') return { responseMode: 'MORE', menuText: mainMenu() };
-  return { responseMode: 'MORE', menuText: mainMenu() };
-}
-
-async function getUpcomingEvents(db) {
+// ─── DATA HELPERS ─────────────────────────────────────────────
+async function getEvents(supabase) {
   const today = new Date().toISOString().split('T')[0];
-  const { data } = await db
+  const { data } = await supabase
     .from('events')
     .select('id,title,date,location')
     .eq('status', 'active')
@@ -332,20 +279,22 @@ async function getUpcomingEvents(db) {
   return data || [];
 }
 
-async function getBrowseMenu(db, prefix = '') {
-  const events = await getUpcomingEvents(db);
-  if (!events.length) return `No upcoming events.^^0.Back`;
+async function buildEventsMenu(supabase, prefix = '') {
+  const events = await getEvents(supabase);
+  if (!events.length) return `No upcoming events.\n0. Back`;
   const lines = events.map((e, i) => {
-    const date = e.date ? new Date(e.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '';
-    // Truncate title to fit 160 char limit across all lines
-    const title = e.title.length > 20 ? e.title.substring(0, 18) + '..' : e.title;
-    return `${i + 1}.${title}${date ? ' ' + date : ''}`;
-  }).join('^');
-  return `${prefix}Upcoming Events:^${lines}^0.Back`;
+    const dateStr = e.date
+      ? new Date(e.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+      : '';
+    // Keep under 160 chars total — truncate long titles
+    const title = e.title.length > 18 ? e.title.substring(0, 17) + '.' : e.title;
+    return `${i + 1}. ${title}${dateStr ? ' ' + dateStr : ''}`;
+  }).join('\n');
+  return `${prefix}Upcoming Events:\n${lines}\n0. Back`;
 }
 
-async function getEventTiers(event_id, db) {
-  const { data } = await db
+async function getTiers(event_id, supabase) {
+  const { data } = await supabase
     .from('ticket_tiers')
     .select('id,name,price,max_quantity')
     .eq('event_id', event_id)
@@ -353,41 +302,45 @@ async function getEventTiers(event_id, db) {
   return data || [];
 }
 
-async function getEventTiersMenu(event, db, prefix = '') {
-  const tiers = await getEventTiers(event.id, db);
-  if (!tiers.length) return `No tickets available.^0.Back`;
-  const title = event.title.length > 22 ? event.title.substring(0, 20) + '..' : event.title;
-  const lines = tiers.map((t, i) => `${i + 1}.${t.name} GHS${t.price.toFixed(0)}`).join('^');
-  return `${prefix}${title}^Select ticket tier:^${lines}^0.Back`;
+async function buildTiersMenu(event, supabase, prefix = '') {
+  const tiers = await getTiers(event.id, supabase);
+  if (!tiers.length) return `No tickets available.\n0. Back`;
+  const title = event.title.length > 20 ? event.title.substring(0, 19) + '.' : event.title;
+  const lines = tiers.map((t, i) => `${i + 1}. ${t.name} - GHS ${t.price.toFixed(2)}`).join('\n');
+  return `${prefix}${title}\nSelect tier:\n${lines}\n0. Back`;
 }
 
-async function getMyTickets(msisdn, db) {
-  const normalised = normalisePhone(msisdn);
-  const phone = normalised || msisdn;
-  // Find tickets by phone — try both number formats
-  const { data: tickets } = await db
+async function myTicketsMenu(msisdn, supabase) {
+  const phone = normalisePhone(msisdn) || msisdn;
+  const guestEmail = `ussd-${phone}@ousted.live`;
+  const { data } = await supabase
     .from('tickets')
     .select('ticket_number,tier_name,events!event_id(title,date)')
-    .or(`guest_email.ilike.${phone}%`)
+    .eq('guest_email', guestEmail)
     .eq('status', 'valid')
     .order('created_at', { ascending: false })
     .limit(3);
 
-  if (!tickets?.length) return `No tickets found.^Buy tickets: option 1^0.Back`;
-  const lines = tickets.map((t, i) => {
-    const ev = t.events?.title?.substring(0, 15) || 'Event';
-    return `${i + 1}.${ev} (${t.tier_name || 'GA'})`;
-  }).join('^');
-  return `Your Tickets:^${lines}^^Visit ousted.live for^full ticket details^0.Back`;
+  if (!data?.length) {
+    return `No tickets found for\n${phone}\n\nBuy tickets: option 1\n0. Back to menu`;
+  }
+
+  const lines = data.map((t, i) => {
+    const title = (t.events?.title || 'Event').substring(0, 14);
+    const tier  = (t.tier_name || 'GA').substring(0, 10);
+    return `${i + 1}. ${title} (${tier})`;
+  }).join('\n');
+
+  return `Your Tickets:\n${lines}\n\nFull details:\nousted.live/tickets/find\n0. Back`;
 }
 
-// ─── PAYMENT ─────────────────────────────────────────────────
-async function initiateUSSDPayment(data, msisdn, db) {
-  const reference = `USSD-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
-  const amountPesewas = Math.round(data.total_amount * 100);
+// ─── PAYSTACK MOMO CHARGE ─────────────────────────────────────
+async function initiatePayment(data, msisdn, supabase) {
+  const reference    = `USSD-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+  const pesewas      = Math.round(data.total_amount * 100);
+  const guestEmail   = `ussd-${data.momo_phone}@ousted.live`;
 
   try {
-    // Initiate Paystack mobile money charge
     const res = await fetch('https://api.paystack.co/charge', {
       method: 'POST',
       headers: {
@@ -395,78 +348,72 @@ async function initiateUSSDPayment(data, msisdn, db) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        email: PLATFORM_EMAIL,
-        amount: amountPesewas,
-        currency: 'GHS',
+        email:        PLATFORM_EMAIL,     // all money to platform account
+        amount:       pesewas,
+        currency:     'GHS',
         mobile_money: {
-          phone: data.momo_phone,
-          provider: data.momo_network,  // mtn | vod | atl
+          phone:    data.momo_phone,
+          provider: data.momo_code,       // mtn | vod | atl
         },
         reference,
         metadata: {
-          type: 'TICKET',
-          channel: 'USSD',
-          event_id: data.event_id,
-          tier_id: data.tier_id,
-          tier_name: data.tier_name,
-          event_title: data.event_title,
-          quantity: data.quantity,
-          base_price: data.base_price,
-          platform_fee: data.fee,
-          buyer_price: data.total_per_ticket,
-          organizer_owes: parseFloat((data.base_price * data.quantity).toFixed(2)),
-          reseller_owes: 0,
-          // USSD buyer — no account, identify by phone
-          guest_email: `ussd-${data.momo_phone}@ousted.live`,
-          guest_name: `USSD Buyer`,
-          ussd_phone: data.momo_phone,
-          momo_provider: data.momo_provider,
-          reseller_code: 'DIRECT',
+          type:                 'TICKET',
+          channel:              'USSD',   // flags webhook to use USSD handler
+          event_id:             data.event_id,
+          tier_id:              data.tier_id,
+          tier_name:            data.tier_name,
+          event_title:          data.event_title,
+          quantity:             data.quantity,
+          base_price:           data.base_price,
+          platform_fee:         data.fee,
+          buyer_price:          data.total_per_ticket,
+          guest_email:          guestEmail,
+          guest_name:           'USSD Buyer',
+          ussd_phone:           data.momo_phone,
+          momo_provider:        data.momo_label,
+          organizer_owes:       parseFloat((data.base_price * data.quantity).toFixed(2)),
+          reseller_owes:        0,
+          reseller_code:        'DIRECT',
           is_reseller_purchase: false,
         },
       }),
     });
 
-    const psData = await res.json();
-
-    if (!psData.status) {
-      console.error('[USSD] Paystack charge failed:', psData.message);
-      return { success: false, error: psData.message || 'Payment failed' };
+    const ps = await res.json();
+    if (!ps.status) {
+      console.error('[USSD] Paystack charge failed:', ps.message);
+      return { success: false, error: ps.message || 'Payment service unavailable.' };
     }
 
-    // Store pending USSD purchase so webhook can create tickets + send SMS
-    await db.from('ussd_pending').insert({
+    // Store pending purchase so webhook can create tickets + send SMS
+    await supabase.from('ussd_pending').insert({
       reference,
-      msisdn: data.momo_phone,
-      event_id: data.event_id,
-      tier_id: data.tier_id,
-      tier_name: data.tier_name,
-      event_title: data.event_title,
-      quantity: data.quantity,
-      base_price: data.base_price,
+      msisdn:       data.momo_phone,
+      event_id:     data.event_id,
+      tier_id:      data.tier_id,
+      tier_name:    data.tier_name,
+      event_title:  data.event_title,
+      quantity:     data.quantity,
+      base_price:   data.base_price,
       total_amount: data.total_amount,
-      momo_phone: data.momo_phone,
-      momo_network: data.momo_network,
-      status: 'pending',
+      momo_phone:   data.momo_phone,
+      momo_network: data.momo_code,
+      status:       'pending',
     }).catch(() => {});
 
     return { success: true, reference };
+
   } catch (err) {
     console.error('[USSD] Payment error:', err.message);
     return { success: false, error: 'Network error. Please try again.' };
   }
 }
 
-// ─── HELPERS ─────────────────────────────────────────────────
+// ─── UTILITY ──────────────────────────────────────────────────
 function normalisePhone(input) {
   if (!input) return null;
-  // Remove spaces, dashes, brackets
-  let p = input.replace(/[\s\-()]/g, '');
-  // 0XXXXXXXXX → 233XXXXXXXXX
-  if (/^0[2-9]\d{8}$/.test(p)) p = '233' + p.slice(1);
-  // +233XXXXXXXXX → 233XXXXXXXXX
-  if (/^\+233\d{9}$/.test(p)) p = p.slice(1);
-  // Validate Ghana number
-  if (/^233[2-9]\d{8}$/.test(p)) return p;
-  return null;
+  let p = String(input).replace(/[\s\-()]/g, '');
+  if (/^0[2-9]\d{8}$/.test(p))    p = '233' + p.slice(1);   // 0XX → 233XX
+  if (/^\+233[2-9]\d{8}$/.test(p)) p = p.slice(1);           // +233 → 233
+  return /^233[2-9]\d{8}$/.test(p) ? p : null;
 }
