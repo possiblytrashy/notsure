@@ -62,13 +62,15 @@ export async function POST(req) {
   // ── NEW SESSION: reset state ──────────────────────────────
   if (newSession === true) {
     try { await supabase.from('ussd_sessions').delete().eq('session_id', sessionID); } catch {}
-    await supabase.from('ussd_sessions').insert({
-      session_id: sessionID,
-      msisdn,
-      network,
-      state: 'MAIN_MENU',
-      data: {},
-    }).catch(() => {});
+    try {
+      await supabase.from('ussd_sessions').insert({
+        session_id: sessionID,
+        msisdn,
+        network,
+        state: 'MAIN_MENU',
+        data: {},
+      });
+    } catch {}
     return respond(sessionID, userID, msisdn, mainMenu(), true);
   }
 
@@ -96,10 +98,11 @@ export async function POST(req) {
     return respond(sessionID, userID, msisdn, message, false);
   }
 
-  await supabase.from('ussd_sessions')
-    .update({ state: nextState, data: nextData, updated_at: new Date().toISOString() })
-    .eq('session_id', sessionID)
-    .catch(() => {});
+  try {
+    await supabase.from('ussd_sessions')
+      .update({ state: nextState, data: nextData, updated_at: new Date().toISOString() })
+      .eq('session_id', sessionID);
+  } catch {}
 
   return respond(sessionID, userID, msisdn, message, true);
 }
@@ -386,20 +389,22 @@ async function initiatePayment(data, msisdn, supabase) {
     }
 
     // Store pending purchase so webhook can create tickets + send SMS
-    await supabase.from('ussd_pending').insert({
-      reference,
-      msisdn:       data.momo_phone,
-      event_id:     data.event_id,
-      tier_id:      data.tier_id,
-      tier_name:    data.tier_name,
-      event_title:  data.event_title,
-      quantity:     data.quantity,
-      base_price:   data.base_price,
-      total_amount: data.total_amount,
-      momo_phone:   data.momo_phone,
-      momo_network: data.momo_code,
-      status:       'pending',
-    }).catch(() => {});
+    try {
+      await supabase.from('ussd_pending').insert({
+        reference,
+        msisdn:       data.momo_phone,
+        event_id:     data.event_id,
+        tier_id:      data.tier_id,
+        tier_name:    data.tier_name,
+        event_title:  data.event_title,
+        quantity:     data.quantity,
+        base_price:   data.base_price,
+        total_amount: data.total_amount,
+        momo_phone:   data.momo_phone,
+        momo_network: data.momo_code,
+        status:       'pending',
+      });
+    } catch {}
 
     return { success: true, reference };
 
