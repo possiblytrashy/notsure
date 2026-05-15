@@ -9,8 +9,8 @@
   },
   "dependencies": {
     "@mapbox/mapbox-gl-geocoder": "^5.0.1",
-    "@supabase/ssr": "^0.0.10",
-    "@supabase/supabase-js": "^2.39.0",
+    "@supabase/ssr": "^0.5.2",
+"@supabase/supabase-js": "^2.45.4",
     "autoprefixer": "^10.4.16",
     "axios": "^1.6.2",
     "clsx": "^2.0.0",
