@@ -98,11 +98,9 @@ export async function POST(req) {
     return respond(sessionID, userID, msisdn, message, false);
   }
 
-  try {
-    await supabase.from('ussd_sessions')
-      .update({ state: nextState, data: nextData, updated_at: new Date().toISOString() })
-      .eq('session_id', sessionID);
-  } catch {}
+  await supabase.from('ussd_sessions')
+    .update({ state: nextState, data: nextData, updated_at: new Date().toISOString() })
+    .eq('session_id', sessionID);
 
   return respond(sessionID, userID, msisdn, message, true);
 }
@@ -389,21 +387,20 @@ async function initiatePayment(data, msisdn, supabase) {
     }
 
     // Store pending purchase so webhook can create tickets + send SMS
-    try {
-      await supabase.from('ussd_pending').insert({
-        reference,
-        msisdn:       data.momo_phone,
-        event_id:     data.event_id,
-        tier_id:      data.tier_id,
-        tier_name:    data.tier_name,
-        event_title:  data.event_title,
-        quantity:     data.quantity,
-        base_price:   data.base_price,
-        total_amount: data.total_amount,
-        momo_phone:   data.momo_phone,
-        momo_network: data.momo_code,
-        status:       'pending',
-      });
+    await supabase.from('ussd_pending').insert({
+      reference,
+      msisdn:       data.momo_phone,
+      event_id:     data.event_id,
+      tier_id:      data.tier_id,
+      tier_name:    data.tier_name,
+      event_title:  data.event_title,
+      quantity:     data.quantity,
+      base_price:   data.base_price,
+      total_amount: data.total_amount,
+      momo_phone:   data.momo_phone,
+      momo_network: data.momo_code,
+      status:       'pending',
+    });
     } catch {}
 
     return { success: true, reference };
