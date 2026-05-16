@@ -4,7 +4,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
-import { sendSMS } from '../../../lib/sms.js';
+import { sendSMS } from '../../../../lib/sms.js';
 
 const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || 'https://ousted.live';
 
