@@ -28,7 +28,6 @@ async function sendArkeselSMS(to, message) {
   }
 
   try {
-    // Arkesel SMS API v2
     const res = await fetch('https://sms.arkesel.com/api/v2/sms/send', {
       method: 'POST',
       headers: {
@@ -57,17 +56,14 @@ async function sendArkeselSMS(to, message) {
 }
 
 // ─── MAIN HANDLER ────────────────────────────────────────────
-// Called from the Paystack webhook route when channel === 'USSD'
 export async function processUSSDPayment(reference, paystackData) {
   const db = getDb();
   const meta = paystackData.metadata || {};
 
   // Idempotency check — already processed?
-  const { data: existing } = await db
-    .from('tickets')
-    .select('id,ticket_number')
-    .eq('reference', reference)
-    .limit(1);
+  const { data: existing } = await new Promise(function(resolve, reject) {
+    db.from('tickets').select('id,ticket_number').eq('reference', reference).limit(1).then(resolve, reject);
+  });
 
   if (existing?.length) {
     console.log(`[USSD] Already processed ${reference}`);
@@ -78,7 +74,6 @@ export async function processUSSDPayment(reference, paystackData) {
   const guestEmail = meta.guest_email || `ussd-${meta.ussd_phone}@ousted.live`;
   const guestPhone = meta.ussd_phone || '';
 
-  // Create ticket records
   const tickets = Array.from({ length: qty }, () => ({
     event_id:             meta.event_id,
     tier_id:              meta.tier_id,
@@ -97,68 +92,71 @@ export async function processUSSDPayment(reference, paystackData) {
     channel:              'USSD',
   }));
 
-  const { data: insertedTickets, error: ticketError } = await db
-    .from('tickets')
-    .insert(tickets)
-    .select('ticket_number');
+  const { data: insertedTickets, error: ticketError } = await new Promise(function(resolve, reject) {
+    db.from('tickets').insert(tickets).select('ticket_number').then(resolve, reject);
+  });
 
   if (ticketError) {
     console.error('[USSD] Ticket insert error:', ticketError.message);
     return { ok: false, error: ticketError.message };
   }
 
-  // Update payout ledger — organizer is owed base_price × qty
   const orgOwes = parseFloat((meta.base_price * qty).toFixed(2));
   const platformKeeps = parseFloat(((paystackData.amount / 100) - orgOwes).toFixed(2));
 
-  await db.from('payout_ledger').insert({
-    reference,
-    event_id:          meta.event_id,
-    organizer_id:      meta.organizer_id || null,
-    transaction_type:  'TICKET',
-    total_collected:   paystackData.amount / 100,
-    organizer_owes:    orgOwes,
-    reseller_owes:     0,
-    platform_keeps:    platformKeeps,
-    status:            'pending',
-    notes:             `${qty}x ${meta.tier_name} via USSD (${guestPhone})`,
-  }).catch(err => console.error('[USSD] Ledger insert error:', err.message));
+  try {
+    await new Promise(function(resolve, reject) {
+      db.from('payout_ledger').insert({
+        reference,
+        event_id:          meta.event_id,
+        organizer_id:      meta.organizer_id || null,
+        transaction_type:  'TICKET',
+        total_collected:   paystackData.amount / 100,
+        organizer_owes:    orgOwes,
+        reseller_owes:     0,
+        platform_keeps:    platformKeeps,
+        status:            'pending',
+        notes:             `${qty}x ${meta.tier_name} via USSD (${guestPhone})`,
+      }).then(resolve, reject);
+    });
+  } catch (err) {
+    console.error('[USSD] Ledger insert error:', err.message);
+  }
 
-  // Increment event tickets_sold
-  await db.rpc('increment_event_tickets_sold', { event_id_param: meta.event_id, amount: qty })
-    .catch(() => {});
+  try {
+    await new Promise(function(resolve, reject) {
+      db.rpc('increment_event_tickets_sold', { event_id_param: meta.event_id, amount: qty }).then(resolve, reject);
+    });
+  } catch (e) {}
 
-  // Mark USSD pending record as completed
-  await db.from('ussd_pending')
-    .update({ status: 'completed', completed_at: new Date().toISOString() })
-    .eq('reference', reference)
-    .catch(() => {});
+  try {
+    await new Promise(function(resolve, reject) {
+      db.from('ussd_pending')
+        .update({ status: 'completed', completed_at: new Date().toISOString() })
+        .eq('reference', reference)
+        .then(resolve, reject);
+    });
+  } catch (e) {}
 
-  // ── SEND SMS WITH TICKET LINK ────────────────────────────────
   const ticketNumbers = (insertedTickets || []).map(t => t.ticket_number).join(', ');
   const smsTarget = normalisePhoneForSMS(guestPhone);
-
-  // Short URL with the reference so they can view tickets in the vault
   const ticketUrl = `${BASE_URL}/tickets/find?ref=${encodeURIComponent(reference)}`;
 
-  const smsLines = [
+  const smsMessage = [
     `OUSTED Ticket Confirmed!`,
     `Event: ${meta.event_title || 'Event'}`,
     `Tier: ${meta.tier_name || 'General'} x${qty}`,
     `Ref: ${reference}`,
     `View: ${ticketUrl}`,
-  ];
-  const smsMessage = smsLines.join('\n');
+  ].join('\n');
 
   if (smsTarget) {
     const smsResult = await sendArkeselSMS(smsTarget, smsMessage);
     if (!smsResult.success) {
-      // Non-fatal — ticket still created, just log the SMS failure
       console.warn(`[USSD SMS] Failed for ${smsTarget}:`, smsResult.error);
     }
   }
 
-  // Fire automation trigger
   fetch(`${BASE_URL}/api/automations/trigger`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-internal-key': process.env.INTERNAL_WEBHOOK_KEY || 'ousted-internal' },
@@ -175,7 +173,7 @@ export async function processUSSDPayment(reference, paystackData) {
         quantity: qty,
       },
     }),
-  }).catch(() => {});
+  }).then(function() {}).catch(function() {});
 
   console.log(`[USSD] ✅ ${qty} ticket(s) created, SMS sent to ${smsTarget} | ref: ${reference}`);
   return { ok: true, tickets_created: qty, sms_sent: !!smsTarget };
