@@ -21,15 +21,20 @@ function db() {
   );
 }
 
-// Wraps any supabase query in a real native Promise so transpiled .catch() always works
-function prom(query) {
-  return Promise.resolve(query);
+// Forces any thenable (including Supabase query builder) into a real native Promise.
+// Uses .then(res, rej) — the two-argument form — which avoids calling .catch() entirely.
+// This is necessary because Next.js/SWC transpiles `await` into .catch() calls,
+// but the Supabase query builder thenable does not expose .catch().
+function toPromise(thenable) {
+  return new Promise(function(resolve, reject) {
+    thenable.then(resolve, reject);
+  });
 }
 
 export async function POST(req) {
   let body;
   try { body = await req.json(); }
-  catch { return NextResponse.json({ message: 'Invalid request', continueSession: false }, { status: 400 }); }
+  catch (e) { return NextResponse.json({ message: 'Invalid request', continueSession: false }, { status: 400 }); }
 
   console.log('[USSD] body:', JSON.stringify(body));
 
@@ -43,8 +48,8 @@ export async function POST(req) {
   const input = String(userData).trim();
 
   if (newSession === true || newSession === 'true') {
-    await prom(supabase.from('ussd_sessions').delete().eq('session_id', sessionID));
-    await prom(supabase.from('ussd_sessions').insert({
+    await toPromise(supabase.from('ussd_sessions').delete().eq('session_id', sessionID));
+    await toPromise(supabase.from('ussd_sessions').insert({
       session_id: sessionID,
       msisdn,
       network,
@@ -54,9 +59,10 @@ export async function POST(req) {
     return respond(sessionID, userID, msisdn, mainMenu(), true);
   }
 
-  const { data: sess } = await prom(
+  const sessResult = await toPromise(
     supabase.from('ussd_sessions').select('*').eq('session_id', sessionID).maybeSingle()
   );
+  const sess = sessResult.data;
 
   if (!sess) {
     return respond(sessionID, userID, msisdn, 'Session expired.\n' + mainMenu(), true);
@@ -66,11 +72,11 @@ export async function POST(req) {
   const { nextState, nextData, message, end } = await transition(session, input, msisdn, supabase);
 
   if (end || nextState === 'END') {
-    await prom(supabase.from('ussd_sessions').delete().eq('session_id', sessionID));
+    await toPromise(supabase.from('ussd_sessions').delete().eq('session_id', sessionID));
     return respond(sessionID, userID, msisdn, message, false);
   }
 
-  await prom(
+  await toPromise(
     supabase.from('ussd_sessions')
       .update({ state: nextState, data: nextData, updated_at: new Date().toISOString() })
       .eq('session_id', sessionID)
@@ -83,8 +89,8 @@ function respond(sessionID, userID, msisdn, message, continueSession) {
   return NextResponse.json({ sessionID, userID, msisdn, message, continueSession });
 }
 
-function mainMenu(prefix = '') {
-  return `${prefix}OUSTED - Event Tickets\n1. Buy Tickets\n2. My Tickets\n0. Exit`;
+function mainMenu(prefix) {
+  return (prefix || '') + 'OUSTED - Event Tickets\n1. Buy Tickets\n2. My Tickets\n0. Exit';
 }
 
 async function transition(session, input, msisdn, supabase) {
@@ -133,7 +139,7 @@ async function transition(session, input, msisdn, supabase) {
       return {
         nextState: 'SELECT_QTY',
         nextData: { ...data, tier_id: tier.id, tier_name: tier.name, base_price: tier.price, fee, total_per_ticket: total },
-        message: `${data.event_title}\n${tier.name}: GHS ${tier.price.toFixed(2)}\nFee: GHS ${fee.toFixed(2)}\nTotal/ticket: GHS ${total.toFixed(2)}\n\nEnter quantity (1-5):\n0. Back`,
+        message: data.event_title + '\n' + tier.name + ': GHS ' + tier.price.toFixed(2) + '\nFee: GHS ' + fee.toFixed(2) + '\nTotal/ticket: GHS ' + total.toFixed(2) + '\n\nEnter quantity (1-5):\n0. Back',
       };
     }
 
@@ -147,29 +153,29 @@ async function transition(session, input, msisdn, supabase) {
       return {
         nextState: 'SELECT_NETWORK',
         nextData: { ...data, quantity: qty, total_amount: totalAmt },
-        message: `Total: GHS ${totalAmt.toFixed(2)} for ${qty} ticket(s)\n\nPay with:\n1. MTN MoMo\n2. Telecel Cash\n3. AirtelTigo\n0. Back`,
+        message: 'Total: GHS ' + totalAmt.toFixed(2) + ' for ' + qty + ' ticket(s)\n\nPay with:\n1. MTN MoMo\n2. Telecel Cash\n3. AirtelTigo\n0. Back',
       };
     }
 
     case 'SELECT_NETWORK': {
-      if (input === '0') return { nextState: 'SELECT_QTY', nextData: data, message: `${data.event_title}\n${data.tier_name}: GHS ${data.base_price.toFixed(2)}\n\nEnter quantity (1-5):\n0. Back` };
+      if (input === '0') return { nextState: 'SELECT_QTY', nextData: data, message: data.event_title + '\n' + data.tier_name + ': GHS ' + data.base_price.toFixed(2) + '\n\nEnter quantity (1-5):\n0. Back' };
       if (!MOMO[input]) return { nextState: 'SELECT_NETWORK', nextData: data, message: 'Choose network:\n1. MTN MoMo\n2. Telecel Cash\n3. AirtelTigo\n0. Back' };
       const net = MOMO[input];
       return {
         nextState: 'ENTER_PHONE',
         nextData: { ...data, momo_code: net.code, momo_label: net.label },
-        message: `${net.label} selected.\n\nEnter MoMo number:\n(e.g. 0241234567)\n0. Back`,
+        message: net.label + ' selected.\n\nEnter MoMo number:\n(e.g. 0241234567)\n0. Back',
       };
     }
 
     case 'ENTER_PHONE': {
-      if (input === '0') return { nextState: 'SELECT_NETWORK', nextData: data, message: `Pay with:\n1. MTN MoMo\n2. Telecel Cash\n3. AirtelTigo\n0. Back` };
+      if (input === '0') return { nextState: 'SELECT_NETWORK', nextData: data, message: 'Pay with:\n1. MTN MoMo\n2. Telecel Cash\n3. AirtelTigo\n0. Back' };
       const phone = normalisePhone(input);
       if (!phone) return { nextState: 'ENTER_PHONE', nextData: data, message: 'Invalid number.\nEnter MoMo number:\n(e.g. 0241234567)\n0. Back' };
       return {
         nextState: 'CONFIRM',
         nextData: { ...data, momo_phone: phone },
-        message: `Confirm order:\n${data.event_title}\n${data.tier_name} x${data.quantity}\nGHS ${data.total_amount.toFixed(2)}\nFrom: ${phone}\n(${data.momo_label})\n\n1. Confirm\n2. Cancel`,
+        message: 'Confirm order:\n' + data.event_title + '\n' + data.tier_name + ' x' + data.quantity + '\nGHS ' + data.total_amount.toFixed(2) + '\nFrom: ' + phone + '\n(' + data.momo_label + ')\n\n1. Confirm\n2. Cancel',
       };
     }
 
@@ -178,9 +184,9 @@ async function transition(session, input, msisdn, supabase) {
       if (input !== '1') return { nextState: 'CONFIRM', nextData: data, message: '1. Confirm\n2. Cancel' };
       const result = await initiatePayment(data, msisdn, supabase);
       if (result.success) {
-        return { end: true, message: `Payment initiated!\nApprove the GHS ${data.total_amount.toFixed(2)} ${data.momo_label} prompt on your phone.\n\nYour ticket will be sent by SMS once confirmed.` };
+        return { end: true, message: 'Payment initiated!\nApprove the GHS ' + data.total_amount.toFixed(2) + ' ' + data.momo_label + ' prompt on your phone.\n\nYour ticket will be sent by SMS once confirmed.' };
       }
-      return { end: true, message: `Payment failed.\n${result.error}\n\nDial again to retry.` };
+      return { end: true, message: 'Payment failed.\n' + result.error + '\n\nDial again to retry.' };
     }
 
     default:
@@ -190,73 +196,74 @@ async function transition(session, input, msisdn, supabase) {
 
 async function getEvents(supabase) {
   const today = new Date().toISOString().split('T')[0];
-  const { data } = await prom(
+  const result = await toPromise(
     supabase.from('events').select('id,title,date,location')
       .eq('status', 'active').eq('is_deleted', false)
       .gte('date', today).order('date', { ascending: true }).limit(8)
   );
-  return data || [];
+  return result.data || [];
 }
 
-async function buildEventsMenu(supabase, prefix = '') {
+async function buildEventsMenu(supabase, prefix) {
   const events = await getEvents(supabase);
-  if (!events.length) return `No upcoming events.\n0. Back`;
-  const lines = events.map((e, i) => {
+  if (!events.length) return 'No upcoming events.\n0. Back';
+  const lines = events.map(function(e, i) {
     const dateStr = e.date ? new Date(e.date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }) : '';
     const title = e.title.length > 18 ? e.title.substring(0, 17) + '.' : e.title;
-    return `${i + 1}. ${title}${dateStr ? ' ' + dateStr : ''}`;
+    return (i + 1) + '. ' + title + (dateStr ? ' ' + dateStr : '');
   }).join('\n');
-  return `${prefix}Upcoming Events:\n${lines}\n0. Back`;
+  return (prefix || '') + 'Upcoming Events:\n' + lines + '\n0. Back';
 }
 
 async function getTiers(event_id, supabase) {
-  const { data } = await prom(
+  const result = await toPromise(
     supabase.from('ticket_tiers').select('id,name,price,max_quantity')
       .eq('event_id', event_id).order('price', { ascending: true })
   );
-  return data || [];
+  return result.data || [];
 }
 
-async function buildTiersMenu(event, supabase, prefix = '') {
+async function buildTiersMenu(event, supabase, prefix) {
   const tiers = await getTiers(event.id, supabase);
-  if (!tiers.length) return `No tickets available.\n0. Back`;
+  if (!tiers.length) return 'No tickets available.\n0. Back';
   const title = event.title.length > 20 ? event.title.substring(0, 19) + '.' : event.title;
-  const lines = tiers.map((t, i) => `${i + 1}. ${t.name} - GHS ${t.price.toFixed(2)}`).join('\n');
-  return `${prefix}${title}\nSelect tier:\n${lines}\n0. Back`;
+  const lines = tiers.map(function(t, i) { return (i + 1) + '. ' + t.name + ' - GHS ' + t.price.toFixed(2); }).join('\n');
+  return (prefix || '') + title + '\nSelect tier:\n' + lines + '\n0. Back';
 }
 
 async function myTicketsMenu(msisdn, supabase) {
   const phone = normalisePhone(msisdn) || msisdn;
-  const guestEmail = `ussd-${phone}@ousted.live`;
-  const { data } = await prom(
+  const guestEmail = 'ussd-' + phone + '@ousted.live';
+  const result = await toPromise(
     supabase.from('tickets').select('ticket_number,tier_name,events!event_id(title,date)')
       .eq('guest_email', guestEmail).eq('status', 'valid')
       .order('created_at', { ascending: false }).limit(3)
   );
-  if (!data?.length) return `No tickets found for\n${phone}\n\nBuy tickets: option 1\n0. Back to menu`;
-  const lines = data.map((t, i) => {
-    const title = (t.events?.title || 'Event').substring(0, 14);
+  const data = result.data;
+  if (!data || !data.length) return 'No tickets found for\n' + phone + '\n\nBuy tickets: option 1\n0. Back to menu';
+  const lines = data.map(function(t, i) {
+    const title = ((t.events && t.events.title) || 'Event').substring(0, 14);
     const tier = (t.tier_name || 'GA').substring(0, 10);
-    return `${i + 1}. ${title} (${tier})`;
+    return (i + 1) + '. ' + title + ' (' + tier + ')';
   }).join('\n');
-  return `Your Tickets:\n${lines}\n\nFull details:\nousted.live/tickets/find\n0. Back`;
+  return 'Your Tickets:\n' + lines + '\n\nFull details:\nousted.live/tickets/find\n0. Back';
 }
 
 async function initiatePayment(data, msisdn, supabase) {
-  const reference = `USSD-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
+  const reference = 'USSD-' + Date.now().toString(36).toUpperCase() + '-' + crypto.randomBytes(3).toString('hex').toUpperCase();
   const pesewas = Math.round(data.total_amount * 100);
-  const guestEmail = `ussd-${data.momo_phone}@ousted.live`;
+  const guestEmail = 'ussd-' + data.momo_phone + '@ousted.live';
 
   try {
     const res = await fetch('https://api.paystack.co/charge', {
       method: 'POST',
-      headers: { Authorization: `Bearer ${process.env.PAYSTACK_SECRET_KEY}`, 'Content-Type': 'application/json' },
+      headers: { Authorization: 'Bearer ' + process.env.PAYSTACK_SECRET_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         email: PLATFORM_EMAIL,
         amount: pesewas,
         currency: 'GHS',
         mobile_money: { phone: data.momo_phone, provider: data.momo_code },
-        reference,
+        reference: reference,
         metadata: {
           type: 'TICKET', channel: 'USSD',
           event_id: data.event_id, tier_id: data.tier_id,
@@ -277,16 +284,22 @@ async function initiatePayment(data, msisdn, supabase) {
       return { success: false, error: ps.message || 'Payment service unavailable.' };
     }
 
-    await prom(supabase.from('ussd_pending').insert({
-      reference, msisdn: data.momo_phone,
-      event_id: data.event_id, tier_id: data.tier_id,
-      tier_name: data.tier_name, event_title: data.event_title,
-      quantity: data.quantity, base_price: data.base_price,
-      total_amount: data.total_amount, momo_phone: data.momo_phone,
-      momo_network: data.momo_code, status: 'pending',
+    await toPromise(supabase.from('ussd_pending').insert({
+      reference: reference,
+      msisdn: data.momo_phone,
+      event_id: data.event_id,
+      tier_id: data.tier_id,
+      tier_name: data.tier_name,
+      event_title: data.event_title,
+      quantity: data.quantity,
+      base_price: data.base_price,
+      total_amount: data.total_amount,
+      momo_phone: data.momo_phone,
+      momo_network: data.momo_code,
+      status: 'pending',
     }));
 
-    return { success: true, reference };
+    return { success: true, reference: reference };
 
   } catch (err) {
     console.error('[USSD] Payment error:', err.message);
@@ -296,7 +309,7 @@ async function initiatePayment(data, msisdn, supabase) {
 
 function normalisePhone(input) {
   if (!input) return null;
-  let p = String(input).replace(/[\s\-()]/g, '');
+  var p = String(input).replace(/[\s\-()]/g, '');
   if (/^0[2-9]\d{8}$/.test(p))     p = '233' + p.slice(1);
   if (/^\+233[2-9]\d{8}$/.test(p)) p = p.slice(1);
   return /^233[2-9]\d{8}$/.test(p) ? p : null;
