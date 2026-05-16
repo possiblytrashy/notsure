@@ -228,6 +228,17 @@ async function transition(session, input, msisdn) {
     if (input === '2' || input === '0') return { nextState: 'MAIN_MENU', nextData: {}, message: mainMenu('Order cancelled.\n') };
     if (input !== '1') return { nextState: 'CONFIRM', nextData: data, message: '1. Confirm\n2. Cancel' };
 
+    // ── DEBUG: show session data snapshot before attempting payment ──
+    // Remove this block once payment is confirmed working
+    const debugSnap = [
+      'DBG state=CONFIRM',
+      'phone=' + (data.momo_phone || 'MISSING'),
+      'net=' + (data.momo_code || 'MISSING'),
+      'amt=' + (data.total_amount || 'MISSING'),
+      'tier=' + (data.tier_id ? data.tier_id.slice(0, 8) : 'MISSING'),
+    ].join('\n');
+    console.log('[USSD] CONFIRM data:', JSON.stringify(data));
+
     const result = await initiatePayment(data, msisdn);
 
     // All successful Paystack MoMo responses mean a prompt was pushed to the
@@ -240,7 +251,8 @@ async function transition(session, input, msisdn) {
       return { end: true, message: promptMsg };
     }
 
-    return { end: true, message: 'Payment failed.\n' + result.error + '\n\nDial again to retry.' };
+    // Show full error + debug snapshot on screen so you can see it without server logs
+    return { end: true, message: 'Payment failed.\n' + result.error + '\n\n' + debugSnap + '\n\nDial again to retry.' };
   }
 
   return { nextState: 'MAIN_MENU', nextData: {}, message: mainMenu() };
