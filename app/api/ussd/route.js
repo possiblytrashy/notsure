@@ -27,14 +27,13 @@ function sbHeaders(extra) {
 
 async function sbSelect(table, filters, single) {
   const params = new URLSearchParams(filters || {});
-  const url = SB_URL() + '/rest/v1/' + table + '?' + params.toString();
-  const res = await fetch(url, {
+  const res = await fetch(SB_URL() + '/rest/v1/' + table + '?' + params.toString(), {
     method: 'GET',
     headers: sbHeaders({ 'Accept': single ? 'application/vnd.pgrst.object+json' : 'application/json' }),
   });
-  if (res.status === 406 || res.status === 404) return { data: null, error: null };
+  if (res.status === 406 || res.status === 404) return { data: null };
   const data = await res.json();
-  return { data: data || null, error: null };
+  return { data: data || null };
 }
 
 async function sbInsert(table, body) {
@@ -118,7 +117,7 @@ export async function POST(req) {
 }
 
 function respond(sessionID, userID, msisdn, message, continueSession) {
-  return NextResponse.json({ sessionID: sessionID, userID: userID, msisdn: msisdn, message: message, continueSession: continueSession });
+  return NextResponse.json({ sessionID, userID, msisdn, message, continueSession });
 }
 
 function mainMenu(prefix) {
@@ -132,12 +131,10 @@ async function transition(session, input, msisdn) {
 
   if (state === 'MAIN_MENU') {
     if (input === '1') {
-      const menu = await buildEventsMenu();
-      return { nextState: 'BROWSE_EVENTS', nextData: data, message: menu };
+      return { nextState: 'BROWSE_EVENTS', nextData: data, message: await buildEventsMenu() };
     }
     if (input === '2') {
-      const msg = await myTicketsMenu(msisdn);
-      return { nextState: 'MAIN_MENU', nextData: data, message: msg };
+      return { nextState: 'MAIN_MENU', nextData: data, message: await myTicketsMenu(msisdn) };
     }
     if (input === '0') return { end: true, message: 'Thank you for using OUSTED.' };
     return { nextState: 'MAIN_MENU', nextData: data, message: mainMenu('Invalid option.\n') };
@@ -170,7 +167,7 @@ async function transition(session, input, msisdn) {
     const total = parseFloat((tier.price + fee).toFixed(2));
     return {
       nextState: 'SELECT_QTY',
-      nextData: { event_id: data.event_id, event_title: data.event_title, tier_id: tier.id, tier_name: tier.name, base_price: tier.price, fee: fee, total_per_ticket: total },
+      nextData: { event_id: data.event_id, event_title: data.event_title, tier_id: tier.id, tier_name: tier.name, base_price: tier.price, fee, total_per_ticket: total },
       message: data.event_title + '\n' + tier.name + ': GHS ' + tier.price.toFixed(2) + '\nFee: GHS ' + fee.toFixed(2) + '\nTotal/ticket: GHS ' + total.toFixed(2) + '\n\nEnter quantity (1-5):\n0. Back',
     };
   }
@@ -184,7 +181,7 @@ async function transition(session, input, msisdn) {
     const totalAmt = parseFloat((data.total_per_ticket * qty).toFixed(2));
     return {
       nextState: 'SELECT_NETWORK',
-      nextData: { event_id: data.event_id, event_title: data.event_title, tier_id: data.tier_id, tier_name: data.tier_name, base_price: data.base_price, fee: data.fee, total_per_ticket: data.total_per_ticket, quantity: qty, total_amount: totalAmt },
+      nextData: { ...data, quantity: qty, total_amount: totalAmt },
       message: 'Total: GHS ' + totalAmt.toFixed(2) + ' for ' + qty + ' ticket(s)\n\nPay with:\n1. MTN MoMo\n2. Telecel Cash\n3. AirtelTigo\n0. Back',
     };
   }
@@ -195,7 +192,7 @@ async function transition(session, input, msisdn) {
     const net = MOMO[input];
     return {
       nextState: 'ENTER_PHONE',
-      nextData: { event_id: data.event_id, event_title: data.event_title, tier_id: data.tier_id, tier_name: data.tier_name, base_price: data.base_price, fee: data.fee, total_per_ticket: data.total_per_ticket, quantity: data.quantity, total_amount: data.total_amount, momo_code: net.code, momo_label: net.label },
+      nextData: { ...data, momo_code: net.code, momo_label: net.label },
       message: net.label + ' selected.\n\nEnter MoMo number:\n(e.g. 0241234567)\n0. Back',
     };
   }
@@ -206,7 +203,7 @@ async function transition(session, input, msisdn) {
     if (!phone) return { nextState: 'ENTER_PHONE', nextData: data, message: 'Invalid number.\nEnter MoMo number:\n(e.g. 0241234567)\n0. Back' };
     return {
       nextState: 'CONFIRM',
-      nextData: { event_id: data.event_id, event_title: data.event_title, tier_id: data.tier_id, tier_name: data.tier_name, base_price: data.base_price, fee: data.fee, total_per_ticket: data.total_per_ticket, quantity: data.quantity, total_amount: data.total_amount, momo_code: data.momo_code, momo_label: data.momo_label, momo_phone: phone },
+      nextData: { ...data, momo_phone: phone },
       message: 'Confirm order:\n' + data.event_title + '\n' + data.tier_name + ' x' + data.quantity + '\nGHS ' + data.total_amount.toFixed(2) + '\nFrom: ' + phone + '\n(' + data.momo_label + ')\n\n1. Confirm\n2. Cancel',
     };
   }
@@ -214,14 +211,166 @@ async function transition(session, input, msisdn) {
   if (state === 'CONFIRM') {
     if (input === '2' || input === '0') return { nextState: 'MAIN_MENU', nextData: {}, message: mainMenu('Order cancelled.\n') };
     if (input !== '1') return { nextState: 'CONFIRM', nextData: data, message: '1. Confirm\n2. Cancel' };
+
     const result = await initiatePayment(data, msisdn);
-    if (result.success) {
-      return { end: true, message: 'Payment initiated!\nApprove the GHS ' + data.total_amount.toFixed(2) + ' ' + data.momo_label + ' prompt on your phone.\n\nYour ticket will be sent by SMS once confirmed.' };
+
+    // Paystack approved immediately (pay_offline — MoMo prompt sent to phone)
+    if (result.success && result.paymentStatus === 'pay_offline') {
+      return {
+        end: true,
+        message: 'Payment request sent!\nCheck your ' + data.momo_label + ' phone for a prompt and enter your PIN to complete.\n\nYour ticket will be sent by SMS once confirmed.',
+      };
     }
+
+    // Paystack requires OTP — collect it within the USSD session
+    if (result.success && result.paymentStatus === 'send_otp') {
+      return {
+        nextState: 'ENTER_OTP',
+        nextData: { ...data, ps_reference: result.reference },
+        message: 'Enter the OTP sent to your ' + data.momo_label + ' number to complete payment:\n0. Cancel',
+      };
+    }
+
+    // Paystack requires PIN entry via USSD prompt on their side (send_pin / pending)
+    if (result.success && (result.paymentStatus === 'send_pin' || result.paymentStatus === 'pending')) {
+      return {
+        end: true,
+        message: 'Payment initiated!\nApprove the ' + data.momo_label + ' prompt on your phone and enter your PIN.\n\nYour ticket will be sent by SMS once confirmed.',
+      };
+    }
+
+    // Unexpected success status
+    if (result.success) {
+      return {
+        end: true,
+        message: 'Payment initiated!\nComplete any prompt on your ' + data.momo_label + ' phone.\n\nYour ticket will be sent by SMS once confirmed.',
+      };
+    }
+
     return { end: true, message: 'Payment failed.\n' + result.error + '\n\nDial again to retry.' };
   }
 
+  // OTP collection state
+  if (state === 'ENTER_OTP') {
+    if (input === '0') return { nextState: 'MAIN_MENU', nextData: {}, message: mainMenu('Payment cancelled.\n') };
+    if (!input || input.length < 4) {
+      return { nextState: 'ENTER_OTP', nextData: data, message: 'Invalid OTP.\nEnter the OTP sent to your phone:\n0. Cancel' };
+    }
+
+    const otpResult = await submitOTP(input, data.ps_reference);
+
+    if (otpResult.success) {
+      return {
+        end: true,
+        message: 'Payment confirmed!\nYour ticket will be sent by SMS shortly.\n\nRef: ' + data.ps_reference,
+      };
+    }
+
+    if (otpResult.retry) {
+      return {
+        nextState: 'ENTER_OTP',
+        nextData: data,
+        message: 'Wrong OTP. Try again:\n0. Cancel',
+      };
+    }
+
+    return { end: true, message: 'Payment failed.\n' + otpResult.error + '\n\nDial again to retry.' };
+  }
+
   return { nextState: 'MAIN_MENU', nextData: {}, message: mainMenu() };
+}
+
+// ─── PAYSTACK CHARGE ──────────────────────────────────────────
+async function initiatePayment(data, msisdn) {
+  const reference = 'USSD-' + Date.now().toString(36).toUpperCase() + '-' + crypto.randomBytes(3).toString('hex').toUpperCase();
+  const pesewas = Math.round(data.total_amount * 100);
+  const guestEmail = 'ussd-' + data.momo_phone + '@ousted.live';
+
+  try {
+    const res = await fetch('https://api.paystack.co/charge', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + process.env.PAYSTACK_SECRET_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: PLATFORM_EMAIL,
+        amount: pesewas,
+        currency: 'GHS',
+        mobile_money: { phone: data.momo_phone, provider: data.momo_code },
+        reference,
+        metadata: {
+          type: 'TICKET', channel: 'USSD',
+          event_id: data.event_id, tier_id: data.tier_id,
+          tier_name: data.tier_name, event_title: data.event_title,
+          quantity: data.quantity, base_price: data.base_price,
+          platform_fee: data.fee, buyer_price: data.total_per_ticket,
+          guest_email: guestEmail, guest_name: 'USSD Buyer',
+          ussd_phone: data.momo_phone, momo_provider: data.momo_label,
+          organizer_owes: parseFloat((data.base_price * data.quantity).toFixed(2)),
+          reseller_owes: 0, reseller_code: 'DIRECT', is_reseller_purchase: false,
+        },
+      }),
+    });
+
+    const ps = await res.json();
+    console.log('[USSD] Paystack charge response:', JSON.stringify(ps));
+
+    if (!ps.status) {
+      return { success: false, error: ps.message || 'Payment service unavailable.' };
+    }
+
+    const paymentStatus = ps.data && ps.data.status;
+
+    // Store pending record regardless of OTP requirement
+    await sbInsert('ussd_pending', {
+      reference,
+      msisdn: data.momo_phone,
+      event_id: data.event_id,
+      tier_id: data.tier_id,
+      tier_name: data.tier_name,
+      event_title: data.event_title,
+      quantity: data.quantity,
+      base_price: data.base_price,
+      total_amount: data.total_amount,
+      momo_phone: data.momo_phone,
+      momo_network: data.momo_code,
+      status: 'pending',
+    });
+
+    return { success: true, reference, paymentStatus };
+
+  } catch (err) {
+    console.error('[USSD] Payment error:', err.message);
+    return { success: false, error: 'Network error. Please try again.' };
+  }
+}
+
+// ─── PAYSTACK OTP SUBMISSION ──────────────────────────────────
+async function submitOTP(otp, reference) {
+  try {
+    const res = await fetch('https://api.paystack.co/charge/submit_otp', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + process.env.PAYSTACK_SECRET_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ otp, reference }),
+    });
+
+    const ps = await res.json();
+    console.log('[USSD] OTP submit response:', JSON.stringify(ps));
+
+    if (!ps.status) {
+      // Wrong OTP — let user retry
+      if (ps.message && ps.message.toLowerCase().includes('otp')) {
+        return { success: false, retry: true, error: ps.message };
+      }
+      return { success: false, retry: false, error: ps.message || 'OTP verification failed.' };
+    }
+
+    const paymentStatus = ps.data && ps.data.status;
+    // success / pay_offline both mean payment is proceeding — webhook will fire
+    return { success: true, paymentStatus };
+
+  } catch (err) {
+    console.error('[USSD] OTP submit error:', err.message);
+    return { success: false, retry: false, error: 'Network error. Try again.' };
+  }
 }
 
 // ─── DATA HELPERS ─────────────────────────────────────────────
@@ -270,7 +419,7 @@ async function myTicketsMenu(msisdn) {
   const phone = normalisePhone(msisdn) || msisdn;
   const guestEmail = 'ussd-' + phone + '@ousted.live';
   const result = await sbSelect('tickets', {
-    'select': 'ticket_number,tier_name,event_id',
+    'select': 'ticket_number,tier_name',
     'guest_email': 'eq.' + guestEmail,
     'status': 'eq.valid',
     'order': 'created_at.desc',
@@ -279,68 +428,9 @@ async function myTicketsMenu(msisdn) {
   const data = result.data;
   if (!data || !data.length) return 'No tickets found for\n' + phone + '\n\nBuy tickets: option 1\n0. Back to menu';
   const lines = data.map(function(t, i) {
-    return (i + 1) + '. Ticket #' + t.ticket_number + ' (' + (t.tier_name || 'GA') + ')';
+    return (i + 1) + '. #' + t.ticket_number + ' (' + (t.tier_name || 'GA') + ')';
   }).join('\n');
-  return 'Your Tickets:\n' + lines + '\n\nFull details:\nousted.live/tickets/find\n0. Back';
-}
-
-// ─── PAYSTACK CHARGE ──────────────────────────────────────────
-async function initiatePayment(data, msisdn) {
-  const reference = 'USSD-' + Date.now().toString(36).toUpperCase() + '-' + crypto.randomBytes(3).toString('hex').toUpperCase();
-  const pesewas = Math.round(data.total_amount * 100);
-  const guestEmail = 'ussd-' + data.momo_phone + '@ousted.live';
-
-  try {
-    const res = await fetch('https://api.paystack.co/charge', {
-      method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + process.env.PAYSTACK_SECRET_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email: PLATFORM_EMAIL,
-        amount: pesewas,
-        currency: 'GHS',
-        mobile_money: { phone: data.momo_phone, provider: data.momo_code },
-        reference: reference,
-        metadata: {
-          type: 'TICKET', channel: 'USSD',
-          event_id: data.event_id, tier_id: data.tier_id,
-          tier_name: data.tier_name, event_title: data.event_title,
-          quantity: data.quantity, base_price: data.base_price,
-          platform_fee: data.fee, buyer_price: data.total_per_ticket,
-          guest_email: guestEmail, guest_name: 'USSD Buyer',
-          ussd_phone: data.momo_phone, momo_provider: data.momo_label,
-          organizer_owes: parseFloat((data.base_price * data.quantity).toFixed(2)),
-          reseller_owes: 0, reseller_code: 'DIRECT', is_reseller_purchase: false,
-        },
-      }),
-    });
-
-    const ps = await res.json();
-    if (!ps.status) {
-      console.error('[USSD] Paystack charge failed:', ps.message);
-      return { success: false, error: ps.message || 'Payment service unavailable.' };
-    }
-
-    await sbInsert('ussd_pending', {
-      reference: reference,
-      msisdn: data.momo_phone,
-      event_id: data.event_id,
-      tier_id: data.tier_id,
-      tier_name: data.tier_name,
-      event_title: data.event_title,
-      quantity: data.quantity,
-      base_price: data.base_price,
-      total_amount: data.total_amount,
-      momo_phone: data.momo_phone,
-      momo_network: data.momo_code,
-      status: 'pending',
-    });
-
-    return { success: true, reference: reference };
-
-  } catch (err) {
-    console.error('[USSD] Payment error:', err.message);
-    return { success: false, error: 'Network error. Please try again.' };
-  }
+  return 'Your Tickets:\n' + lines + '\n\nousted.live/tickets/find\n0. Back';
 }
 
 // ─── UTILITY ──────────────────────────────────────────────────
