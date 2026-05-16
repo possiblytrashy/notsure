@@ -6,6 +6,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
+import { sendSMS } from '../../../lib/sms.js';
 
 export const runtime = 'nodejs';
 
@@ -167,6 +168,24 @@ async function processTicket(supabase, data, meta) {
   }).catch(() => {});
 
   console.log(`[WEBHOOK] ✅ ${qty} ticket(s) created for ${guest_email} | ref: ${data.reference}`);
+
+  // ── SMS NOTIFICATION (Arkesel) ───────────────────────────────────
+  const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || 'https://ousted.live';
+  const ticketUrl = `${BASE_URL}/tickets/find?ref=${encodeURIComponent(data.reference)}`;
+  // Phone may be in metadata directly, or encoded in the USSD guest email pattern
+  const rawPhone = meta.guest_phone || meta.ussd_phone || null;
+  const emailPhone = guest_email.match(/^ussd-(\d{9,15})@/)?.[1] || null;
+  const smsPhone = rawPhone || emailPhone;
+  if (smsPhone) {
+    const smsBody = [
+      `OUSTED Ticket Confirmed!`,
+      `Event: ${meta.event_title || 'Your event'}`,
+      `Tier: ${meta.tier_name || 'General'} x${qty}`,
+      `Ref: ${data.reference}`,
+      `View: ${ticketUrl}`,
+    ].join('\n');
+    await sendSMS(smsPhone, smsBody).catch(() => {});
+  }
 }
 
 async function processVote(supabase, data, meta) {  // meta passed through for ledger
