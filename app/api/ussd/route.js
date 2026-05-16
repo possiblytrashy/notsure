@@ -236,15 +236,21 @@ async function initiatePayment(data, msisdn) {
   const pesewas = Math.round(data.total_amount * 100);
   const guestEmail = 'ussd-' + data.momo_phone + '@ousted.live';
 
+  // Paystack GHS mobile_money expects local format: 0XXXXXXXXX
+  // data.momo_phone is stored as 233XXXXXXXXX — convert it
+  const paystackPhone = data.momo_phone.startsWith('233')
+    ? '0' + data.momo_phone.slice(3)
+    : data.momo_phone;
+
   try {
     const res = await fetch('https://api.paystack.co/charge', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + process.env.PAYSTACK_SECRET_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        email: guestEmail,          // unique per customer — required for MoMo prompt routing
+        email: guestEmail,
         amount: pesewas,
         currency: 'GHS',
-        mobile_money: { phone: data.momo_phone, provider: data.momo_code },
+        mobile_money: { phone: paystackPhone, provider: data.momo_code },
         reference,
         metadata: {
           type: 'TICKET', channel: 'USSD',
@@ -263,13 +269,29 @@ async function initiatePayment(data, msisdn) {
     const ps = await res.json();
     console.log('[USSD] Paystack charge response:', JSON.stringify(ps));
 
+    // Top-level failure (bad key, malformed request, etc.)
     if (!ps.status) {
       return { success: false, error: ps.message || 'Payment service unavailable.' };
     }
 
     const paymentStatus = ps.data && ps.data.status;
+    const psMessage = (ps.data && ps.data.message) || ps.message || '';
 
-    // Store pending record regardless of OTP requirement
+    // Paystack accepted the request but the charge itself failed
+    // (wrong phone, insufficient funds, provider down, etc.)
+    if (paymentStatus === 'failed') {
+      console.error('[USSD] Charge failed:', psMessage);
+      return { success: false, error: psMessage || 'Mobile money charge failed.' };
+    }
+
+    // Anything other than a prompt-bearing status is unexpected — treat as failure
+    const promptStatuses = ['pay_offline', 'send_pin', 'pending'];
+    if (!promptStatuses.includes(paymentStatus)) {
+      console.error('[USSD] Unexpected charge status:', paymentStatus, psMessage);
+      return { success: false, error: psMessage || 'Unexpected payment status: ' + paymentStatus };
+    }
+
+    // Charge is live — store the pending record
     await sbInsert('ussd_pending', {
       reference,
       msisdn: data.momo_phone,
