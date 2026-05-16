@@ -6,7 +6,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
-import { sendSMS } from '../../../lib/sms.js';
+import { sendSMS } from '../../../../lib/sms.js';
 
 export const runtime = 'nodejs';
 
