@@ -4,6 +4,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
+import { sendSMS } from '../../../lib/sms.js';
 
 const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || 'https://ousted.live';
 
@@ -17,42 +18,6 @@ function getDb() {
 
 function generateTicketNumber() {
   return `OT-${Date.now().toString(36).toUpperCase()}-${crypto.randomBytes(3).toString('hex').toUpperCase()}`;
-}
-
-// ─── SEND SMS VIA ARKESEL ─────────────────────────────────────
-async function sendArkeselSMS(to, message) {
-  const apiKey = process.env.ARKESEL_API_KEY;
-  if (!apiKey) {
-    console.warn('[USSD SMS] ARKESEL_API_KEY not set — skipping SMS');
-    return { success: false, error: 'SMS not configured' };
-  }
-
-  try {
-    const res = await fetch('https://sms.arkesel.com/api/v2/sms/send', {
-      method: 'POST',
-      headers: {
-        'api-key': apiKey,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        sender: process.env.ARKESEL_SENDER_ID || 'OUSTED',
-        message,
-        recipients: [to],
-      }),
-    });
-
-    const data = await res.json();
-    if (data.status === 'success') {
-      console.log(`[USSD SMS] Sent to ${to}: ${data.data?.message || 'OK'}`);
-      return { success: true };
-    }
-
-    console.error('[USSD SMS] Arkesel error:', data);
-    return { success: false, error: data.message || 'SMS send failed' };
-  } catch (err) {
-    console.error('[USSD SMS] Network error:', err.message);
-    return { success: false, error: err.message };
-  }
 }
 
 // ─── MAIN HANDLER ────────────────────────────────────────────
@@ -151,7 +116,7 @@ export async function processUSSDPayment(reference, paystackData) {
   ].join('\n');
 
   if (smsTarget) {
-    const smsResult = await sendArkeselSMS(smsTarget, smsMessage);
+    const smsResult = await sendSMS(smsTarget, smsMessage);
     if (!smsResult.success) {
       console.warn(`[USSD SMS] Failed for ${smsTarget}:`, smsResult.error);
     }
