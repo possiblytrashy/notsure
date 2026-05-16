@@ -5,7 +5,7 @@ import crypto from 'crypto';
 
 export const runtime = 'nodejs';
 
-const PLATFORM_EMAIL = process.env.PLATFORM_EMAIL || 'payments@ousted.live';
+// Guest email is derived per-transaction from the MoMo phone number
 
 const MOMO = {
   '1': { label: 'MTN MoMo',     code: 'mtn' },
@@ -214,67 +214,17 @@ async function transition(session, input, msisdn) {
 
     const result = await initiatePayment(data, msisdn);
 
-    // Paystack approved immediately (pay_offline — MoMo prompt sent to phone)
-    if (result.success && result.paymentStatus === 'pay_offline') {
-      return {
-        end: true,
-        message: 'Payment request sent!\nCheck your ' + data.momo_label + ' phone for a prompt and enter your PIN to complete.\n\nYour ticket will be sent by SMS once confirmed.',
-      };
-    }
-
-    // Paystack requires OTP — collect it within the USSD session
-    if (result.success && result.paymentStatus === 'send_otp') {
-      return {
-        nextState: 'ENTER_OTP',
-        nextData: { ...data, ps_reference: result.reference },
-        message: 'Enter the OTP sent to your ' + data.momo_label + ' number to complete payment:\n0. Cancel',
-      };
-    }
-
-    // Paystack requires PIN entry via USSD prompt on their side (send_pin / pending)
-    if (result.success && (result.paymentStatus === 'send_pin' || result.paymentStatus === 'pending')) {
-      return {
-        end: true,
-        message: 'Payment initiated!\nApprove the ' + data.momo_label + ' prompt on your phone and enter your PIN.\n\nYour ticket will be sent by SMS once confirmed.',
-      };
-    }
-
-    // Unexpected success status
+    // All successful Paystack MoMo responses mean a prompt was pushed to the
+    // user's phone (pay_offline) or the network will handle it (send_pin/pending).
+    // We NEVER collect OTP inside a USSD session — the user approves on their phone.
     if (result.success) {
-      return {
-        end: true,
-        message: 'Payment initiated!\nComplete any prompt on your ' + data.momo_label + ' phone.\n\nYour ticket will be sent by SMS once confirmed.',
-      };
+      const promptMsg = (result.paymentStatus === 'pay_offline' || result.paymentStatus === 'send_pin')
+        ? 'A payment prompt has been sent to your ' + data.momo_label + ' number.\n\nEnter your PIN on your phone to complete.\n\nYour ticket will arrive by SMS once payment is confirmed.'
+        : 'Payment request sent to ' + data.momo_phone + '.\n\nApprove the ' + data.momo_label + ' prompt on your phone.\n\nYour ticket will arrive by SMS once confirmed.';
+      return { end: true, message: promptMsg };
     }
 
     return { end: true, message: 'Payment failed.\n' + result.error + '\n\nDial again to retry.' };
-  }
-
-  // OTP collection state
-  if (state === 'ENTER_OTP') {
-    if (input === '0') return { nextState: 'MAIN_MENU', nextData: {}, message: mainMenu('Payment cancelled.\n') };
-    if (!input || input.length < 4) {
-      return { nextState: 'ENTER_OTP', nextData: data, message: 'Invalid OTP.\nEnter the OTP sent to your phone:\n0. Cancel' };
-    }
-
-    const otpResult = await submitOTP(input, data.ps_reference);
-
-    if (otpResult.success) {
-      return {
-        end: true,
-        message: 'Payment confirmed!\nYour ticket will be sent by SMS shortly.\n\nRef: ' + data.ps_reference,
-      };
-    }
-
-    if (otpResult.retry) {
-      return {
-        nextState: 'ENTER_OTP',
-        nextData: data,
-        message: 'Wrong OTP. Try again:\n0. Cancel',
-      };
-    }
-
-    return { end: true, message: 'Payment failed.\n' + otpResult.error + '\n\nDial again to retry.' };
   }
 
   return { nextState: 'MAIN_MENU', nextData: {}, message: mainMenu() };
@@ -291,7 +241,7 @@ async function initiatePayment(data, msisdn) {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + process.env.PAYSTACK_SECRET_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        email: PLATFORM_EMAIL,
+        email: guestEmail,          // unique per customer — required for MoMo prompt routing
         amount: pesewas,
         currency: 'GHS',
         mobile_money: { phone: data.momo_phone, provider: data.momo_code },
@@ -340,36 +290,6 @@ async function initiatePayment(data, msisdn) {
   } catch (err) {
     console.error('[USSD] Payment error:', err.message);
     return { success: false, error: 'Network error. Please try again.' };
-  }
-}
-
-// ─── PAYSTACK OTP SUBMISSION ──────────────────────────────────
-async function submitOTP(otp, reference) {
-  try {
-    const res = await fetch('https://api.paystack.co/charge/submit_otp', {
-      method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + process.env.PAYSTACK_SECRET_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ otp, reference }),
-    });
-
-    const ps = await res.json();
-    console.log('[USSD] OTP submit response:', JSON.stringify(ps));
-
-    if (!ps.status) {
-      // Wrong OTP — let user retry
-      if (ps.message && ps.message.toLowerCase().includes('otp')) {
-        return { success: false, retry: true, error: ps.message };
-      }
-      return { success: false, retry: false, error: ps.message || 'OTP verification failed.' };
-    }
-
-    const paymentStatus = ps.data && ps.data.status;
-    // success / pay_offline both mean payment is proceeding — webhook will fire
-    return { success: true, paymentStatus };
-
-  } catch (err) {
-    console.error('[USSD] OTP submit error:', err.message);
-    return { success: false, retry: false, error: 'Network error. Try again.' };
   }
 }
 
