@@ -72,48 +72,64 @@ export async function POST(req) {
 
   console.log('[USSD] body:', JSON.stringify(body));
 
-  const { sessionID, userID, newSession, msisdn, userData = '', network = '' } = body;
+  // Arkesel may send sessionId (camelCase d) or sessionID (uppercase D) — accept both
+  const sessionID = body.sessionID || body.sessionId;
+  const { userID, newSession, msisdn, userData = '', network = '' } = body;
 
   if (!sessionID || !msisdn) {
+    console.error('[USSD] Missing sessionID or msisdn. Keys received:', Object.keys(body));
     return NextResponse.json({ message: 'Bad request', continueSession: false }, { status: 400 });
   }
 
   const input = String(userData).trim();
 
-  if (newSession === true || newSession === 'true') {
-    await sbDelete('ussd_sessions', { 'session_id': 'eq.' + sessionID });
-    await sbInsert('ussd_sessions', {
-      session_id: sessionID,
-      msisdn: msisdn,
-      network: network,
-      state: 'MAIN_MENU',
-      data: {},
+  try {
+    if (newSession === true || newSession === 'true') {
+      await sbDelete('ussd_sessions', { 'session_id': 'eq.' + sessionID });
+      await sbInsert('ussd_sessions', {
+        session_id: sessionID,
+        msisdn: msisdn,
+        network: network,
+        state: 'MAIN_MENU',
+        data: {},
+      });
+      return respond(sessionID, userID, msisdn, mainMenu(), true);
+    }
+
+    const sessResult = await sbSelect('ussd_sessions', { 'session_id': 'eq.' + sessionID, 'select': '*' }, true);
+    const sess = sessResult.data;
+
+    console.log('[USSD] session lookup:', sessionID, '→', sess ? ('state=' + sess.state) : 'NOT FOUND');
+
+    if (!sess) {
+      return respond(sessionID, userID, msisdn, 'Session expired.\n' + mainMenu(), true);
+    }
+
+    const session = { state: sess.state, data: sess.data || {} };
+    console.log('[USSD] transition: state=' + session.state + ' input=' + JSON.stringify(input));
+
+    const { nextState, nextData, message, end } = await transition(session, input, msisdn);
+
+    if (end || nextState === 'END') {
+      await sbDelete('ussd_sessions', { 'session_id': 'eq.' + sessionID });
+      return respond(sessionID, userID, msisdn, message, false);
+    }
+
+    const updateResult = await sbUpdate('ussd_sessions', { 'session_id': 'eq.' + sessionID }, {
+      state: nextState,
+      data: nextData,
+      updated_at: new Date().toISOString(),
     });
-    return respond(sessionID, userID, msisdn, mainMenu(), true);
+    if (updateResult.error) {
+      console.error('[USSD] sbUpdate failed:', updateResult.error);
+    }
+
+    return respond(sessionID, userID, msisdn, message, true);
+
+  } catch (err) {
+    console.error('[USSD] Unhandled error:', err.message, err.stack);
+    return respond(sessionID, userID, msisdn, 'An error occurred. Please dial again.', false);
   }
-
-  const sessResult = await sbSelect('ussd_sessions', { 'session_id': 'eq.' + sessionID, 'select': '*' }, true);
-  const sess = sessResult.data;
-
-  if (!sess) {
-    return respond(sessionID, userID, msisdn, 'Session expired.\n' + mainMenu(), true);
-  }
-
-  const session = { state: sess.state, data: sess.data || {} };
-  const { nextState, nextData, message, end } = await transition(session, input, msisdn);
-
-  if (end || nextState === 'END') {
-    await sbDelete('ussd_sessions', { 'session_id': 'eq.' + sessionID });
-    return respond(sessionID, userID, msisdn, message, false);
-  }
-
-  await sbUpdate('ussd_sessions', { 'session_id': 'eq.' + sessionID }, {
-    state: nextState,
-    data: nextData,
-    updated_at: new Date().toISOString(),
-  });
-
-  return respond(sessionID, userID, msisdn, message, true);
 }
 
 function respond(sessionID, userID, msisdn, message, continueSession) {
@@ -233,16 +249,24 @@ async function transition(session, input, msisdn) {
 // ─── PAYSTACK CHARGE ──────────────────────────────────────────
 async function initiatePayment(data, msisdn) {
   const reference = 'USSD-' + Date.now().toString(36).toUpperCase() + '-' + crypto.randomBytes(3).toString('hex').toUpperCase();
-  const pesewas = Math.round(data.total_amount * 100);
-  const guestEmail = 'ussd-' + data.momo_phone + '@ousted.live';
-
-  // Paystack GHS mobile_money expects local format: 0XXXXXXXXX
-  // data.momo_phone is stored as 233XXXXXXXXX — convert it
-  const paystackPhone = data.momo_phone.startsWith('233')
-    ? '0' + data.momo_phone.slice(3)
-    : data.momo_phone;
 
   try {
+    if (!data.momo_phone) {
+      console.error('[USSD] initiatePayment: momo_phone missing from session data', JSON.stringify(data));
+      return { success: false, error: 'Session data lost. Please dial again.' };
+    }
+
+    const pesewas = Math.round(data.total_amount * 100);
+    const guestEmail = 'ussd-' + data.momo_phone + '@ousted.live';
+
+    // Paystack GHS mobile_money expects local format: 0XXXXXXXXX
+    // data.momo_phone is stored as 233XXXXXXXXX — convert it
+    const paystackPhone = data.momo_phone.startsWith('233')
+      ? '0' + data.momo_phone.slice(3)
+      : data.momo_phone;
+
+    console.log('[USSD] initiatePayment: phone=' + paystackPhone + ' provider=' + data.momo_code + ' amount=' + pesewas);
+
     const res = await fetch('https://api.paystack.co/charge', {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + process.env.PAYSTACK_SECRET_KEY, 'Content-Type': 'application/json' },
