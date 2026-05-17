@@ -386,7 +386,7 @@ async function getEvents() {
   const result = await sbSelect('events', {
     'select': 'id,title,date,location',
     'status': 'eq.active',
-    'is_deleted': 'eq.false',
+    'is_deleted': 'neq.true',
     'date': 'gte.' + today,
     'order': 'date.asc',
     'limit': '8',
