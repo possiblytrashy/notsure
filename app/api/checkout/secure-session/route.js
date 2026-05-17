@@ -88,6 +88,7 @@ async function handleTicketPurchase(body) {
       custom_fields: [
         { display_name: 'Event',          variable_name: 'event_title',      value: tier.events.title },
         { display_name: 'Guest Name',     variable_name: 'guest_name',       value: safeName },
+        { display_name: 'Guest Phone',    variable_name: 'guest_phone',      value: safePhone },
         { display_name: 'Tier',           variable_name: 'tier_name',        value: tier.name },
         { display_name: 'Qty',            variable_name: 'quantity',         value: String(qty) },
         { display_name: 'Organizer Gets', variable_name: 'organizer_amount', value: `GHS ${(basePrice * qty).toFixed(2)}` },
