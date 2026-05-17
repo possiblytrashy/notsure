@@ -19,14 +19,18 @@ function generateTicketNumber() {
 // ─── ARKESEL SMS ──────────────────────────────────────────────
 async function sendSMS(phone, message) {
   const key = process.env.ARKESEL_API_KEY;
-  if (!key || !phone) return;
+  if (!key) { console.warn('[SMS] ARKESEL_API_KEY not set'); return { success: false, error: 'no_api_key' }; }
+  if (!phone) return { success: false, error: 'no_phone' };
   const p = String(phone).replace(/[\s\-()]/g, '');
   const e164 = /^233[2-9]\d{8}$/.test(p) ? '+' + p
     : /^0[2-9]\d{8}$/.test(p) ? '+233' + p.slice(1)
     : /^\+233[2-9]\d{8}$/.test(p) ? p : null;
-  if (!e164) return;
+  if (!e164) {
+    console.warn(`[SMS] Phone normalisation failed for: ${phone}`);
+    return { success: false, error: 'invalid_phone', raw: phone };
+  }
   try {
-    await fetch('https://sms.arkesel.com/api/v2/sms/send', {
+    const res = await fetch('https://sms.arkesel.com/api/v2/sms/send', {
       method: 'POST',
       headers: { 'api-key': key, 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -35,7 +39,13 @@ async function sendSMS(phone, message) {
         recipients: [e164],
       }),
     });
-  } catch (e) { console.error('[SMS] Failed:', e.message); }
+    const data = await res.json();
+    console.log(`[SMS] Arkesel response for ${e164}:`, JSON.stringify(data));
+    return data.status === 'success' ? { success: true, phone: e164 } : { success: false, error: data.message, raw: data };
+  } catch (e) {
+    console.error('[SMS] Network error:', e.message);
+    return { success: false, error: e.message };
+  }
 }
 
 export async function POST(req) {
@@ -189,11 +199,15 @@ async function processTicket(supabase, data, meta) {
 
 
   // ── SMS confirmation — sent for ALL purchases that include a phone number
-  const smsPhone = meta.ussd_phone || meta.guest_phone || null;
+  // Paystack may not preserve arbitrary metadata keys; fall back to custom_fields
+  const customFields = Array.isArray(meta.custom_fields) ? meta.custom_fields : [];
+  const phoneFromCustomFields = customFields.find(f => f.variable_name === 'guest_phone')?.value || null;
+  const smsPhone = meta.ussd_phone || meta.guest_phone || phoneFromCustomFields || null;
+  console.log(`[WEBHOOK] SMS check — ussd_phone=${meta.ussd_phone || 'none'} guest_phone=${meta.guest_phone || 'none'} custom_fields_phone=${phoneFromCustomFields || 'none'} resolved=${smsPhone || 'NONE'}`);
   if (smsPhone) {
     const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || 'https://ousted.live';
     const ticketNumbers = tickets.map(t => t.ticket_number).join(', ');
-    await sendSMS(smsPhone, [
+    const smsResult = await sendSMS(smsPhone, [
       'OUSTED: Payment confirmed!',
       `Event: ${meta.event_title || 'Your event'}`,
       `${tier?.name || meta.tier_name || 'Ticket'} x${qty}`,
@@ -201,6 +215,7 @@ async function processTicket(supabase, data, meta) {
       `Ref: ${data.reference}`,
       `${BASE_URL}/tickets/find?ref=${encodeURIComponent(data.reference)}`,
     ].join('\n'));
+    console.log(`[WEBHOOK] SMS dispatch result: ${JSON.stringify(smsResult)}`);
   }
 
   console.error(`[WEBHOOK] ✅ ${qty} ticket(s) created for ${guest_email} | ref: ${data.reference}`);
