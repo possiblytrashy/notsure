@@ -107,11 +107,12 @@ async function handleTicketPurchase(body) {
 }
 
 async function handleVotePurchase(body) {
-  const { candidate_id, vote_count, email, voter_name } = body;
+  const { candidate_id, vote_count, email, voter_name, voter_phone } = body;
   if (!candidate_id || !vote_count || vote_count < 1) return NextResponse.json({ error: 'Missing fields' }, { status: 400 });
 
   const votes = Math.max(1, Math.min(1000, parseInt(vote_count, 10)));
   const safeName = sanitize(voter_name || 'Anonymous', 100);
+  const safeVoterPhone = sanitize(voter_phone || '', 20);
   const voterEmail = isValidEmail(email) ? email.trim().toLowerCase() : 'anonymous@voter.ousted.live';
   const supabase = getSupabase();
 
@@ -141,13 +142,15 @@ async function handleVotePurchase(body) {
       competition_title: candidate.contests.competitions?.title,
       organizer_id: organizerId,
       vote_count: votes, voter_email: voterEmail, voter_name: safeName,
+      voter_phone: safeVoterPhone,
       vote_price: votePrice, buyer_price: buyerPricePerVote, platform_fee: platformFeePerVote,
       organizer_owes: parseFloat((votePrice * votes).toFixed(2)),
       reseller_owes: 0,
       custom_fields: [
-        { display_name: 'Voting For',   variable_name: 'candidate',    value: candidate.name },
-        { display_name: 'Votes',        variable_name: 'votes',        value: String(votes) },
-        { display_name: 'Platform Fee', variable_name: 'platform_fee', value: `GHS ${(platformFeePerVote * votes).toFixed(2)}` }
+        { display_name: 'Voting For',    variable_name: 'candidate',    value: candidate.name },
+        { display_name: 'Votes',         variable_name: 'votes',        value: String(votes) },
+        { display_name: 'Voter Phone',   variable_name: 'voter_phone',  value: safeVoterPhone },
+        { display_name: 'Platform Fee',  variable_name: 'platform_fee', value: `GHS ${(platformFeePerVote * votes).toFixed(2)}` }
       ]
     }
     // NO subaccount, NO split — 100% to platform Paystack account
