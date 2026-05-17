@@ -202,7 +202,9 @@ async function processTicket(supabase, data, meta) {
   // Paystack may not preserve arbitrary metadata keys; fall back to custom_fields
   const customFields = Array.isArray(meta.custom_fields) ? meta.custom_fields : [];
   const phoneFromCustomFields = customFields.find(f => f.variable_name === 'guest_phone')?.value || null;
-  const smsPhone = meta.ussd_phone || meta.guest_phone || phoneFromCustomFields || null;
+  const smsPhone = (meta.ussd_phone && String(meta.ussd_phone).trim()) ||
+                   (meta.guest_phone && String(meta.guest_phone).trim()) ||
+                   (phoneFromCustomFields && String(phoneFromCustomFields).trim()) || null;
   console.log(`[WEBHOOK] SMS check — ussd_phone=${meta.ussd_phone || 'none'} guest_phone=${meta.guest_phone || 'none'} custom_fields_phone=${phoneFromCustomFields || 'none'} resolved=${smsPhone || 'NONE'}`);
   if (smsPhone) {
     const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || 'https://ousted.live';
@@ -278,4 +280,23 @@ async function processVote(supabase, data, meta) {  // meta passed through for l
   }).catch(() => {});
 
   console.error(`[WEBHOOK] ✅ ${votes} vote(s) for ${candidate_name} | ref: ${data.reference}`);
+
+  // ── SMS confirmation for vote purchases ──────────────────────────────────
+  const customVoteFields = Array.isArray(meta.custom_fields) ? meta.custom_fields : [];
+  const phoneFromVoteFields = customVoteFields.find(f => f.variable_name === 'voter_phone')?.value || null;
+  const voteSmsPhone = (meta.voter_phone && String(meta.voter_phone).trim()) ||
+                       (phoneFromVoteFields && String(phoneFromVoteFields).trim()) || null;
+  console.log(`[WEBHOOK] Vote SMS check — voter_phone=${meta.voter_phone || 'none'} custom_fields_phone=${phoneFromVoteFields || 'none'} resolved=${voteSmsPhone || 'NONE'}`);
+  if (voteSmsPhone) {
+    const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || 'https://ousted.live';
+    const voteSmsResult = await sendSMS(voteSmsPhone, [
+      'OUSTED: Votes confirmed!',
+      `Voted for: ${candidate_name}`,
+      `Votes cast: ${votes}`,
+      `Contest: ${meta.contest_title || 'Contest'}`,
+      `Ref: ${data.reference}`,
+      `${BASE_URL}/voting`,
+    ].join('\n'));
+    console.log(`[WEBHOOK] Vote SMS dispatch result: ${JSON.stringify(voteSmsResult)}`);
+  }
 }
