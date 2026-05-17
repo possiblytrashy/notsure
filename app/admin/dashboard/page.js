@@ -6,7 +6,8 @@ import {
   LogOut, RefreshCcw, Check, Copy, DollarSign, TrendingUp,
   Users, Ticket, ChevronDown, ChevronRight, Search, Filter,
   CheckCircle2, Clock, AlertTriangle, Loader2, X, Download,
-  BarChart3, Calendar, ArrowUpRight, ShieldCheck, Zap
+  BarChart3, Calendar, ArrowUpRight, ShieldCheck, Zap,
+  MessageSquare, Phone, Send, CheckSquare, Square, PhoneOff
 } from 'lucide-react';
 
 /* ─── COPY BUTTON ─── */
@@ -139,8 +140,17 @@ export default function AdminDashboard() {
   const [typeFilter, setTypeFilter] = useState('all'); // all | ORGANIZER | RESELLER
   const [search, setSearch] = useState('');
   const [totals, setTotals] = useState({ collected: 0, owed_org: 0, owed_res: 0, platform: 0, pending_count: 0 });
-  const [tab, setTab] = useState('payouts'); // payouts | overview
+  const [tab, setTab] = useState('payouts'); // payouts | overview | sms
   const [eventBreakdown, setEventBreakdown] = useState([]);
+
+  // ── SMS TAB STATE ──
+  const [smsTickets, setSmsTickets] = useState([]);
+  const [smsLoading, setSmsLoading] = useState(false);
+  const [smsSearch, setSmsSearch] = useState('');
+  const [selectedRefs, setSelectedRefs] = useState(new Set());
+  const [smsSending, setSmsSending] = useState(false);
+  const [smsResult, setSmsResult] = useState(null);
+  const [smsFilter, setSmsFilter] = useState('all');
 
   const load = useCallback(async () => {
     // Get session token to send to our server-side API
@@ -355,7 +365,66 @@ export default function AdminDashboard() {
     })();
   }, [router, load]);
 
-  const markPaid = async (payoutId) => {
+  // ── SMS FUNCTIONS ──
+  const loadSmsTickets = async () => {
+    setSmsLoading(true);
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    try {
+      const res = await fetch('/api/admin/sms', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const { tickets } = await res.json();
+        setSmsTickets(tickets || []);
+      }
+    } catch (e) {
+      console.error('SMS load error:', e);
+    }
+    setSmsLoading(false);
+  };
+
+  const sendSmsToSelected = async (sendAll = false) => {
+    setSmsSending(true);
+    setSmsResult(null);
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    try {
+      const res = await fetch('/api/admin/sms', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({
+          sendAll,
+          references: sendAll ? [] : Array.from(selectedRefs)
+        })
+      });
+      const data = await res.json();
+      setSmsResult(data.results || null);
+      if (!sendAll) setSelectedRefs(new Set());
+    } catch (e) {
+      console.error('SMS send error:', e);
+    }
+    setSmsSending(false);
+  };
+
+  const toggleRef = (ref) => {
+    setSelectedRefs(prev => {
+      const next = new Set(prev);
+      next.has(ref) ? next.delete(ref) : next.add(ref);
+      return next;
+    });
+  };
+
+  const toggleAll = (refs) => {
+    setSelectedRefs(prev => {
+      const allSelected = refs.every(r => prev.has(r));
+      const next = new Set(prev);
+      refs.forEach(r => allSelected ? next.delete(r) : next.add(r));
+      return next;
+    });
+  };
+
+    const markPaid = async (payoutId) => {
     const payout = payouts.find(p => p.id === payoutId);
     if (!payout) return;
     const refs = payout.transactions.map(t => t.reference).filter(Boolean);
@@ -441,7 +510,7 @@ export default function AdminDashboard() {
 
         {/* Tabs */}
         <div style={{ display: 'flex', gap: 8, marginBottom: 18 }}>
-          {[['payouts', '💸 Payouts'], ['overview', '📊 By Event'], ['ussd', '📱 USSD']].map(([v, l]) => (
+          {[['payouts', '💸 Payouts'], ['overview', '📊 By Event'], ['ussd', '📱 USSD'], ['sms', '✉️ SMS']].map(([v, l]) => (
             <button key={v} onClick={() => setTab(v)} style={{ padding: '9px 18px', borderRadius: 20, border: 'none', background: tab === v ? '#0f172a' : '#fff', color: tab === v ? '#fff' : '#64748b', fontSize: 12, fontWeight: 900, cursor: 'pointer', boxShadow: tab === v ? '0 4px 14px rgba(0,0,0,.15)' : 'none' }}>{l}</button>
           ))}
         </div>
@@ -511,6 +580,133 @@ export default function AdminDashboard() {
                 </div>
               </div>
             ))}
+          </div>
+
+        ) : tab === 'sms' ? (
+
+          /* ── SMS TAB ── */
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
+              <h2 style={{ fontSize: 16, fontWeight: 950, margin: 0, color: '#0f172a' }}>Ticket SMS</h2>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button onClick={loadSmsTickets} disabled={smsLoading}
+                  style={{ background: '#f1f5f9', border: '1px solid #e2e8f0', color: '#475569', padding: '8px 14px', borderRadius: 12, fontWeight: 900, fontSize: 11, cursor: smsLoading ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <RefreshCcw size={12} style={{ animation: smsLoading ? 'spin .8s linear infinite' : 'none' }} />
+                  {smsLoading ? 'Loading...' : 'Load Tickets'}
+                </button>
+                <button onClick={() => sendSmsToSelected(false)}
+                  disabled={smsSending || selectedRefs.size === 0}
+                  style={{ background: selectedRefs.size > 0 ? 'linear-gradient(135deg,#0ea5e9,#0284c7)' : '#e2e8f0', border: 'none', color: selectedRefs.size > 0 ? '#fff' : '#94a3b8', padding: '8px 16px', borderRadius: 12, fontWeight: 900, fontSize: 11, cursor: selectedRefs.size > 0 && !smsSending ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {smsSending ? <Loader2 size={12} style={{ animation: 'spin .8s linear infinite' }} /> : <Send size={12} />}
+                  Send to Selected ({selectedRefs.size})
+                </button>
+                <button onClick={() => sendSmsToSelected(true)}
+                  disabled={smsSending || smsTickets.length === 0}
+                  style={{ background: smsSending || smsTickets.length === 0 ? '#e2e8f0' : 'linear-gradient(135deg,#0f172a,#334155)', border: 'none', color: smsSending || smsTickets.length === 0 ? '#94a3b8' : '#fff', padding: '8px 16px', borderRadius: 12, fontWeight: 900, fontSize: 11, cursor: !smsSending && smsTickets.length > 0 ? 'pointer' : 'not-allowed', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {smsSending ? <Loader2 size={12} style={{ animation: 'spin .8s linear infinite' }} /> : <MessageSquare size={12} />}
+                  Resend All SMS
+                </button>
+              </div>
+            </div>
+
+            {/* SMS Result Banner */}
+            {smsResult && (
+              <div style={{ background: '#f0fdf4', border: '1px solid #86efac', borderRadius: 16, padding: '14px 18px', marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <CheckCircle2 size={18} color="#22c55e" />
+                  <div>
+                    <p style={{ margin: '0 0 2px', fontWeight: 900, fontSize: 14, color: '#166534' }}>SMS Batch Complete</p>
+                    <p style={{ margin: 0, fontSize: 12, color: '#16a34a', fontWeight: 700 }}>
+                      {smsResult.sent} sent · {smsResult.skipped} skipped (no phone) · {smsResult.failed} failed
+                    </p>
+                  </div>
+                </div>
+                <button onClick={() => setSmsResult(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#86efac' }}><X size={14} /></button>
+              </div>
+            )}
+
+            {/* Filters + search */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {[['all','All'],['with_phone','📞 Has Phone'],['no_phone','🚫 No Phone']].map(([v,l]) => (
+                  <button key={v} onClick={() => setSmsFilter(v)}
+                    style={{ padding: '7px 12px', borderRadius: 20, border: 'none', background: smsFilter === v ? '#0f172a' : '#fff', color: smsFilter === v ? '#fff' : '#64748b', fontSize: 10, fontWeight: 900, cursor: 'pointer' }}>{l}</button>
+                ))}
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: '8px 12px', flex: 1, minWidth: 180 }}>
+                <Search size={12} color="#94a3b8" />
+                <input value={smsSearch} onChange={e => setSmsSearch(e.target.value)} placeholder="Search name, email, event..."
+                  style={{ background: 'none', border: 'none', outline: 'none', fontSize: 12, fontWeight: 600, flex: 1, color: '#0f172a' }} />
+                {smsSearch && <button onClick={() => setSmsSearch('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}><X size={12} /></button>}
+              </div>
+            </div>
+
+            {smsTickets.length === 0 && !smsLoading ? (
+              <div style={{ textAlign: 'center', padding: '50px 20px', background: '#fff', borderRadius: 20, border: '1px dashed #e2e8f0' }}>
+                <div style={{ fontSize: 36, marginBottom: 12 }}>✉️</div>
+                <p style={{ color: '#94a3b8', fontWeight: 800, margin: '0 0 12px' }}>No ticket data loaded yet</p>
+                <button onClick={loadSmsTickets} style={{ background: '#0f172a', color: '#fff', border: 'none', padding: '10px 20px', borderRadius: 12, fontWeight: 900, fontSize: 12, cursor: 'pointer' }}>Load Tickets</button>
+              </div>
+            ) : (() => {
+              const filteredSms = smsTickets.filter(t => {
+                const matchFilter = smsFilter === 'all' ? true : smsFilter === 'with_phone' ? t.has_phone : !t.has_phone;
+                const matchSearch = !smsSearch || [t.guest_name, t.guest_email, t.event_title].some(s => s?.toLowerCase().includes(smsSearch.toLowerCase()));
+                return matchFilter && matchSearch;
+              });
+              const visibleRefs = filteredSms.map(t => t.reference);
+              const allVisibleSelected = visibleRefs.length > 0 && visibleRefs.every(r => selectedRefs.has(r));
+              return (
+                <div>
+                  {/* Table header + select all */}
+                  <div style={{ background: '#fff', borderRadius: '16px 16px 0 0', border: '1px solid #e2e8f0', borderBottom: 'none', padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <button onClick={() => toggleAll(visibleRefs)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 900 }}>
+                      {allVisibleSelected ? <CheckSquare size={15} color="#0ea5e9" /> : <Square size={15} />}
+                      {allVisibleSelected ? 'Deselect All' : 'Select All'}
+                    </button>
+                    <span style={{ fontSize: 10, color: '#94a3b8', fontWeight: 800, marginLeft: 'auto' }}>
+                      {filteredSms.length} record{filteredSms.length !== 1 ? 's' : ''} · {filteredSms.filter(t => t.has_phone).length} with phone
+                    </span>
+                  </div>
+                  {/* Rows */}
+                  <div style={{ border: '1px solid #e2e8f0', borderTop: 'none', borderRadius: '0 0 16px 16px', overflow: 'hidden', maxHeight: 520, overflowY: 'auto' }}>
+                    {filteredSms.length === 0 ? (
+                      <div style={{ textAlign: 'center', padding: '40px 20px', background: '#fff' }}>
+                        <p style={{ color: '#94a3b8', fontWeight: 700, margin: 0 }}>No records match your filter</p>
+                      </div>
+                    ) : filteredSms.map((t, i) => {
+                      const isSelected = selectedRefs.has(t.reference);
+                      return (
+                        <div key={t.reference} onClick={() => t.has_phone && toggleRef(t.reference)}
+                          style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', background: isSelected ? '#f0f9ff' : i % 2 === 0 ? '#fff' : '#fafafa', borderBottom: '1px solid #f1f5f9', cursor: t.has_phone ? 'pointer' : 'default', transition: 'background .15s' }}>
+                          {/* Checkbox */}
+                          <div style={{ flexShrink: 0 }}>
+                            {t.has_phone
+                              ? (isSelected ? <CheckSquare size={16} color="#0ea5e9" /> : <Square size={16} color="#cbd5e1" />)
+                              : <PhoneOff size={15} color="#cbd5e1" />}
+                          </div>
+                          {/* Avatar */}
+                          <div style={{ width: 36, height: 36, borderRadius: 10, background: t.has_phone ? '#e0f2fe' : '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, flexShrink: 0 }}>
+                            {t.has_phone ? '📱' : '👤'}
+                          </div>
+                          {/* Info */}
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <p style={{ margin: '0 0 2px', fontSize: 13, fontWeight: 900, color: '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.guest_name}</p>
+                            <p style={{ margin: 0, fontSize: 11, color: '#64748b', fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.event_title} · {t.tier_name} x{t.quantity}</p>
+                          </div>
+                          {/* Contact + ref */}
+                          <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                            {t.has_phone
+                              ? <p style={{ margin: '0 0 2px', fontSize: 11, fontWeight: 900, color: '#0ea5e9', display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'flex-end' }}><Phone size={10} />{t.guest_phone}</p>
+                              : <p style={{ margin: '0 0 2px', fontSize: 10, fontWeight: 800, color: '#cbd5e1' }}>No phone</p>}
+                            <p style={{ margin: 0, fontSize: 10, color: '#94a3b8', fontWeight: 700, fontFamily: 'monospace' }}>{t.reference?.substring(0, 16)}…</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
 
         ) : (
