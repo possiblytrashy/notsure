@@ -188,14 +188,16 @@ async function processTicket(supabase, data, meta) {
   }).catch(() => {});
 
 
-  // ── SMS confirmation (USSD purchases + any purchase with a phone in metadata)
+  // ── SMS confirmation — sent for ALL purchases that include a phone number
   const smsPhone = meta.ussd_phone || meta.guest_phone || null;
   if (smsPhone) {
     const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || 'https://ousted.live';
+    const ticketNumbers = tickets.map(t => t.ticket_number).join(', ');
     await sendSMS(smsPhone, [
       'OUSTED: Payment confirmed!',
       `Event: ${meta.event_title || 'Your event'}`,
       `${tier?.name || meta.tier_name || 'Ticket'} x${qty}`,
+      `Ticket(s): ${ticketNumbers}`,
       `Ref: ${data.reference}`,
       `${BASE_URL}/tickets/find?ref=${encodeURIComponent(data.reference)}`,
     ].join('\n'));
