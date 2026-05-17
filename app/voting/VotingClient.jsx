@@ -1,11 +1,12 @@
 "use client";
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { supabase } from '../../lib/supabase';
-import { ArrowLeft, Search, Trophy, Crown, Share2, Plus, Minus, ChevronRight, Award, Check, RefreshCcw, AlertCircle, Mail, User, X, TrendingUp, ShieldCheck, Vote } from 'lucide-react';
+import { ArrowLeft, Search, Trophy, Crown, Share2, Plus, Minus, ChevronRight, Award, Check, RefreshCcw, AlertCircle, Mail, User, X, TrendingUp, ShieldCheck, Vote, Phone } from 'lucide-react';
 
 function VoterModal({ candidate, contest, onConfirm, onClose }) {
   const [email, setEmail] = useState('');
   const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
   const [qty, setQty] = useState(1);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -16,8 +17,9 @@ function VoterModal({ candidate, contest, onConfirm, onClose }) {
   const handleSubmit = async () => {
     if (!email.includes('@')) { setError('Valid email required'); return; }
     if (!name.trim()) { setError('Your name is required'); return; }
+    if (!phone.trim()) { setError('Phone number required for SMS receipt'); return; }
     setError(''); setLoading(true);
-    await onConfirm({ email, name, qty });
+    await onConfirm({ email, name, qty, phone: phone.trim() });
     setLoading(false);
   };
 
@@ -36,6 +38,7 @@ function VoterModal({ candidate, contest, onConfirm, onClose }) {
         <div style={{ display:'flex', flexDirection:'column', gap:'12px', marginBottom:'20px' }}>
           <div style={S.inputRow}><User size={16} color="#94a3b8"/><input value={name} onChange={e=>setName(e.target.value)} placeholder="Your full name" style={S.inlineInput}/></div>
           <div style={S.inputRow}><Mail size={16} color="#94a3b8"/><input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="Email for vote receipt" style={S.inlineInput}/></div>
+          <div style={S.inputRow}><Phone size={16} color="#94a3b8"/><input type="tel" value={phone} onChange={e=>setPhone(e.target.value)} placeholder="Phone number for SMS receipt" style={S.inlineInput}/></div>
         </div>
         <div style={S.qtyBox}>
           <div>
@@ -148,11 +151,11 @@ export default function VotingPortal() {
     }
   },[competitions, fetchData]);
 
-  const handleVoteConfirm = async ({ email, name, qty }) => {
+  const handleVoteConfirm = async ({ email, name, qty, phone }) => {
     if (!voterModal) return;
     const { candidate, contest } = voterModal;
     try {
-      const res = await fetch('/api/checkout/secure-session',{ method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ type:'VOTE', candidate_id:candidate.id, vote_count:qty, email, voter_name:name }) });
+      const res = await fetch('/api/checkout/secure-session',{ method:'POST', headers:{ 'Content-Type':'application/json' }, body:JSON.stringify({ type:'VOTE', candidate_id:candidate.id, vote_count:qty, email, voter_name:name, voter_phone: phone || '' }) });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error||'Payment failed');
       setVoterModal(null);
