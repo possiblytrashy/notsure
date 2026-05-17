@@ -146,6 +146,7 @@ export default function AdminDashboard() {
   // ── SMS TAB STATE ──
   const [smsTickets, setSmsTickets] = useState([]);
   const [smsLoading, setSmsLoading] = useState(false);
+  const [smsError, setSmsError] = useState(null);
   const [smsSearch, setSmsSearch] = useState('');
   const [selectedRefs, setSelectedRefs] = useState(new Set());
   const [smsSending, setSmsSending] = useState(false);
@@ -368,17 +369,21 @@ export default function AdminDashboard() {
   // ── SMS FUNCTIONS ──
   const loadSmsTickets = async () => {
     setSmsLoading(true);
+    setSmsError(null);
     const { data: { session } } = await supabase.auth.getSession();
     const token = session?.access_token;
     try {
       const res = await fetch('/api/admin/sms', {
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      if (res.ok) {
-        const { tickets } = await res.json();
-        setSmsTickets(tickets || []);
+      const json = await res.json();
+      if (!res.ok) {
+        setSmsError(json.error || `HTTP ${res.status}`);
+      } else {
+        setSmsTickets(json.tickets || []);
       }
     } catch (e) {
+      setSmsError(e.message);
       console.error('SMS load error:', e);
     }
     setSmsLoading(false);
@@ -424,7 +429,14 @@ export default function AdminDashboard() {
     });
   };
 
-    const markPaid = async (payoutId) => {
+    // Auto-load SMS tickets when tab switches to 'sms'
+  useEffect(() => {
+    if (tab === 'sms' && smsTickets.length === 0 && !smsLoading) {
+      loadSmsTickets();
+    }
+  }, [tab]);
+
+  const markPaid = async (payoutId) => {
     const payout = payouts.find(p => p.id === payoutId);
     if (!payout) return;
     const refs = payout.transactions.map(t => t.reference).filter(Boolean);
@@ -622,6 +634,20 @@ export default function AdminDashboard() {
                   </div>
                 </div>
                 <button onClick={() => setSmsResult(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#86efac' }}><X size={14} /></button>
+              </div>
+            )}
+
+            {/* Error banner */}
+            {smsError && (
+              <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 16, padding: '14px 18px', marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <AlertTriangle size={16} color="#ef4444" />
+                  <div>
+                    <p style={{ margin: '0 0 2px', fontWeight: 900, fontSize: 13, color: '#991b1b' }}>Failed to load tickets</p>
+                    <p style={{ margin: 0, fontSize: 12, color: '#b91c1c', fontWeight: 700 }}>{smsError}</p>
+                  </div>
+                </div>
+                <button onClick={() => setSmsError(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#fca5a5' }}><X size={14} /></button>
               </div>
             )}
 
