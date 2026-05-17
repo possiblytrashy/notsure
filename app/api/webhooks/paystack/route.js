@@ -1,11 +1,14 @@
-// OUSTED WEBHOOK ENGINE v3.0
+// OUSTED WEBHOOK ENGINE v3.1
 // Handles: charge.success for TICKET and VOTE purchases
-// USSD purchases are routed to processUSSDPayment when meta.channel === 'USSD'
-// Idempotent, timing-safe HMAC verification, records base_price correctly
+// USSD purchases (meta.channel === 'USSD') are routed to processUSSDPayment,
+//   which also marks ussd_pending complete and fires automations.
+// Web purchases go through processTicket.
+// Idempotent, timing-safe HMAC verification, records base_price correctly.
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
+import { processUSSDPayment } from '../../ussd/payment-callback/handler.js';
 
 export const runtime = 'nodejs';
 
@@ -15,11 +18,10 @@ function generateTicketNumber() {
   return `OT-${ts}-${rand}`;
 }
 
-
 // ─── ARKESEL SMS ──────────────────────────────────────────────
 async function sendSMS(phone, message) {
   const key = process.env.ARKESEL_API_KEY;
-  if (!key) { console.warn('[SMS] ARKESEL_API_KEY not set'); return { success: false, error: 'no_api_key' }; }
+  if (!key) { console.warn('[SMS] ARKESEL_API_KEY not set — skipping'); return { success: false, error: 'no_api_key' }; }
   if (!phone) return { success: false, error: 'no_phone' };
   const p = String(phone).replace(/[\s\-()]/g, '');
   const e164 = /^233[2-9]\d{8}$/.test(p) ? '+' + p
@@ -79,7 +81,7 @@ export async function POST(req) {
   // ── IDEMPOTENCY CHECK ────────────────────────────────────────────
   const { data: existing } = await supabase.from('webhook_log').select('id,status').eq('reference', reference).single().catch(() => ({ data: null }));
   if (existing?.status === 'processed') {
-    console.error(`[WEBHOOK] Already processed: ${reference}`);
+    console.log(`[WEBHOOK] Already processed: ${reference}`);
     return NextResponse.json({ ok: true });
   }
 
@@ -91,9 +93,14 @@ export async function POST(req) {
 
   try {
     if (meta.type === 'TICKET') {
-      // USSD and web purchases both go through processTicket
-      // (USSD pending record is updated separately by the ussd route)
-      await processTicket(supabase, event.data, meta);
+      if (meta.channel === 'USSD') {
+        // USSD path: dedicated handler updates ussd_pending, fires automations, sends SMS to MoMo number
+        console.log(`[WEBHOOK] Routing to processUSSDPayment (channel=USSD) | ref: ${reference}`);
+        await processUSSDPayment(reference, event.data);
+      } else {
+        // Web / standard purchase path
+        await processTicket(supabase, event.data, meta);
+      }
     } else if (meta.type === 'VOTE') {
       await processVote(supabase, event.data, meta);
     }
@@ -164,7 +171,6 @@ async function processTicket(supabase, data, meta) {
 
   // Update event tickets_sold counter
   await supabase.rpc('increment_event_tickets_sold', { event_id_param: event_id, amount: qty }).catch(() => {
-    // fallback direct update
     supabase.from('events').select('tickets_sold').eq('id', event_id).single().then(({ data: ev }) => {
       supabase.from('events').update({ tickets_sold: (ev?.tickets_sold || 0) + qty }).eq('id', event_id);
     });
@@ -197,15 +203,22 @@ async function processTicket(supabase, data, meta) {
     notes: `${qty}x ${tier?.name || 'ticket'} for ${guest_email}`
   }).catch(() => {});
 
-
-  // ── SMS confirmation — sent for ALL purchases that include a phone number
-  // Paystack may not preserve arbitrary metadata keys; fall back to custom_fields
+  // ── SMS CONFIRMATION ──────────────────────────────────────────
+  // Priority order for phone resolution:
+  //   1. meta.guest_phone — set directly by checkout in metadata root
+  //   2. custom_fields guest_phone — survives Paystack metadata sanitisation
+  //   3. data.customer.phone — Paystack's own customer object, most reliable
   const customFields = Array.isArray(meta.custom_fields) ? meta.custom_fields : [];
   const phoneFromCustomFields = customFields.find(f => f.variable_name === 'guest_phone')?.value || null;
-  const smsPhone = (meta.ussd_phone && String(meta.ussd_phone).trim()) ||
-                   (meta.guest_phone && String(meta.guest_phone).trim()) ||
-                   (phoneFromCustomFields && String(phoneFromCustomFields).trim()) || null;
-  console.log(`[WEBHOOK] SMS check — ussd_phone=${meta.ussd_phone || 'none'} guest_phone=${meta.guest_phone || 'none'} custom_fields_phone=${phoneFromCustomFields || 'none'} resolved=${smsPhone || 'NONE'}`);
+  const phoneFromCustomer = data.customer?.phone ? String(data.customer.phone).trim() : null;
+  const smsPhone =
+    (meta.guest_phone && String(meta.guest_phone).trim()) ||
+    (phoneFromCustomFields && String(phoneFromCustomFields).trim()) ||
+    phoneFromCustomer ||
+    null;
+
+  console.log(`[WEBHOOK] SMS check — guest_phone=${meta.guest_phone || 'none'} | custom_fields=${phoneFromCustomFields || 'none'} | customer.phone=${phoneFromCustomer || 'none'} → resolved=${smsPhone || 'NONE'}`);
+
   if (smsPhone) {
     const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || 'https://ousted.live';
     const ticketNumbers = tickets.map(t => t.ticket_number).join(', ');
@@ -217,13 +230,15 @@ async function processTicket(supabase, data, meta) {
       `Ref: ${data.reference}`,
       `${BASE_URL}/tickets/find?ref=${encodeURIComponent(data.reference)}`,
     ].join('\n'));
-    console.log(`[WEBHOOK] SMS dispatch result: ${JSON.stringify(smsResult)}`);
+    console.log(`[WEBHOOK] SMS result: ${JSON.stringify(smsResult)}`);
+  } else {
+    console.warn(`[WEBHOOK] No phone resolved for ${guest_email} — SMS skipped`);
   }
 
-  console.error(`[WEBHOOK] ✅ ${qty} ticket(s) created for ${guest_email} | ref: ${data.reference}`);
+  console.log(`[WEBHOOK] ✅ ${qty} ticket(s) created for ${guest_email} | ref: ${data.reference}`);
 }
 
-async function processVote(supabase, data, meta) {  // meta passed through for ledger
+async function processVote(supabase, data, meta) {
   const {
     candidate_id, candidate_name, contest_id,
     vote_count, voter_email, voter_name,
@@ -279,14 +294,20 @@ async function processVote(supabase, data, meta) {  // meta passed through for l
     notes: `${votes} vote(s) for ${candidate_name}`
   }).catch(() => {});
 
-  console.error(`[WEBHOOK] ✅ ${votes} vote(s) for ${candidate_name} | ref: ${data.reference}`);
+  console.log(`[WEBHOOK] ✅ ${votes} vote(s) for ${candidate_name} | ref: ${data.reference}`);
 
-  // ── SMS confirmation for vote purchases ──────────────────────────────────
+  // ── SMS CONFIRMATION FOR VOTES ───────────────────────────────
   const customVoteFields = Array.isArray(meta.custom_fields) ? meta.custom_fields : [];
   const phoneFromVoteFields = customVoteFields.find(f => f.variable_name === 'voter_phone')?.value || null;
-  const voteSmsPhone = (meta.voter_phone && String(meta.voter_phone).trim()) ||
-                       (phoneFromVoteFields && String(phoneFromVoteFields).trim()) || null;
-  console.log(`[WEBHOOK] Vote SMS check — voter_phone=${meta.voter_phone || 'none'} custom_fields_phone=${phoneFromVoteFields || 'none'} resolved=${voteSmsPhone || 'NONE'}`);
+  const phoneFromCustomer = data.customer?.phone ? String(data.customer.phone).trim() : null;
+  const voteSmsPhone =
+    (meta.voter_phone && String(meta.voter_phone).trim()) ||
+    (phoneFromVoteFields && String(phoneFromVoteFields).trim()) ||
+    phoneFromCustomer ||
+    null;
+
+  console.log(`[WEBHOOK] Vote SMS — voter_phone=${meta.voter_phone || 'none'} | custom_fields=${phoneFromVoteFields || 'none'} | customer.phone=${phoneFromCustomer || 'none'} → resolved=${voteSmsPhone || 'NONE'}`);
+
   if (voteSmsPhone) {
     const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || 'https://ousted.live';
     const voteSmsResult = await sendSMS(voteSmsPhone, [
@@ -297,6 +318,6 @@ async function processVote(supabase, data, meta) {  // meta passed through for l
       `Ref: ${data.reference}`,
       `${BASE_URL}/voting`,
     ].join('\n'));
-    console.log(`[WEBHOOK] Vote SMS dispatch result: ${JSON.stringify(voteSmsResult)}`);
+    console.log(`[WEBHOOK] Vote SMS result: ${JSON.stringify(voteSmsResult)}`);
   }
 }
