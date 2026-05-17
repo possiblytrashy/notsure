@@ -285,7 +285,6 @@ async function initiatePayment(data, msisdn) {
   const reference = 'USSD-' + Date.now().toString(36).toUpperCase() + '-' + crypto.randomBytes(3).toString('hex').toUpperCase();
   const pesewas = Math.round(data.total_amount * 100);
   const guestEmail = 'ussd-' + data.momo_phone + '@ousted.live';
-    // Paystack GHS expects local format 0XXXXXXXXX not 233XXXXXXXXX
     const paystackPhone = data.momo_phone.startsWith('233') ? '0' + data.momo_phone.slice(3) : data.momo_phone;
 
   try {
@@ -293,7 +292,7 @@ async function initiatePayment(data, msisdn) {
       method: 'POST',
       headers: { 'Authorization': 'Bearer ' + process.env.PAYSTACK_SECRET_KEY, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        email: guestEmail, // was PLATFORM_EMAIL — unique per customer required for MoMo routing
+        email: guestEmail,
         amount: pesewas,
         currency: 'GHS',
         mobile_money: { phone: paystackPhone, provider: data.momo_code },
@@ -321,11 +320,10 @@ async function initiatePayment(data, msisdn) {
 
     const paymentStatus = ps.data && ps.data.status;
 
-    // If Paystack accepted the request but the charge itself failed, surface the error
+    // Paystack can return status:true but data.status:'failed' (wrong number, provider down, etc.)
     if (paymentStatus === 'failed') {
-      const errMsg = (ps.data && ps.data.message) || ps.message || 'Charge failed.';
-      console.error('[USSD] Charge failed:', errMsg);
-      return { success: false, error: errMsg };
+      const why = (ps.data && ps.data.message) || ps.message || 'Charge was rejected.';
+      return { success: false, error: why };
     }
 
     // Store pending record regardless of OTP requirement
