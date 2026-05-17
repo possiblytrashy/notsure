@@ -115,6 +115,7 @@ export default function EventPage() {
   const [user, setUser] = useState(null);
   const [guestName, setGuestName] = useState('');
   const [guestEmail, setGuestEmail] = useState('');
+  const [guestPhone, setGuestPhone] = useState('');
   const [currentImg, setCurrentImg] = useState(0);
   const [selectedTier, setSelectedTier] = useState(null);
   const [quantity, setQuantity] = useState(1);
@@ -294,7 +295,7 @@ export default function EventPage() {
     try {
       const res = await fetch('/api/checkout/secure-session', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ event_id: id, tier_id: selectedTier, email: guestEmail.trim().toLowerCase(), guest_name: guestName.trim() || 'Guest', reseller_code: refCode || 'DIRECT', quantity: quantity || 1 })
+        body: JSON.stringify({ event_id: id, tier_id: selectedTier, email: guestEmail.trim().toLowerCase(), guest_name: guestName.trim() || 'Guest', guest_phone: guestPhone.trim() || '', reseller_code: refCode || 'DIRECT', quantity: quantity || 1 })
       });
       const data = await res.json();
       if (!res.ok || !data.authorization_url) { alert(`Error: ${data.error || 'Payment initialization failed'}`); setIsProcessing(false); return; }
@@ -487,6 +488,9 @@ export default function EventPage() {
               </div>
               <div style={{ background: '#f1f5f9', borderRadius: '16px', padding: '14px 18px', display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '22px' }}>
                 <Mail size={16} color="#94a3b8" /><input type="email" style={{ background: 'none', border: 'none', outline: 'none', flex: 1, fontSize: '14px', fontWeight: 600 }} placeholder="Email Address" value={guestEmail} onChange={e => setGuestEmail(e.target.value)} required />
+              </div>
+              <div style={{ background: '#f8fafc', borderRadius: '14px', padding: '14px 16px', display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
+                <Phone size={16} color="#94a3b8" /><input type="tel" style={{ background: 'none', border: 'none', outline: 'none', flex: 1, fontSize: '14px', fontWeight: 600 }} placeholder="Phone Number (for ticket SMS)" value={guestPhone} onChange={e => setGuestPhone(e.target.value)} />
               </div>
 
               <h3 style={{ fontSize: '13px', fontWeight: 900, marginBottom: '14px', color: '#0f172a' }}>2. CHOOSE YOUR TIER</h3>
