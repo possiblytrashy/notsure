@@ -15,6 +15,29 @@ function generateTicketNumber() {
   return `OT-${ts}-${rand}`;
 }
 
+
+// ─── ARKESEL SMS ──────────────────────────────────────────────
+async function sendSMS(phone, message) {
+  const key = process.env.ARKESEL_API_KEY;
+  if (!key || !phone) return;
+  const p = String(phone).replace(/[\s\-()]/g, '');
+  const e164 = /^233[2-9]\d{8}$/.test(p) ? '+' + p
+    : /^0[2-9]\d{8}$/.test(p) ? '+233' + p.slice(1)
+    : /^\+233[2-9]\d{8}$/.test(p) ? p : null;
+  if (!e164) return;
+  try {
+    await fetch('https://sms.arkesel.com/api/v2/sms/send', {
+      method: 'POST',
+      headers: { 'api-key': key, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        sender: process.env.ARKESEL_SENDER_ID || 'OUSTED',
+        message,
+        recipients: [e164],
+      }),
+    });
+  } catch (e) { console.error('[SMS] Failed:', e.message); }
+}
+
 export async function POST(req) {
   const body = await req.text();
   const signature = req.headers.get('x-paystack-signature') || '';
@@ -163,6 +186,20 @@ async function processTicket(supabase, data, meta) {
     status: 'pending',
     notes: `${qty}x ${tier?.name || 'ticket'} for ${guest_email}`
   }).catch(() => {});
+
+
+  // ── SMS confirmation (USSD purchases + any purchase with a phone in metadata)
+  const smsPhone = meta.ussd_phone || meta.guest_phone || null;
+  if (smsPhone) {
+    const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || 'https://ousted.live';
+    await sendSMS(smsPhone, [
+      'OUSTED: Payment confirmed!',
+      `Event: ${meta.event_title || 'Your event'}`,
+      `${tier?.name || meta.tier_name || 'Ticket'} x${qty}`,
+      `Ref: ${data.reference}`,
+      `${BASE_URL}/tickets/find?ref=${encodeURIComponent(data.reference)}`,
+    ].join('\n'));
+  }
 
   console.error(`[WEBHOOK] ✅ ${qty} ticket(s) created for ${guest_email} | ref: ${data.reference}`);
 }
