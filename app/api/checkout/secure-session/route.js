@@ -34,13 +34,14 @@ export async function POST(req) {
 }
 
 async function handleTicketPurchase(body) {
-  const { event_id, tier_id, email, guest_name, reseller_code, quantity = 1 } = body;
+  const { event_id, tier_id, email, guest_name, guest_phone, reseller_code, quantity = 1 } = body;
   if (!isValidEmail(email)) return NextResponse.json({ error: 'Valid email required' }, { status: 400 });
   if (!tier_id || !event_id) return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
 
   const qty = Math.max(1, Math.min(10, parseInt(quantity, 10) || 1));
   const normalizedEmail = email.trim().toLowerCase();
   const safeName = sanitize(guest_name || 'Guest', 100);
+  const safePhone = sanitize(guest_phone || '', 20);
   const safeCode = sanitize(reseller_code || 'DIRECT', 50);
   const supabase = getSupabase();
 
@@ -77,7 +78,7 @@ async function handleTicketPurchase(body) {
     metadata: {
       type: 'TICKET', event_id, tier_id, tier_name: tier.name,
       event_title: tier.events.title, organizer_id: tier.events.organizer_id,
-      guest_email: normalizedEmail, guest_name: safeName,
+      guest_email: normalizedEmail, guest_name: safeName, guest_phone: safePhone,
       reseller_code: safeCode, event_reseller_id: resellerData?.id || null,
       is_reseller_purchase: isResellerPurchase,
       base_price: basePrice, buyer_price: buyerPricePerTicket,
