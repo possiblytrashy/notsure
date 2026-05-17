@@ -6,7 +6,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
-import { sendSMS } from '../../../../lib/sms.js';
 
 export const runtime = 'nodejs';
 
@@ -47,7 +46,7 @@ export async function POST(req) {
   // ── IDEMPOTENCY CHECK ────────────────────────────────────────────
   const { data: existing } = await supabase.from('webhook_log').select('id,status').eq('reference', reference).single().catch(() => ({ data: null }));
   if (existing?.status === 'processed') {
-    console.log(`[WEBHOOK] Already processed: ${reference}`);
+    console.error(`[WEBHOOK] Already processed: ${reference}`);
     return NextResponse.json({ ok: true });
   }
 
@@ -58,11 +57,9 @@ export async function POST(req) {
   const startTime = Date.now();
 
   try {
-    if (meta.type === 'TICKET' && meta.channel === 'USSD') {
-      // USSD ticket purchase — use dedicated handler that also sends SMS
-      const { processUSSDPayment } = await import('../../ussd/payment-callback/handler.js');
-      await processUSSDPayment(event.data.reference, event.data);
-    } else if (meta.type === 'TICKET') {
+    if (meta.type === 'TICKET') {
+      // USSD and web purchases both go through processTicket
+      // (USSD pending record is updated separately by the ussd route)
       await processTicket(supabase, event.data, meta);
     } else if (meta.type === 'VOTE') {
       await processVote(supabase, event.data, meta);
@@ -167,25 +164,7 @@ async function processTicket(supabase, data, meta) {
     notes: `${qty}x ${tier?.name || 'ticket'} for ${guest_email}`
   }).catch(() => {});
 
-  console.log(`[WEBHOOK] ✅ ${qty} ticket(s) created for ${guest_email} | ref: ${data.reference}`);
-
-  // ── SMS NOTIFICATION (Arkesel) ───────────────────────────────────
-  const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || 'https://ousted.live';
-  const ticketUrl = `${BASE_URL}/tickets/find?ref=${encodeURIComponent(data.reference)}`;
-  // Phone may be in metadata directly, or encoded in the USSD guest email pattern
-  const rawPhone = meta.guest_phone || meta.ussd_phone || null;
-  const emailPhone = guest_email.match(/^ussd-(\d{9,15})@/)?.[1] || null;
-  const smsPhone = rawPhone || emailPhone;
-  if (smsPhone) {
-    const smsBody = [
-      `OUSTED Ticket Confirmed!`,
-      `Event: ${meta.event_title || 'Your event'}`,
-      `Tier: ${meta.tier_name || 'General'} x${qty}`,
-      `Ref: ${data.reference}`,
-      `View: ${ticketUrl}`,
-    ].join('\n');
-    await sendSMS(smsPhone, smsBody).catch(() => {});
-  }
+  console.error(`[WEBHOOK] ✅ ${qty} ticket(s) created for ${guest_email} | ref: ${data.reference}`);
 }
 
 async function processVote(supabase, data, meta) {  // meta passed through for ledger
@@ -244,5 +223,5 @@ async function processVote(supabase, data, meta) {  // meta passed through for l
     notes: `${votes} vote(s) for ${candidate_name}`
   }).catch(() => {});
 
-  console.log(`[WEBHOOK] ✅ ${votes} vote(s) for ${candidate_name} | ref: ${data.reference}`);
+  console.error(`[WEBHOOK] ✅ ${votes} vote(s) for ${candidate_name} | ref: ${data.reference}`);
 }
