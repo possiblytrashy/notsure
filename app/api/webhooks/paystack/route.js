@@ -111,13 +111,14 @@ export async function POST(req) {
 
   const { reference } = event.data;
 
-  // Idempotency check
+  // Idempotency check — maybeSingle() returns { data: null } when no row exists
+  // instead of throwing PGRST116, so no .catch() wrapper needed.
   const { data: existing } = await supabase
     .from('webhook_log')
     .select('id,status')
     .eq('reference', reference)
-    .single()
-    .catch(() => ({ data: null }));
+    .maybeSingle();
+
   if (existing?.status === 'processed') {
     console.log(`[WEBHOOK] Already processed: ${reference}`);
     return NextResponse.json({ ok: true });
@@ -176,11 +177,13 @@ async function processTicket(supabase, data, meta) {
 
   const qty = Math.max(1, Math.min(10, parseInt(quantity, 10) || 1));
 
+  // maybeSingle() returns { data: null } when the tier doesn't exist
+  // instead of throwing, keeping behaviour consistent with the rest of the file.
   const { data: tier } = await supabase
     .from('ticket_tiers')
     .select('max_quantity,name')
     .eq('id', tier_id)
-    .single();
+    .maybeSingle();
 
   if (tier?.max_quantity > 0) {
     const { count } = await supabase
@@ -246,12 +249,15 @@ async function processTicket(supabase, data, meta) {
   // Update reseller stats
   if (is_reseller_purchase && event_reseller_id) {
     const earned = (reseller_commission || 0) * qty;
+
+    // maybeSingle() returns { data: null } when no reseller row exists yet,
+    // avoiding the PGRST116 error that .single().catch() was masking before.
     const { data: er } = await supabase
       .from('event_resellers')
       .select('tickets_sold,total_earned')
       .eq('id', event_reseller_id)
-      .single()
-      .catch(() => ({ data: null }));
+      .maybeSingle();
+
     await supabase.from('event_resellers').update({
       tickets_sold: (er?.tickets_sold || 0) + qty,
       total_earned: parseFloat(((er?.total_earned || 0) + earned).toFixed(2)),
