@@ -839,7 +839,7 @@ export default function CreateEvent() {
         </div>
         <div>
            <p style={{ margin: 0, fontSize: '10px', fontWeight: '900', color: '#94a3b8' }}>SELECTED COORDINATES</p>
-           <p style={{ margin: 0, fontSize: '13px', fontWeight: '800', color: '#0f172a' }}>{eventData.lat.toFixed(5)}, {eventData.lng.toFixed(5)}</p>
+           <p style={{ margin: 0, fontSize: '13px', fontWeight: '800', color: '#0f172a' }}>{eventData.lat != null ? eventData.lat.toFixed(5) : '—'}, {eventData.lng != null ? eventData.lng.toFixed(5) : '—'}</p>
         </div>
      </div>
      <p style={{ margin: 0, fontSize: '12px', color: '#64748b', fontWeight: '600' }}>
