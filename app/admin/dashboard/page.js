@@ -142,6 +142,7 @@ export default function AdminDashboard() {
   const [totals, setTotals] = useState({ collected: 0, owed_org: 0, owed_res: 0, platform: 0, pending_count: 0 });
   const [tab, setTab] = useState('payouts'); // payouts | overview | sms
   const [eventBreakdown, setEventBreakdown] = useState([]);
+  const [ussdPending, setUssdPending] = useState([]);
 
   // ── SMS TAB STATE ──
   const [smsTickets, setSmsTickets] = useState([]);
@@ -168,7 +169,8 @@ export default function AdminDashboard() {
       return;
     }
 
-    const { tickets, votes, organizers, resellerLinks, ledger, events, candidates } = await res.json();
+    const { tickets, votes, organizers, resellerLinks, ledger, events, candidates, ussdPending: ussdData } = await res.json();
+    setUssdPending(ussdData || []);
 
     // Build lookup maps
     const eventMap = {};
