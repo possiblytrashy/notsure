@@ -238,13 +238,20 @@ async function processTicket(supabase, data, meta) {
   if (insertError) throw insertError;
 
   // Update event tickets_sold counter
-  await supabase
-    .rpc('increment_event_tickets_sold', { event_id_param: event_id, amount: qty })
-    .catch(() => {
-      supabase.from('events').select('tickets_sold').eq('id', event_id).single().then(({ data: ev }) => {
-        supabase.from('events').update({ tickets_sold: (ev?.tickets_sold || 0) + qty }).eq('id', event_id);
-      });
-    });
+  const { error: rpcTicketError } = await supabase
+    .rpc('increment_event_tickets_sold', { event_id_param: event_id, amount: qty });
+  if (rpcTicketError) {
+    const { data: ev } = await supabase
+      .from('events')
+      .select('tickets_sold')
+      .eq('id', event_id)
+      .maybeSingle();
+    await supabase
+      .from('events')
+      .update({ tickets_sold: (ev?.tickets_sold || 0) + qty })
+      .eq('id', event_id)
+      .catch(() => {});
+  }
 
   // Update reseller stats
   if (is_reseller_purchase && event_reseller_id) {
@@ -346,8 +353,16 @@ async function processVote(supabase, data, meta) {
     p_vote_increment: votes,
   });
   if (rpcError) {
-    const { data: cand } = await supabase.from('candidates').select('vote_count').eq('id', candidate_id).single();
-    await supabase.from('candidates').update({ vote_count: (cand?.vote_count || 0) + votes }).eq('id', candidate_id);
+    const { data: cand } = await supabase
+      .from('candidates')
+      .select('vote_count')
+      .eq('id', candidate_id)
+      .maybeSingle();
+    await supabase
+      .from('candidates')
+      .update({ vote_count: (cand?.vote_count || 0) + votes })
+      .eq('id', candidate_id)
+      .catch(() => {});
   }
 
   const voteOrgOwes = meta.organizer_owes || (vote_price * votes) || 0;
