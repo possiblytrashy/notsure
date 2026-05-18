@@ -1,9 +1,13 @@
-// OUSTED WEBHOOK ENGINE v3.1
+// OUSTED WEBHOOK ENGINE v3.2
 // Handles: charge.success for TICKET and VOTE purchases
-// USSD purchases (meta.channel === 'USSD') are routed to processUSSDPayment,
-//   which also marks ussd_pending complete and fires automations.
+// USSD purchases (meta.channel === 'USSD') are routed to processUSSDPayment.
 // Web purchases go through processTicket.
-// Idempotent, timing-safe HMAC verification, records base_price correctly.
+// Idempotent, timing-safe HMAC verification.
+//
+// v3.2 changes:
+//   - guest_phone saved directly on every ticket row (no more digging through webhook_log)
+//   - Every SMS attempt (sent / failed / skipped) logged to sms_log table
+//   - Single shared sendSMS() + logSMS() helpers — no more inline duplicates
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
@@ -13,49 +17,78 @@ import { processUSSDPayment } from '../../ussd/payment-callback/handler.js';
 export const runtime = 'nodejs';
 
 function generateTicketNumber() {
-  const ts = Date.now().toString(36).toUpperCase();
+  const ts   = Date.now().toString(36).toUpperCase();
   const rand = Math.random().toString(36).substring(2, 8).toUpperCase();
   return `OT-${ts}-${rand}`;
 }
 
-// ─── ARKESEL SMS ──────────────────────────────────────────────
+// ─── SMS HELPERS ──────────────────────────────────────────────
+function normalisePhone(input) {
+  if (!input) return null;
+  const p = String(input).replace(/[\s\-()+]/g, '');
+  if (/^0[2-9]\d{8}$/.test(p))     return '+233' + p.slice(1);
+  if (/^233[2-9]\d{8}$/.test(p))   return '+' + p;
+  if (/^\+233[2-9]\d{8}$/.test(p)) return p;
+  return null;
+}
+
 async function sendSMS(phone, message) {
-  const key = process.env.ARKESEL_API_KEY;
-  if (!key) { console.warn('[SMS] ARKESEL_API_KEY not set — skipping'); return { success: false, error: 'no_api_key' }; }
-  if (!phone) return { success: false, error: 'no_phone' };
-  const p = String(phone).replace(/[\s\-()]/g, '');
-  const e164 = /^233[2-9]\d{8}$/.test(p) ? '+' + p
-    : /^0[2-9]\d{8}$/.test(p) ? '+233' + p.slice(1)
-    : /^\+233[2-9]\d{8}$/.test(p) ? p : null;
+  const apiKey   = process.env.ARKESEL_API_KEY;
+  const senderId = process.env.ARKESEL_SENDER_ID || 'OUSTED';
+
+  if (!apiKey) {
+    console.warn('[SMS] ARKESEL_API_KEY not set — skipping');
+    return { success: false, error: 'no_api_key' };
+  }
+
+  const e164 = normalisePhone(phone);
   if (!e164) {
-    console.warn(`[SMS] Phone normalisation failed for: ${phone}`);
+    console.warn(`[SMS] Phone normalisation failed: ${phone}`);
     return { success: false, error: 'invalid_phone', raw: phone };
   }
+
   try {
     const res = await fetch('https://sms.arkesel.com/api/v2/sms/send', {
       method: 'POST',
-      headers: { 'api-key': key, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sender: process.env.ARKESEL_SENDER_ID || 'OUSTED',
-        message,
-        recipients: [e164],
-      }),
+      headers: { 'api-key': apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sender: senderId, message, recipients: [e164] }),
     });
     const data = await res.json();
     console.log(`[SMS] Arkesel response for ${e164}:`, JSON.stringify(data));
-    return data.status === 'success' ? { success: true, phone: e164 } : { success: false, error: data.message, raw: data };
+    return data.status === 'success'
+      ? { success: true, phone: e164 }
+      : { success: false, error: data.message, raw: data, phone: e164 };
   } catch (e) {
     console.error('[SMS] Network error:', e.message);
     return { success: false, error: e.message };
   }
 }
 
+// Log every SMS attempt to sms_log so admins can audit and resend knows history.
+// Upsert on (reference, phone) so replaying a webhook never creates duplicate rows.
+async function logSMS(supabase, { reference, phone, message, result, channel = 'web' }) {
+  const e164 = normalisePhone(phone) || phone || 'unknown';
+  await supabase.from('sms_log').upsert({
+    reference,
+    phone:   e164,
+    message,
+    status:  result.success ? 'sent'   : 'failed',
+    error:   result.success ? null      : (result.error || 'unknown'),
+    channel,
+  }, { onConflict: 'reference,phone' }).catch(err =>
+    console.warn('[SMS] Failed to write sms_log:', err.message)
+  );
+}
+
+// ─── WEBHOOK ENTRY POINT ──────────────────────────────────────
 export async function POST(req) {
-  const body = await req.text();
+  const body      = await req.text();
   const signature = req.headers.get('x-paystack-signature') || '';
 
-  // ── TIMING-SAFE HMAC VERIFICATION ───────────────────────────────
-  const expected = crypto.createHmac('sha512', process.env.PAYSTACK_SECRET_KEY || '').update(body).digest('hex');
+  const expected = crypto
+    .createHmac('sha512', process.env.PAYSTACK_SECRET_KEY || '')
+    .update(body)
+    .digest('hex');
   try {
     if (!crypto.timingSafeEqual(Buffer.from(signature, 'hex'), Buffer.from(expected, 'hex'))) {
       console.error('[WEBHOOK] Invalid signature');
@@ -78,246 +111,281 @@ export async function POST(req) {
 
   const { reference } = event.data;
 
-  // ── IDEMPOTENCY CHECK ────────────────────────────────────────────
-  const { data: existing } = await supabase.from('webhook_log').select('id,status').eq('reference', reference).single().catch(() => ({ data: null }));
+  // Idempotency check
+  const { data: existing } = await supabase
+    .from('webhook_log')
+    .select('id,status')
+    .eq('reference', reference)
+    .single()
+    .catch(() => ({ data: null }));
   if (existing?.status === 'processed') {
     console.log(`[WEBHOOK] Already processed: ${reference}`);
     return NextResponse.json({ ok: true });
   }
 
-  // Mark as processing
-  await supabase.from('webhook_log').upsert({ reference, status: 'processing', raw_payload: event }, { onConflict: 'reference' }).catch(() => {});
+  await supabase.from('webhook_log').upsert(
+    { reference, status: 'processing', raw_payload: event },
+    { onConflict: 'reference' }
+  ).catch(() => {});
 
-  const meta = event.data.metadata || {};
+  const meta      = event.data.metadata || {};
   const startTime = Date.now();
 
   try {
     if (meta.type === 'TICKET') {
       if (meta.channel === 'USSD') {
-        // USSD path: dedicated handler updates ussd_pending, fires automations, sends SMS to MoMo number
-        console.log(`[WEBHOOK] Routing to processUSSDPayment (channel=USSD) | ref: ${reference}`);
+        console.log(`[WEBHOOK] Routing to processUSSDPayment (USSD) | ref: ${reference}`);
         await processUSSDPayment(reference, event.data);
       } else {
-        // Web / standard purchase path
         await processTicket(supabase, event.data, meta);
       }
     } else if (meta.type === 'VOTE') {
       await processVote(supabase, event.data, meta);
     }
 
-    // Mark processed
     await supabase.from('webhook_log').upsert({
-      reference, status: 'processed',
+      reference,
+      status:      'processed',
       duration_ms: Date.now() - startTime,
-      raw_payload: event
+      raw_payload: event,
     }, { onConflict: 'reference' }).catch(() => {});
 
   } catch (err) {
     console.error('[WEBHOOK] Processing error:', err.message);
     await supabase.from('webhook_log').upsert({
-      reference, status: 'failed',
+      reference,
+      status:      'failed',
       duration_ms: Date.now() - startTime,
-      raw_payload: { ...event, _error: err.message }
+      raw_payload: { ...event, _error: err.message },
     }, { onConflict: 'reference' }).catch(() => {});
-    // Return 200 to prevent Paystack retry storms
+    // 200 to prevent Paystack retry storms
   }
 
   return NextResponse.json({ ok: true });
 }
 
+// ─── TICKET HANDLER ───────────────────────────────────────────
 async function processTicket(supabase, data, meta) {
   const {
     event_id, tier_id, guest_email, guest_name,
     reseller_code, event_reseller_id, is_reseller_purchase,
-    base_price, buyer_price, platform_fee, reseller_commission, quantity = 1
+    base_price, platform_fee, reseller_commission, quantity = 1,
   } = meta;
 
   if (!event_id || !tier_id || !guest_email) throw new Error('Missing ticket metadata');
 
   const qty = Math.max(1, Math.min(10, parseInt(quantity, 10) || 1));
 
-  // Capacity check before creating tickets
-  const { data: tier } = await supabase.from('ticket_tiers').select('max_quantity,name').eq('id', tier_id).single();
+  const { data: tier } = await supabase
+    .from('ticket_tiers')
+    .select('max_quantity,name')
+    .eq('id', tier_id)
+    .single();
+
   if (tier?.max_quantity > 0) {
-    const { count } = await supabase.from('tickets').select('id', { count: 'exact', head: true }).eq('tier_id', tier_id).eq('status', 'valid');
+    const { count } = await supabase
+      .from('tickets')
+      .select('id', { count: 'exact', head: true })
+      .eq('tier_id', tier_id)
+      .eq('status', 'valid');
     if ((count || 0) + qty > tier.max_quantity) {
       console.error(`[WEBHOOK] Oversell prevented for tier ${tier_id}`);
       return;
     }
   }
 
-  // Generate tickets (one per quantity)
+  // ── Resolve phone BEFORE insert so it lives on the ticket row ──────
+  const customFields          = Array.isArray(meta.custom_fields) ? meta.custom_fields : [];
+  const phoneFromCustomFields = customFields.find(f => f.variable_name === 'guest_phone')?.value || null;
+  const phoneFromCustomer     = data.customer?.phone ? String(data.customer.phone).trim() : null;
+  const smsPhone =
+    (meta.guest_phone       && String(meta.guest_phone).trim())      ||
+    (phoneFromCustomFields   && String(phoneFromCustomFields).trim()) ||
+    phoneFromCustomer                                                 ||
+    null;
+
+  console.log(
+    `[WEBHOOK] Phone — guest_phone=${meta.guest_phone || 'none'} | ` +
+    `custom_fields=${phoneFromCustomFields || 'none'} | ` +
+    `customer.phone=${phoneFromCustomer || 'none'} → ${smsPhone || 'NONE'}`
+  );
+
+  // Build ticket rows — guest_phone saved directly so the admin never
+  // has to dig through webhook_log.raw_payload
   const tickets = Array.from({ length: qty }, () => ({
     event_id,
     tier_id,
-    tier_name: tier?.name || '',
-    reference: data.reference,
-    ticket_number: generateTicketNumber(),
-    guest_email: guest_email.trim().toLowerCase(),
-    guest_name: guest_name || 'Guest',
-    // Financial recording: store what the organizer receives (base price), not buyer price
-    amount: base_price || (data.amount / 100 / (qty || 1)),
-    base_amount: base_price || (data.amount / 100 / (qty || 1)),
-    platform_fee: platform_fee || 0,
+    tier_name:            tier?.name || '',
+    reference:            data.reference,
+    ticket_number:        generateTicketNumber(),
+    guest_email:          guest_email.trim().toLowerCase(),
+    guest_name:           guest_name || 'Guest',
+    guest_phone:          normalisePhone(smsPhone) || smsPhone || null,  // ← saved to DB
+    amount:               base_price || (data.amount / 100 / qty),
+    base_amount:          base_price || (data.amount / 100 / qty),
+    platform_fee:         platform_fee || 0,
     is_reseller_purchase: is_reseller_purchase || false,
-    reseller_code: reseller_code || 'DIRECT',
-    event_reseller_id: event_reseller_id || null,
-    status: 'valid',
-    is_scanned: false
+    reseller_code:        reseller_code || 'DIRECT',
+    event_reseller_id:    event_reseller_id || null,
+    status:               'valid',
+    is_scanned:           false,
   }));
 
   const { error: insertError } = await supabase.from('tickets').insert(tickets);
   if (insertError) throw insertError;
 
   // Update event tickets_sold counter
-  await supabase.rpc('increment_event_tickets_sold', { event_id_param: event_id, amount: qty }).catch(() => {
-    supabase.from('events').select('tickets_sold').eq('id', event_id).single().then(({ data: ev }) => {
-      supabase.from('events').update({ tickets_sold: (ev?.tickets_sold || 0) + qty }).eq('id', event_id);
+  await supabase
+    .rpc('increment_event_tickets_sold', { event_id_param: event_id, amount: qty })
+    .catch(() => {
+      supabase.from('events').select('tickets_sold').eq('id', event_id).single().then(({ data: ev }) => {
+        supabase.from('events').update({ tickets_sold: (ev?.tickets_sold || 0) + qty }).eq('id', event_id);
+      });
     });
-  });
 
   // Update reseller stats
   if (is_reseller_purchase && event_reseller_id) {
     const earned = (reseller_commission || 0) * qty;
-    const { data: er } = await supabase.from('event_resellers').select('tickets_sold,total_earned').eq('id', event_reseller_id).single().catch(() => ({ data: null }));
+    const { data: er } = await supabase
+      .from('event_resellers')
+      .select('tickets_sold,total_earned')
+      .eq('id', event_reseller_id)
+      .single()
+      .catch(() => ({ data: null }));
     await supabase.from('event_resellers').update({
       tickets_sold: (er?.tickets_sold || 0) + qty,
-      total_earned: parseFloat(((er?.total_earned || 0) + earned).toFixed(2))
+      total_earned: parseFloat(((er?.total_earned || 0) + earned).toFixed(2)),
     }).eq('id', event_reseller_id).catch(() => {});
   }
 
-  // Write to payout ledger so admin can see what to pay out
+  // Payout ledger
   const orgOwes = meta.organizer_owes || (base_price * qty) || 0;
-  const resOwes = meta.reseller_owes || (is_reseller_purchase ? (reseller_commission || 0) * qty : 0);
+  const resOwes = meta.reseller_owes  || (is_reseller_purchase ? (reseller_commission || 0) * qty : 0);
   await supabase.from('payout_ledger').insert({
-    reference: data.reference,
+    reference:         data.reference,
     event_id,
-    organizer_id: meta.organizer_id || null,
+    organizer_id:      meta.organizer_id || null,
     event_reseller_id: is_reseller_purchase ? event_reseller_id : null,
-    transaction_type: 'TICKET',
-    total_collected: data.amount / 100,
-    organizer_owes: parseFloat(orgOwes.toFixed(2)),
-    reseller_owes: parseFloat(resOwes.toFixed(2)),
-    platform_keeps: parseFloat((data.amount / 100 - orgOwes - resOwes).toFixed(2)),
-    status: 'pending',
-    notes: `${qty}x ${tier?.name || 'ticket'} for ${guest_email}`
+    transaction_type:  'TICKET',
+    total_collected:   data.amount / 100,
+    organizer_owes:    parseFloat(orgOwes.toFixed(2)),
+    reseller_owes:     parseFloat(resOwes.toFixed(2)),
+    platform_keeps:    parseFloat((data.amount / 100 - orgOwes - resOwes).toFixed(2)),
+    status:            'pending',
+    notes:             `${qty}x ${tier?.name || 'ticket'} for ${guest_email}`,
   }).catch(() => {});
 
-  // ── SMS CONFIRMATION ──────────────────────────────────────────
-  // Priority order for phone resolution:
-  //   1. meta.guest_phone — set directly by checkout in metadata root
-  //   2. custom_fields guest_phone — survives Paystack metadata sanitisation
-  //   3. data.customer.phone — Paystack's own customer object, most reliable
-  const customFields = Array.isArray(meta.custom_fields) ? meta.custom_fields : [];
-  const phoneFromCustomFields = customFields.find(f => f.variable_name === 'guest_phone')?.value || null;
-  const phoneFromCustomer = data.customer?.phone ? String(data.customer.phone).trim() : null;
-  const smsPhone =
-    (meta.guest_phone && String(meta.guest_phone).trim()) ||
-    (phoneFromCustomFields && String(phoneFromCustomFields).trim()) ||
-    phoneFromCustomer ||
-    null;
-
-  console.log(`[WEBHOOK] SMS check — guest_phone=${meta.guest_phone || 'none'} | custom_fields=${phoneFromCustomFields || 'none'} | customer.phone=${phoneFromCustomer || 'none'} → resolved=${smsPhone || 'NONE'}`);
+  // ── SMS ──────────────────────────────────────────────────────
+  const BASE_URL      = process.env.NEXT_PUBLIC_BASE_URL || 'https://ousted.live';
+  const ticketNumbers = tickets.map(t => t.ticket_number).join(', ');
 
   if (smsPhone) {
-    const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || 'https://ousted.live';
-    const ticketNumbers = tickets.map(t => t.ticket_number).join(', ');
-    const smsResult = await sendSMS(smsPhone, [
+    const message = [
       'OUSTED: Payment confirmed!',
       `Event: ${meta.event_title || 'Your event'}`,
       `${tier?.name || meta.tier_name || 'Ticket'} x${qty}`,
       `Ticket(s): ${ticketNumbers}`,
       `Ref: ${data.reference}`,
       `${BASE_URL}/tickets/find?ref=${encodeURIComponent(data.reference)}`,
-    ].join('\n'));
-    console.log(`[WEBHOOK] SMS result: ${JSON.stringify(smsResult)}`);
+    ].join('\n');
+
+    const smsResult = await sendSMS(smsPhone, message);
+    console.log(`[WEBHOOK] SMS result:`, JSON.stringify(smsResult));
+
+    // Persist result — admin can see sent/failed and resend as needed
+    await logSMS(supabase, { reference: data.reference, phone: smsPhone, message, result: smsResult, channel: 'web' });
   } else {
-    console.warn(`[WEBHOOK] No phone resolved for ${guest_email} — SMS skipped`);
+    console.warn(`[WEBHOOK] No phone for ${guest_email} — SMS skipped`);
+    // Log the skip so admin knows no phone was collected at checkout
+    await logSMS(supabase, {
+      reference: data.reference,
+      phone:     guest_email,
+      message:   '(skipped — no phone at checkout)',
+      result:    { success: false, error: 'no_phone_provided' },
+      channel:   'web',
+    });
   }
 
-  console.log(`[WEBHOOK] ✅ ${qty} ticket(s) created for ${guest_email} | ref: ${data.reference}`);
+  console.log(`[WEBHOOK] ✅ ${qty} ticket(s) for ${guest_email} | ref: ${data.reference}`);
 }
 
+// ─── VOTE HANDLER ─────────────────────────────────────────────
 async function processVote(supabase, data, meta) {
   const {
     candidate_id, candidate_name, contest_id,
     vote_count, voter_email, voter_name,
-    vote_price, platform_fee, competition_id
+    vote_price, platform_fee, competition_id,
   } = meta;
 
   if (!candidate_id || !vote_count) throw new Error('Missing vote metadata');
 
   const votes = parseInt(vote_count, 10);
 
-  // Log vote transaction (audit trail)
   await supabase.from('vote_transactions').upsert({
-    reference: data.reference,
+    reference:     data.reference,
     candidate_id,
     contest_id,
     competition_id,
-    voter_email: voter_email?.toLowerCase(),
-    voter_name: voter_name || 'Anonymous',
-    vote_count: votes,
-    vote_price: vote_price || 0,
-    platform_fee: platform_fee || 0,
-    amount_paid: data.amount / 100,
-    status: 'confirmed'
+    voter_email:   voter_email?.toLowerCase(),
+    voter_name:    voter_name || 'Anonymous',
+    vote_count:    votes,
+    vote_price:    vote_price || 0,
+    platform_fee:  platform_fee || 0,
+    amount_paid:   data.amount / 100,
+    status:        'confirmed',
   }, { onConflict: 'reference' }).catch(() => {});
 
-  // Increment vote count
   const { error: rpcError } = await supabase.rpc('increment_vote_count', {
-    p_candidate_id: candidate_id,
-    p_vote_increment: votes
+    p_candidate_id:   candidate_id,
+    p_vote_increment: votes,
   });
-
   if (rpcError) {
-    // Manual fallback
     const { data: cand } = await supabase.from('candidates').select('vote_count').eq('id', candidate_id).single();
     await supabase.from('candidates').update({ vote_count: (cand?.vote_count || 0) + votes }).eq('id', candidate_id);
   }
 
-  // Write to payout ledger
   const voteOrgOwes = meta.organizer_owes || (vote_price * votes) || 0;
   await supabase.from('payout_ledger').insert({
-    reference: data.reference,
-    event_id: null,
-    organizer_id: meta.organizer_id || null,
+    reference:         data.reference,
+    event_id:          null,
+    organizer_id:      meta.organizer_id || null,
     event_reseller_id: null,
-    transaction_type: 'VOTE',
-    total_collected: data.amount / 100,
-    organizer_owes: parseFloat(voteOrgOwes.toFixed(2)),
-    reseller_owes: 0,
-    platform_keeps: parseFloat((data.amount / 100 - voteOrgOwes).toFixed(2)),
-    contest_id: contest_id || null,
-    competition_id: competition_id || null,
-    status: 'pending',
-    notes: `${votes} vote(s) for ${candidate_name}`
+    transaction_type:  'VOTE',
+    total_collected:   data.amount / 100,
+    organizer_owes:    parseFloat(voteOrgOwes.toFixed(2)),
+    reseller_owes:     0,
+    platform_keeps:    parseFloat((data.amount / 100 - voteOrgOwes).toFixed(2)),
+    contest_id:        contest_id || null,
+    competition_id:    competition_id || null,
+    status:            'pending',
+    notes:             `${votes} vote(s) for ${candidate_name}`,
   }).catch(() => {});
 
   console.log(`[WEBHOOK] ✅ ${votes} vote(s) for ${candidate_name} | ref: ${data.reference}`);
 
-  // ── SMS CONFIRMATION FOR VOTES ───────────────────────────────
-  const customVoteFields = Array.isArray(meta.custom_fields) ? meta.custom_fields : [];
+  // Vote SMS
+  const customVoteFields    = Array.isArray(meta.custom_fields) ? meta.custom_fields : [];
   const phoneFromVoteFields = customVoteFields.find(f => f.variable_name === 'voter_phone')?.value || null;
-  const phoneFromCustomer = data.customer?.phone ? String(data.customer.phone).trim() : null;
+  const phoneFromCustomer   = data.customer?.phone ? String(data.customer.phone).trim() : null;
   const voteSmsPhone =
-    (meta.voter_phone && String(meta.voter_phone).trim()) ||
-    (phoneFromVoteFields && String(phoneFromVoteFields).trim()) ||
-    phoneFromCustomer ||
+    (meta.voter_phone      && String(meta.voter_phone).trim())     ||
+    (phoneFromVoteFields   && String(phoneFromVoteFields).trim())  ||
+    phoneFromCustomer                                              ||
     null;
-
-  console.log(`[WEBHOOK] Vote SMS — voter_phone=${meta.voter_phone || 'none'} | custom_fields=${phoneFromVoteFields || 'none'} | customer.phone=${phoneFromCustomer || 'none'} → resolved=${voteSmsPhone || 'NONE'}`);
 
   if (voteSmsPhone) {
     const BASE_URL = process.env.NEXT_PUBLIC_BASE_URL || 'https://ousted.live';
-    const voteSmsResult = await sendSMS(voteSmsPhone, [
+    const message  = [
       'OUSTED: Votes confirmed!',
       `Voted for: ${candidate_name}`,
       `Votes cast: ${votes}`,
       `Contest: ${meta.contest_title || 'Contest'}`,
       `Ref: ${data.reference}`,
       `${BASE_URL}/voting`,
-    ].join('\n'));
-    console.log(`[WEBHOOK] Vote SMS result: ${JSON.stringify(voteSmsResult)}`);
+    ].join('\n');
+
+    const voteSmsResult = await sendSMS(voteSmsPhone, message);
+    console.log(`[WEBHOOK] Vote SMS:`, JSON.stringify(voteSmsResult));
+    await logSMS(supabase, { reference: data.reference, phone: voteSmsPhone, message, result: voteSmsResult, channel: 'web' });
   }
 }
