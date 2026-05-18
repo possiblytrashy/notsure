@@ -8,6 +8,11 @@
 //   - guest_phone saved directly on every ticket row (no more digging through webhook_log)
 //   - Every SMS attempt (sent / failed / skipped) logged to sms_log table
 //   - Single shared sendSMS() + logSMS() helpers — no more inline duplicates
+//
+// v3.2.1 fix:
+//   - Replaced all .catch() chains on Supabase queries with .then(r => r, fn)
+//     because Supabase v2 returns a PromiseLike, not a native Promise,
+//     so .catch() is not a function on the query builder.
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
@@ -75,7 +80,7 @@ async function logSMS(supabase, { reference, phone, message, result, channel = '
     status:  result.success ? 'sent'   : 'failed',
     error:   result.success ? null      : (result.error || 'unknown'),
     channel,
-  }, { onConflict: 'reference,phone' }).catch(err =>
+  }, { onConflict: 'reference,phone' }).then(r => r, err =>
     console.warn('[SMS] Failed to write sms_log:', err.message)
   );
 }
@@ -127,7 +132,7 @@ export async function POST(req) {
   await supabase.from('webhook_log').upsert(
     { reference, status: 'processing', raw_payload: event },
     { onConflict: 'reference' }
-  ).catch(() => {});
+  ).then(r => r, () => {});
 
   const meta      = event.data.metadata || {};
   const startTime = Date.now();
@@ -149,7 +154,7 @@ export async function POST(req) {
       status:      'processed',
       duration_ms: Date.now() - startTime,
       raw_payload: event,
-    }, { onConflict: 'reference' }).catch(() => {});
+    }, { onConflict: 'reference' }).then(r => r, () => {});
 
   } catch (err) {
     console.error('[WEBHOOK] Processing error:', err.message);
@@ -158,7 +163,7 @@ export async function POST(req) {
       status:      'failed',
       duration_ms: Date.now() - startTime,
       raw_payload: { ...event, _error: err.message },
-    }, { onConflict: 'reference' }).catch(() => {});
+    }, { onConflict: 'reference' }).then(r => r, () => {});
     // 200 to prevent Paystack retry storms
   }
 
@@ -250,7 +255,7 @@ async function processTicket(supabase, data, meta) {
       .from('events')
       .update({ tickets_sold: (ev?.tickets_sold || 0) + qty })
       .eq('id', event_id)
-      .catch(() => {});
+      .then(r => r, () => {});
   }
 
   // Update reseller stats
@@ -268,7 +273,7 @@ async function processTicket(supabase, data, meta) {
     await supabase.from('event_resellers').update({
       tickets_sold: (er?.tickets_sold || 0) + qty,
       total_earned: parseFloat(((er?.total_earned || 0) + earned).toFixed(2)),
-    }).eq('id', event_reseller_id).catch(() => {});
+    }).eq('id', event_reseller_id).then(r => r, () => {});
   }
 
   // Payout ledger
@@ -286,7 +291,7 @@ async function processTicket(supabase, data, meta) {
     platform_keeps:    parseFloat((data.amount / 100 - orgOwes - resOwes).toFixed(2)),
     status:            'pending',
     notes:             `${qty}x ${tier?.name || 'ticket'} for ${guest_email}`,
-  }).catch(() => {});
+  }).then(r => r, () => {});
 
   // ── SMS ──────────────────────────────────────────────────────
   const BASE_URL      = process.env.NEXT_PUBLIC_BASE_URL || 'https://ousted.live';
@@ -346,7 +351,7 @@ async function processVote(supabase, data, meta) {
     platform_fee:  platform_fee || 0,
     amount_paid:   data.amount / 100,
     status:        'confirmed',
-  }, { onConflict: 'reference' }).catch(() => {});
+  }, { onConflict: 'reference' }).then(r => r, () => {});
 
   const { error: rpcError } = await supabase.rpc('increment_vote_count', {
     p_candidate_id:   candidate_id,
@@ -362,7 +367,7 @@ async function processVote(supabase, data, meta) {
       .from('candidates')
       .update({ vote_count: (cand?.vote_count || 0) + votes })
       .eq('id', candidate_id)
-      .catch(() => {});
+      .then(r => r, () => {});
   }
 
   const voteOrgOwes = meta.organizer_owes || (vote_price * votes) || 0;
@@ -380,7 +385,7 @@ async function processVote(supabase, data, meta) {
     competition_id:    competition_id || null,
     status:            'pending',
     notes:             `${votes} vote(s) for ${candidate_name}`,
-  }).catch(() => {});
+  }).then(r => r, () => {});
 
   console.log(`[WEBHOOK] ✅ ${votes} vote(s) for ${candidate_name} | ref: ${data.reference}`);
 
