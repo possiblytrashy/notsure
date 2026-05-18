@@ -4,6 +4,13 @@
 // v2 changes:
 //   - guest_phone saved on each ticket row (was missing before)
 //   - SMS result logged to sms_log table
+//
+// v2.1 fix:
+//   - Replaced all .catch() chains on Supabase queries with .then(r => r, fn)
+//     because Supabase v2 returns a PromiseLike, not a native Promise,
+//     so .catch() is not a function on the query builder.
+//   - Native fetch() chains (.catch on the automation trigger) left as-is —
+//     fetch returns a real Promise so .catch() is valid there.
 
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
@@ -72,7 +79,7 @@ async function logSMS(db, { reference, phone, message, result, channel = 'ussd' 
     status:  result.success ? 'sent'  : 'failed',
     error:   result.success ? null     : (result.error || 'unknown'),
     channel,
-  }, { onConflict: 'reference,phone' }).catch(err =>
+  }, { onConflict: 'reference,phone' }).then(r => r, err =>
     console.warn('[SMS] Failed to write sms_log:', err.message)
   );
 }
@@ -133,14 +140,15 @@ export async function processUSSDPayment(reference, paystackData) {
     platform_keeps:   platformKeeps,
     status:           'pending',
     notes:            `${qty}x ${meta.tier_name} via USSD (${guestPhone})`,
-  }).catch(err => console.error('[USSD] Ledger error:', err.message));
+  }).then(r => r, err => console.error('[USSD] Ledger error:', err.message));
 
-  await db.rpc('increment_event_tickets_sold', { event_id_param: meta.event_id, amount: qty }).catch(() => {});
+  await db.rpc('increment_event_tickets_sold', { event_id_param: meta.event_id, amount: qty })
+    .then(r => r, () => {});
 
   await db.from('ussd_pending')
     .update({ status: 'completed', completed_at: new Date().toISOString() })
     .eq('reference', reference)
-    .catch(() => {});
+    .then(r => r, () => {});
 
   // ── SMS ───────────────────────────────────────────────────
   const ticketUrl = `${BASE_URL}/tickets/find?ref=${encodeURIComponent(reference)}`;
@@ -169,6 +177,7 @@ export async function processUSSDPayment(reference, paystackData) {
   }
 
   // Fire automation trigger (best-effort)
+  // fetch() returns a native Promise so .catch() is valid here — no change needed.
   fetch(`${BASE_URL}/api/automations/trigger`, {
     method: 'POST',
     headers: {
