@@ -1104,7 +1104,7 @@ const handleEditSubmit = async (e) => {
       </div>
 
       {/* ── FORM GRID ── */}
-      <form onSubmit={handleEditSubmit} style={{ display: 'grid', gridTemplateColumns: '1.8fr 1fr', gap: 36, alignItems: 'start' }}>
+      <form onSubmit={handleEditSubmit} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(340px,100%), 1fr))', gap: 24, alignItems: 'start' }}>
 
         {/* LEFT COLUMN */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
@@ -1206,7 +1206,7 @@ const handleEditSubmit = async (e) => {
             </div>
 
             {/* Date + Time */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 24 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(200px,100%), 1fr))', gap: 14, marginBottom: 18 }}>
               <div>
                 <label style={{ fontSize: 11, fontWeight: 900, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 10, display: 'block' }}>EVENT DATE</label>
                 <div style={{ position: 'relative' }}>
@@ -1249,7 +1249,7 @@ const handleEditSubmit = async (e) => {
             </div>
 
             {/* Category + Status + Resellers */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 14 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(130px,100%), 1fr))', gap: 12 }}>
               <div>
                 <label style={{ fontSize: 11, fontWeight: 900, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.1em', marginBottom: 10, display: 'block' }}>CATEGORY</label>
                 <select style={editInputStyle} value={editForm.category || 'Entertainment'}
@@ -1541,11 +1541,11 @@ const handleEditSubmit = async (e) => {
 
 // --- LUXURY STYLES ---
 const skeletonStyles = {
-  wrapper: { height: '100vh', display: 'flex', flexDirection: 'column', padding: '50px 30px', background: '#fcfcfc', maxWidth: '1440px', margin: '0 auto' },
+  wrapper: { height: '100vh', display: 'flex', flexDirection: 'column', padding: 'clamp(16px,4vw,50px) clamp(12px,3vw,30px)', background: '#fcfcfc', maxWidth: '1440px', margin: '0 auto' },
   header: { display: 'flex', justifyContent: 'space-between', marginBottom: '60px' },
   block: (w, h, r = '12px') => ({ width: w, height: h, background: '#eee', borderRadius: r, animation: 'pulse 1.5s infinite ease-in-out' }),
   hero: { width: '100%', height: '250px', background: '#e0e0e0', borderRadius: '30px', marginBottom: '60px', animation: 'pulse 1.5s infinite ease-in-out' },
-  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '30px' },
+  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(300px,100%), 1fr))', gap: '30px' },
   card: { height: '300px', background: '#f5f5f5', borderRadius: '24px', animation: 'pulse 1.5s infinite ease-in-out' }
 };
 // CSS Injection for Skeleton Animation
@@ -1555,10 +1555,10 @@ if (typeof document !== 'undefined') {
   document.head.appendChild(styleSheet);
 }
 
-const mainWrapper = { padding: '50px 30px', maxWidth: '1440px', margin: '0 auto', background: '#fcfcfc', minHeight: '100vh', fontFamily: 'Inter, sans-serif' };
+const mainWrapper = { padding: 'clamp(16px,4vw,50px) clamp(12px,3vw,30px)', maxWidth: '1440px', margin: '0 auto', background: '#fcfcfc', minHeight: '100vh', fontFamily: 'Inter, sans-serif', overflowX: 'hidden' };
 const loadingText = { fontSize: '12px', fontWeight: 800, color: '#94a3b8', letterSpacing: '2px', textAlign: 'center', marginTop: '20px' };
-const topNav = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '60px' };
-const logoText = { fontSize: '30px', fontWeight: 950, letterSpacing: '-2px', margin: 0 };
+const topNav = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'clamp(20px,5vw,60px)', flexWrap: 'wrap', gap: '12px' };
+const logoText = { fontSize: 'clamp(22px,5vw,30px)', fontWeight: 950, letterSpacing: '-2px', margin: 0 };
 const badgeLuxury = { background: '#000', color: '#fff', fontSize: '10px', padding: '5px 12px', borderRadius: '4px', verticalAlign: 'middle', marginLeft: '10px' };
 const subLabel = { fontSize: '12px', color: '#94a3b8', margin: '4px 0 0', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '1px' };
 const headerActions = { display: 'flex', gap: '20px', alignItems: 'center' };
@@ -1568,17 +1568,17 @@ const onboardingBadge = (on) => ({ display: 'flex', alignItems: 'center', gap: '
 const dot = (on) => ({ width: '6px', height: '6px', borderRadius: '50%', background: on ? '#16a34a' : '#e11d48' });
 const circleAction = { width: '48px', height: '48px', borderRadius: '50%', border: '1px solid #eee', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
 const logoutCircle = { width: '48px', height: '48px', borderRadius: '50%', border: 'none', background: '#000', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
-const balanceCard = { background: '#000', borderRadius: '30px', padding: '50px', color: '#fff', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', boxShadow: '0 20px 40px rgba(0,0,0,0.1)' };
+const balanceCard = { background: '#000', borderRadius: '30px', padding: 'clamp(22px,5vw,50px)', color: '#fff', display: 'flex', flexDirection: 'column', justifyContent: 'space-between', boxShadow: '0 20px 40px rgba(0,0,0,0.1)' };
 const cardHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' };
 const balanceInfo = { display: 'flex', flexDirection: 'column' };
 const financeLabel = { fontSize: '11px', fontWeight: 800, color: '#94a3b8', letterSpacing: '2px' };
-const balanceValue = { fontSize: '56px', fontWeight: 950, margin: '20px 0', letterSpacing: '-3px' };
+const balanceValue = { fontSize: 'clamp(28px,7vw,56px)', fontWeight: 950, margin: '16px 0', letterSpacing: '-2px' };
 const iconCircleGold = { width: '64px', height: '64px', borderRadius: '22px', background: 'rgba(212, 175, 55, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' };
-const statsRow = { display: 'flex', gap: '25px', marginBottom: '30px' };
+const statsRow = { display: 'flex', gap: 'clamp(10px,2vw,25px)', marginBottom: 'clamp(14px,3vw,30px)', flexWrap: 'wrap' };
 const miniStat = { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: 600, color: '#16a34a' };
 const autoPayoutTag = { display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: '#0ea5e9', fontWeight: 600 };
-const settingsIconBtn = { padding: '15px 30px', background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '12px', color: '#fff', cursor: 'pointer', fontWeight: 800, fontSize: '12px', display: 'flex', alignItems: 'center', gap: '10px', alignSelf: 'flex-start' };
-const glassStatCard = { background: '#fff', padding: '30px', borderRadius: '25px', border: '1px solid #f0f0f0', display: 'flex', flexDirection: 'column' };
+const settingsIconBtn = { padding: '12px 18px', background: 'rgba(255,255,255,0.1)', border: 'none', borderRadius: '12px', color: '#fff', cursor: 'pointer', fontWeight: 800, fontSize: '12px', display: 'flex', alignItems: 'center', gap: '10px', alignSelf: 'flex-start' };
+const glassStatCard = { background: '#fff', padding: 'clamp(16px,3vw,30px)', borderRadius: '25px', border: '1px solid #f0f0f0', display: 'flex', flexDirection: 'column' };
 const glassHeader = { display: 'flex', justifyContent: 'space-between', marginBottom: '20px' };
 const statPercent = { fontSize: '10px', fontWeight: 900, color: '#16a34a', background: '#f0fdf4', padding: '4px 10px', borderRadius: '20px' };
 const statLabel = { fontSize: '11px', fontWeight: 800, color: '#94a3b8', margin: '0 0 8px', letterSpacing: '1px' };
@@ -1586,39 +1586,39 @@ const statVal = { fontSize: '28px', fontWeight: 950, margin: 0, color: '#000' };
 const tabItem = (active) => ({ padding: '15px 5px', background: 'none', border: 'none', color: active ? '#000' : '#94a3b8', fontSize: '13px', fontWeight: 900, cursor: 'pointer', borderBottom: active ? '4px solid #000' : '4px solid transparent', transition: '0.3s' });
 const viewPort = { minHeight: '600px' };
 const fadeAnim = { animation: 'fadeIn 0.6s ease' };
-const viewHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '40px' };
-const viewTitle = { margin: 0, fontSize: '24px', fontWeight: 950, letterSpacing: '-1px' };
+const viewHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'clamp(16px,4vw,40px)', flexWrap: 'wrap', gap: '10px' };
+const viewTitle = { margin: 0, fontSize: 'clamp(18px,4vw,24px)', fontWeight: 950, letterSpacing: '-1px' };
 const addBtn = { background: '#000', color: '#fff', border: 'none', padding: '14px 28px', borderRadius: '14px', fontWeight: 800, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px', fontSize: '12px' };
-const cardGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '30px' };
+const cardGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(320px,100%), 1fr))', gap: '30px' };
 const itemCard = { background: '#fff', borderRadius: '24px', border: '1px solid #f0f0f0', overflow: 'hidden', transition: '0.3s' };
-const itemImage = (url) => ({ height: '240px', background: url ? `url(${url}) center/cover` : '#f8f8f8', position: 'relative' });
+const itemImage = (url) => ({ height: 'clamp(140px,30vw,240px)', background: url ? `url(${url}) center/cover` : '#f8f8f8', position: 'relative' });
 const imageOverlay = { position: 'absolute', inset: 0, background: 'linear-gradient(to bottom, transparent, rgba(0,0,0,0.4))' };
 const cardQuickActions = { position: 'absolute', top: '15px', right: '15px', display: 'flex', gap: '10px' };
 const miniAction = { width: '40px', height: '40px', borderRadius: '12px', background: 'rgba(255,255,255,0.9)', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 4px 10px rgba(0,0,0,0.1)' };
-const itemBody = { padding: '25px' };
+const itemBody = { padding: 'clamp(14px,3vw,25px)' };
 const itemTitle = { margin: '0 0 12px', fontSize: '18px', fontWeight: 900 };
 const itemMeta = { display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '25px' };
 const metaLine = { display: 'flex', alignItems: 'center', gap: '10px', fontSize: '13px', color: '#64748b', fontWeight: 600 };
 const cardActionRow = { display: 'flex', gap: '10px' };
 const fullWidthBtn = { flex: 1, padding: '12px', background: '#000', color: '#fff', border: 'none', borderRadius: '12px', fontWeight: 800, fontSize: '11px', cursor: 'pointer' };
 const editBtnCircle = { width: '40px', height: '40px', borderRadius: '12px', border: '1px solid #eee', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' };
-const emptyState = { gridColumn: '1/-1', textAlign: 'center', padding: '60px', color: '#94a3b8', border: '2px dashed #eee', borderRadius: '24px' };
-const filterGroup = { display: 'flex', gap: '15px', alignItems: 'center' };
+const emptyState = { gridColumn: '1/-1', textAlign: 'center', padding: 'clamp(24px,6vw,60px)', color: '#94a3b8', border: '2px dashed #eee', borderRadius: '24px' };
+const filterGroup = { display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' };
 const searchBox = { display: 'flex', alignItems: 'center', gap: '10px', background: '#fff', border: '1px solid #e2e8f0', padding: '10px 15px', borderRadius: '12px' };
-const searchInputField = { border: 'none', outline: 'none', fontSize: '13px', fontWeight: 600, width: '150px' };
+const searchInputField = { border: 'none', outline: 'none', fontSize: '13px', fontWeight: 600, width: 'clamp(80px,15vw,150px)', minWidth: '60px' };
 const eventDropdown = { padding: '10px 15px', borderRadius: '12px', border: '1px solid #e2e8f0', background: '#fff', fontSize: '13px', fontWeight: 600, outline: 'none' };
 const outlineBtn = { display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 15px', border: '1px solid #e2e8f0', background: '#fff', borderRadius: '12px', fontSize: '11px', fontWeight: 800, cursor: 'pointer' };
-const tableWrapper = { background: '#fff', borderRadius: '24px', border: '1px solid #f0f0f0', overflow: 'hidden' };
+const tableWrapper = { background: '#fff', borderRadius: '24px', border: '1px solid #f0f0f0', overflowX: 'auto', WebkitOverflowScrolling: 'touch' };
 const dataTable = { width: '100%', borderCollapse: 'collapse' };
-const tableTh = { textAlign: 'left', padding: '20px 25px', fontSize: '11px', fontWeight: 800, color: '#94a3b8', letterSpacing: '1px', borderBottom: '1px solid #f0f0f0' };
+const tableTh = { textAlign: 'left', padding: '14px 16px', fontSize: '11px', fontWeight: 800, color: '#94a3b8', letterSpacing: '1px', borderBottom: '1px solid #f0f0f0', whiteSpace: 'nowrap' };
 const tableTr = { borderBottom: '1px solid #f8f8f8' };
-const tableTd = { padding: '20px 25px', fontSize: '13px', fontWeight: 600, color: '#334155' };
+const tableTd = { padding: '14px 16px', fontSize: '13px', fontWeight: 600, color: '#334155', whiteSpace: 'nowrap' };
 const guestBold = { margin: 0, fontWeight: 800, color: '#000' };
 const guestMuted = { margin: 0, fontSize: '11px', color: '#94a3b8', marginTop: '4px' };
 const scannedPill = { background: '#f0fdf4', color: '#16a34a', padding: '6px 12px', borderRadius: '20px', fontSize: '10px', fontWeight: 900 };
 const activePill = { background: '#f0f9ff', color: '#0ea5e9', padding: '6px 12px', borderRadius: '20px', fontSize: '10px', fontWeight: 900 };
-const emptyTableState = { padding: '60px', textAlign: 'center', color: '#94a3b8', fontSize: '13px' };
-const contestCard = { background: '#fff', borderRadius: '30px', border: '1px solid #f0f0f0', overflow: 'hidden', padding: '30px', display: 'flex', flexDirection: 'column' };
+const emptyTableState = { padding: 'clamp(24px,5vw,60px)', textAlign: 'center', color: '#94a3b8', fontSize: '13px' };
+const contestCard = { background: '#fff', borderRadius: '24px', border: '1px solid #f0f0f0', overflow: 'hidden', padding: 'clamp(16px,3vw,30px)', display: 'flex', flexDirection: 'column' };
 const contestHeader = { display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '25px' };
 const badgeLuxuryAlt = { fontSize: '10px', fontWeight: 900, background: '#000', color: '#fff', display: 'inline-block', padding: '4px 10px', borderRadius: '6px' };
 const perfSub = { margin: 0, fontSize: '13px', color: '#64748b', lineHeight: '1.5' };
@@ -1638,9 +1638,9 @@ const voteBarFill = (percentage) => ({
 });
 const candVotes = { fontSize: '12px', fontWeight: 900, width: '60px', textAlign: 'right' };
 const emptySmall = { fontSize: '12px', color: '#94a3b8', textAlign: 'center', padding: '20px', background: '#f8fafc', borderRadius: '12px' };
-const sectionTitleRow = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '30px' };
+const sectionTitleRow = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'clamp(14px,3vw,30px)', flexWrap: 'wrap', gap: '8px' };
 const activityBadge = { display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11px', fontWeight: 800, color: '#16a34a', background: '#f0fdf4', padding: '6px 12px', borderRadius: '20px' };
-const analyticsGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '20px' };
+const analyticsGrid = { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(300px,100%), 1fr))', gap: '20px' };
 const eventPerformanceCard = { background: '#fff', border: '1px solid #f0f0f0', borderRadius: '24px', padding: '25px' };
 const perfHeader = { display: 'flex', justifyContent: 'space-between', marginBottom: '20px' };
 const perfName = { margin: 0, fontSize: '15px', fontWeight: 800 };
