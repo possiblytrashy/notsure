@@ -8,11 +8,6 @@
 //   - guest_phone saved directly on every ticket row (no more digging through webhook_log)
 //   - Every SMS attempt (sent / failed / skipped) logged to sms_log table
 //   - Single shared sendSMS() + logSMS() helpers — no more inline duplicates
-//
-// v3.2.1 fix:
-//   - Replaced all .catch() chains on Supabase queries with .then(r => r, fn)
-//     because Supabase v2 returns a PromiseLike, not a native Promise,
-//     so .catch() is not a function on the query builder.
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
@@ -80,7 +75,7 @@ async function logSMS(supabase, { reference, phone, message, result, channel = '
     status:  result.success ? 'sent'   : 'failed',
     error:   result.success ? null      : (result.error || 'unknown'),
     channel,
-  }, { onConflict: 'reference,phone' }).then(r => r, err =>
+  }, { onConflict: 'reference,phone' }).catch(err =>
     console.warn('[SMS] Failed to write sms_log:', err.message)
   );
 }
@@ -116,14 +111,13 @@ export async function POST(req) {
 
   const { reference } = event.data;
 
-  // Idempotency check — maybeSingle() returns { data: null } when no row exists
-  // instead of throwing PGRST116, so no .catch() wrapper needed.
+  // Idempotency check
   const { data: existing } = await supabase
     .from('webhook_log')
     .select('id,status')
     .eq('reference', reference)
-    .maybeSingle();
-
+    .single()
+    .catch(() => ({ data: null }));
   if (existing?.status === 'processed') {
     console.log(`[WEBHOOK] Already processed: ${reference}`);
     return NextResponse.json({ ok: true });
@@ -132,7 +126,7 @@ export async function POST(req) {
   await supabase.from('webhook_log').upsert(
     { reference, status: 'processing', raw_payload: event },
     { onConflict: 'reference' }
-  ).then(r => r, () => {});
+  ).catch(() => {});
 
   const meta      = event.data.metadata || {};
   const startTime = Date.now();
@@ -154,7 +148,7 @@ export async function POST(req) {
       status:      'processed',
       duration_ms: Date.now() - startTime,
       raw_payload: event,
-    }, { onConflict: 'reference' }).then(r => r, () => {});
+    }, { onConflict: 'reference' }).catch(() => {});
 
   } catch (err) {
     console.error('[WEBHOOK] Processing error:', err.message);
@@ -163,7 +157,7 @@ export async function POST(req) {
       status:      'failed',
       duration_ms: Date.now() - startTime,
       raw_payload: { ...event, _error: err.message },
-    }, { onConflict: 'reference' }).then(r => r, () => {});
+    }, { onConflict: 'reference' }).catch(() => {});
     // 200 to prevent Paystack retry storms
   }
 
@@ -182,13 +176,11 @@ async function processTicket(supabase, data, meta) {
 
   const qty = Math.max(1, Math.min(10, parseInt(quantity, 10) || 1));
 
-  // maybeSingle() returns { data: null } when the tier doesn't exist
-  // instead of throwing, keeping behaviour consistent with the rest of the file.
   const { data: tier } = await supabase
     .from('ticket_tiers')
     .select('max_quantity,name')
     .eq('id', tier_id)
-    .maybeSingle();
+    .single();
 
   if (tier?.max_quantity > 0) {
     const { count } = await supabase
@@ -243,37 +235,27 @@ async function processTicket(supabase, data, meta) {
   if (insertError) throw insertError;
 
   // Update event tickets_sold counter
-  const { error: rpcTicketError } = await supabase
-    .rpc('increment_event_tickets_sold', { event_id_param: event_id, amount: qty });
-  if (rpcTicketError) {
-    const { data: ev } = await supabase
-      .from('events')
-      .select('tickets_sold')
-      .eq('id', event_id)
-      .maybeSingle();
-    await supabase
-      .from('events')
-      .update({ tickets_sold: (ev?.tickets_sold || 0) + qty })
-      .eq('id', event_id)
-      .then(r => r, () => {});
-  }
+  await supabase
+    .rpc('increment_event_tickets_sold', { event_id_param: event_id, amount: qty })
+    .catch(() => {
+      supabase.from('events').select('tickets_sold').eq('id', event_id).single().then(({ data: ev }) => {
+        supabase.from('events').update({ tickets_sold: (ev?.tickets_sold || 0) + qty }).eq('id', event_id);
+      });
+    });
 
   // Update reseller stats
   if (is_reseller_purchase && event_reseller_id) {
     const earned = (reseller_commission || 0) * qty;
-
-    // maybeSingle() returns { data: null } when no reseller row exists yet,
-    // avoiding the PGRST116 error that .single().catch() was masking before.
     const { data: er } = await supabase
       .from('event_resellers')
       .select('tickets_sold,total_earned')
       .eq('id', event_reseller_id)
-      .maybeSingle();
-
+      .single()
+      .catch(() => ({ data: null }));
     await supabase.from('event_resellers').update({
       tickets_sold: (er?.tickets_sold || 0) + qty,
       total_earned: parseFloat(((er?.total_earned || 0) + earned).toFixed(2)),
-    }).eq('id', event_reseller_id).then(r => r, () => {});
+    }).eq('id', event_reseller_id).catch(() => {});
   }
 
   // Payout ledger
@@ -291,7 +273,7 @@ async function processTicket(supabase, data, meta) {
     platform_keeps:    parseFloat((data.amount / 100 - orgOwes - resOwes).toFixed(2)),
     status:            'pending',
     notes:             `${qty}x ${tier?.name || 'ticket'} for ${guest_email}`,
-  }).then(r => r, () => {});
+  }).catch(() => {});
 
   // ── SMS ──────────────────────────────────────────────────────
   const BASE_URL      = process.env.NEXT_PUBLIC_BASE_URL || 'https://ousted.live';
@@ -351,23 +333,15 @@ async function processVote(supabase, data, meta) {
     platform_fee:  platform_fee || 0,
     amount_paid:   data.amount / 100,
     status:        'confirmed',
-  }, { onConflict: 'reference' }).then(r => r, () => {});
+  }, { onConflict: 'reference' }).catch(() => {});
 
   const { error: rpcError } = await supabase.rpc('increment_vote_count', {
     p_candidate_id:   candidate_id,
     p_vote_increment: votes,
   });
   if (rpcError) {
-    const { data: cand } = await supabase
-      .from('candidates')
-      .select('vote_count')
-      .eq('id', candidate_id)
-      .maybeSingle();
-    await supabase
-      .from('candidates')
-      .update({ vote_count: (cand?.vote_count || 0) + votes })
-      .eq('id', candidate_id)
-      .then(r => r, () => {});
+    const { data: cand } = await supabase.from('candidates').select('vote_count').eq('id', candidate_id).single();
+    await supabase.from('candidates').update({ vote_count: (cand?.vote_count || 0) + votes }).eq('id', candidate_id);
   }
 
   const voteOrgOwes = meta.organizer_owes || (vote_price * votes) || 0;
@@ -385,7 +359,7 @@ async function processVote(supabase, data, meta) {
     competition_id:    competition_id || null,
     status:            'pending',
     notes:             `${votes} vote(s) for ${candidate_name}`,
-  }).then(r => r, () => {});
+  }).catch(() => {});
 
   console.log(`[WEBHOOK] ✅ ${votes} vote(s) for ${candidate_name} | ref: ${data.reference}`);
 
