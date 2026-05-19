@@ -119,7 +119,24 @@ export default function GateScanner() {
     if (!isScanning) return;
     let scanner = null;
     import('html5-qrcode').then(({ Html5QrcodeScanner }) => {
-      scanner = new Html5QrcodeScanner('reader', { fps: 15, qrbox: 260 }, false);
+      const qrboxSize = Math.min(window.innerWidth - 48, 280);
+      scanner = new Html5QrcodeScanner(
+        'reader',
+        {
+          fps: 15,
+          qrbox: { width: qrboxSize, height: qrboxSize },
+          aspectRatio: 1.0,
+          showTorchButtonIfSupported: true,
+          showZoomSliderIfSupported: true,
+          defaultZoomValueIfSupported: 1,
+          videoConstraints: {
+            facingMode: { ideal: 'environment' }, // rear camera on mobile
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
+        },
+        false
+      );
       scanner.render((decoded) => verifyQR(decoded), () => {});
       scannerRef.current = scanner;
     });
@@ -139,8 +156,23 @@ export default function GateScanner() {
   const cfg = statusConfig[status.type] || statusConfig.ready;
 
   return (
-    <div style={{ maxWidth: 480, margin: '0 auto', padding: '15px 14px 80px', fontFamily: 'system-ui,-apple-system,sans-serif', background: '#f8fafc', minHeight: '100vh' }}>
-      <style>{`@keyframes spin{to{transform:rotate(360deg)}}@keyframes pulse{0%,100%{opacity:.5}50%{opacity:1}}`}</style>
+    <div style={{ maxWidth: 500, margin: '0 auto', padding: '14px 12px 80px', width: '100%', fontFamily: 'system-ui,-apple-system,sans-serif', background: '#f8fafc', minHeight: '100vh' }}>
+      <style>{`
+        @keyframes spin{to{transform:rotate(360deg)}}
+        @keyframes pulse{0%,100%{opacity:.5}50%{opacity:1}}
+        /* html5-qrcode mobile fixes */
+        #reader{width:100%!important}
+        #reader video{width:100%!important;height:auto!important;object-fit:cover;border-radius:0}
+        #reader__scan_region{width:100%!important}
+        #reader__scan_region img{width:100%!important}
+        #reader__dashboard{padding:8px 10px!important}
+        #reader__dashboard_section_swaplink{font-size:12px!important;word-break:break-word}
+        #reader__dashboard_section_csr span{font-size:11px!important}
+        #reader__filescan_input{font-size:12px!important;max-width:100%}
+        #reader select{max-width:100%;font-size:12px!important}
+        #reader__status_span{font-size:11px!important;word-break:break-word}
+        #reader__camera_permission_button{font-size:13px!important;padding:10px 16px!important;max-width:100%;word-break:break-word}
+      `}</style>
 
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
@@ -243,7 +275,7 @@ export default function GateScanner() {
       </div>
 
       {/* Scanner */}
-      {isScanning && <div style={{ borderRadius: 22, overflow: 'hidden', border: '4px solid #000', marginBottom: 14 }}><div id="reader" /></div>}
+      {isScanning && <div style={{ borderRadius: 18, overflow: 'hidden', border: '3px solid #000', marginBottom: 14, width: '100%' }}><div id="reader" /></div>}
 
       {/* History */}
       <div style={{ background: '#fff', borderRadius: 20, padding: 15, border: '1px solid #e2e8f0' }}>
