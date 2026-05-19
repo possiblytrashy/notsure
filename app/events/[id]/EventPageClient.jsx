@@ -73,7 +73,7 @@ function WaitlistModal({ event, tier, onClose }) {
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, backdropFilter: 'blur(8px)', padding: '20px' }}>
-      <div style={{ background: '#fff', borderRadius: '30px', padding: '40px', width: '100%', maxWidth: '400px', boxShadow: '0 40px 80px rgba(0,0,0,0.2)' }}>
+      <div style={{ background: '#fff', borderRadius: '24px', padding: 'clamp(20px,5vw,40px)', width: '100%', maxWidth: '400px', boxShadow: '0 20px 60px rgba(0,0,0,0.15)', margin: '0 10px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px' }}>
           <h3 style={{ margin: 0, fontWeight: 900, fontSize: '22px' }}>Join Waitlist</h3>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}><X size={20} /></button>
@@ -356,7 +356,7 @@ export default function EventPage() {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
         <style>{`@keyframes pulse{0%,100%{opacity:.6}50%{opacity:1}} @keyframes successPop{0%{transform:scale(0.5);opacity:0}70%{transform:scale(1.1)}100%{transform:scale(1);opacity:1}}`}</style>
-        <div style={{ maxWidth: '460px', width: '100%', background: '#fff', borderRadius: '40px', padding: '48px', boxShadow: '0 40px 80px rgba(0,0,0,0.12)', border: '1px solid #f1f5f9' }}>
+        <div style={{ maxWidth: '460px', width: '100%', background: '#fff', borderRadius: '28px', padding: 'clamp(20px,5vw,48px)', boxShadow: '0 20px 60px rgba(0,0,0,0.12)', border: '1px solid #f1f5f9', margin: '0 12px' }}>
           <div style={{ textAlign: 'center' }}>
             <div style={{ width: '80px', height: '80px', borderRadius: '24px', background: '#f0fdf4', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 22px', animation: 'successPop 0.5s ease' }}>
               <CheckCircle2 size={40} color="#22c55e" />
@@ -364,7 +364,7 @@ export default function EventPage() {
             <h2 style={{ fontSize: '26px', fontWeight: 950, letterSpacing: '-1px', margin: '0 0 8px' }}>ACCESS GRANTED</h2>
             <p style={{ color: '#64748b', fontWeight: 600, margin: '0 0 28px' }}>Your ticket is confirmed and ready</p>
 
-            <div style={{ background: '#000', borderRadius: '24px', padding: '24px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '18px', textAlign: 'left', marginBottom: '28px', color: '#fff' }}>
+            <div style={{ background: '#000', borderRadius: '20px', padding: 'clamp(14px,3vw,24px)', display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(120px,1fr))', gap: '14px', textAlign: 'left', marginBottom: '20px', color: '#fff' }}>
               {[['ATTENDEE', paymentSuccess.customer], ['TIER', paymentSuccess.tier], ['EVENT', event.title?.substring(0, 20)], ['DATE', formatDate(event.date).substring(0, 15)]].map(([l, v]) => (
                 <div key={l}><div style={{ fontSize: '9px', fontWeight: 800, color: 'rgba(255,255,255,0.4)', letterSpacing: '1px', marginBottom: '4px' }}>{l}</div><div style={{ fontSize: '13px', fontWeight: 700 }}>{v}</div></div>
               ))}
@@ -377,7 +377,7 @@ export default function EventPage() {
 
             {event.lat && event.lng && (
               <>
-                <div style={{ height: '280px', borderRadius: '24px', overflow: 'hidden', marginBottom: '16px', border: '1px solid #f1f5f9', position: 'relative' }}>
+                <div style={{ height: 'clamp(180px,40vw,280px)', borderRadius: '20px', overflow: 'hidden', marginBottom: '14px', border: '1px solid #f1f5f9', position: 'relative' }}>
                   <LuxuryMap lat={event.lat} lng={event.lng} />
                   <div style={{ position: 'absolute', bottom: '15px', left: '15px', right: '15px', background: '#fff', padding: '10px 14px', borderRadius: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 10px 30px rgba(0,0,0,0.1)', zIndex: 999 }}>
                     <p style={{ margin: 0, fontWeight: 800, fontSize: '11px' }}>{event.location}</p>
@@ -386,7 +386,7 @@ export default function EventPage() {
                 </div>
                 <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '20px', marginBottom: '24px', border: '1px solid #f1f5f9' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}><Car size={16} color="#000" /><span style={{ fontSize: '11px', fontWeight: 900, letterSpacing: '1px' }}>TRAVEL CONCIERGE</span></div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '8px' }}>
                     {['uber', 'bolt', 'yango'].map(app => (
                       <button key={app} onClick={() => handleRide(app)} style={{ background: '#fff', border: '1px solid #e2e8f0', padding: '10px', borderRadius: '12px', fontSize: '12px', fontWeight: 800, cursor: 'pointer' }}>{app.charAt(0).toUpperCase() + app.slice(1)}</button>
                     ))}
@@ -410,7 +410,7 @@ export default function EventPage() {
 
   // ── MAIN RENDER ──────────────────────────────────────────────────────────
   return (
-    <div style={{ maxWidth: '1300px', margin: '0 auto', padding: '20px 16px 100px', fontFamily: '"Inter",sans-serif' }}>
+    <div style={{ maxWidth: '1300px', margin: '0 auto', padding: 'clamp(12px,3vw,20px) clamp(10px,2vw,16px) 100px', fontFamily: '"Inter",sans-serif' }}>
       <style>{`
         @keyframes pulse{0%,100%{opacity:.6}50%{opacity:1}}
         @keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
@@ -436,10 +436,10 @@ export default function EventPage() {
       </div>
 
       {/* MAIN GRID */}
-      <div className="cg" style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '55px', animation: 'fadeIn 0.5s ease' }}>
+      <div className="cg" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(340px,100%), 1fr))', gap: 'clamp(20px,4vw,55px)', animation: 'fadeIn 0.5s ease' }}>
         {/* GALLERY */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '25px' }}>
-          <div className="mf" style={{ width: '100%', borderRadius: '36px', overflow: 'hidden', height: '640px', background: '#f1f5f9', position: 'relative', boxShadow: '0 20px 50px rgba(0,0,0,0.06)' }}>
+          <div className="mf" style={{ width: '100%', borderRadius: '36px', overflow: 'hidden', height: 'clamp(240px,50vw,640px)', background: '#f1f5f9', position: 'relative', boxShadow: '0 20px 50px rgba(0,0,0,0.06)' }}>
             <img src={event.images?.[currentImg] || 'https://via.placeholder.com/800'} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt={event.title} />
             {event.images?.length > 1 && (
               <div style={{ position: 'absolute', bottom: '24px', left: '50%', transform: 'translateX(-50%)', display: 'flex', gap: '12px' }}>
@@ -478,7 +478,7 @@ export default function EventPage() {
           </div>
 
           {/* SPECS */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(min(200px,100%),1fr))', gap: '10px' }}>
             {[{ icon: Calendar, color: '#0ea5e9', label: 'DATE', value: formatDate(event.date) },
               { icon: Clock, color: '#f43f5e', label: 'TIME', value: formatTime(event.time) }].map(({ icon: Icon, color, label, value }) => (
               <div key={label} style={{ display: 'flex', gap: '12px', alignItems: 'center', padding: '14px', background: 'rgba(255,255,255,0.8)', borderRadius: '18px', border: '1px solid #f1f5f9', backdropFilter: 'blur(10px)' }}>
