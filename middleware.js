@@ -43,13 +43,19 @@ const RATE_LIMITS = {
   default:                        { limit: 60, window: 60_000 },
 };
 
-const SECURITY_HEADERS = {
+const SECURITY_HEADERS_DEFAULT = {
   'X-Content-Type-Options': 'nosniff',
   'X-Frame-Options': 'DENY',
   'X-XSS-Protection': '1; mode=block',
   'Referrer-Policy': 'strict-origin-when-cross-origin',
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=(self)',
   'Strict-Transport-Security': 'max-age=63072000; includeSubDomains; preload',
+};
+
+// Allow camera on the QR scan page only
+const SECURITY_HEADERS_CAMERA = {
+  ...SECURITY_HEADERS_DEFAULT,
+  'Permissions-Policy': 'camera=(self), microphone=(), geolocation=(self)',
 };
 
 // Blocked user agents (bots/scrapers trying to abuse checkout)
@@ -105,7 +111,8 @@ export async function middleware(req) {
     res.headers.set('X-RateLimit-Remaining', String(remaining));
 
     // Apply security headers to all API responses
-    for (const [key, val] of Object.entries(SECURITY_HEADERS)) {
+    const headersToApply = pathname.startsWith('/admin/scan') ? SECURITY_HEADERS_CAMERA : SECURITY_HEADERS_DEFAULT;
+    for (const [key, val] of Object.entries(headersToApply)) {
       res.headers.set(key, val);
     }
     return res;
@@ -120,7 +127,8 @@ export async function middleware(req) {
 
   // ── 5. ADD SECURITY HEADERS TO ALL RESPONSES ──────────────────────────────
   const res = NextResponse.next();
-  for (const [key, val] of Object.entries(SECURITY_HEADERS)) {
+  const pageHeaders = pathname.startsWith('/admin/scan') ? SECURITY_HEADERS_CAMERA : SECURITY_HEADERS_DEFAULT;
+  for (const [key, val] of Object.entries(pageHeaders)) {
     res.headers.set(key, val);
   }
 
