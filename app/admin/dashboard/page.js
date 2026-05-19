@@ -475,7 +475,7 @@ export default function AdminDashboard() {
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}*{box-sizing:border-box}`}</style>
 
       {/* Header */}
-      <div style={{ background: '#0f172a', padding: '14px 18px', position: 'sticky', top: 0, zIndex: 50 }}>
+      <div style={{ background: '#0f172a', padding: '12px 14px', position: 'sticky', top: 0, zIndex: 50 }}>
         <div style={{ maxWidth: 900, margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <div style={{ width: 36, height: 36, background: 'linear-gradient(135deg,#CDA434,#7a5c1e)', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 17 }}>💰</div>
@@ -515,7 +515,7 @@ export default function AdminDashboard() {
         )}
 
         {/* Stats grid */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 12, marginBottom: 18 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(130px,1fr))', gap: 10, marginBottom: 16 }}>
           <StatCard label="TOTAL COLLECTED" value={`GHS ${totals.collected.toFixed(2)}`} sub="All time" accent="#0f172a" icon={<DollarSign size={16} />} />
           <StatCard label="PLATFORM PROFIT" value={`GHS ${totals.platform.toFixed(2)}`} sub="5% of all sales" accent="#22c55e" icon={<TrendingUp size={16} />} />
           <StatCard label="OWE ORGANIZERS" value={`GHS ${totals.owed_org.toFixed(2)}`} sub="Ticket + vote revenue" accent="#ef4444" icon={<Users size={16} />} />
@@ -543,7 +543,7 @@ export default function AdminDashboard() {
                   </div>
                   <p style={{ margin: 0, fontSize: 18, fontWeight: 950, color: '#0f172a', letterSpacing: '-1px' }}>GHS {ev.collected.toFixed(2)}</p>
                 </div>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(90px,1fr))', gap: 8 }}>
                   {[['Organizer', ev.owed_org, '#ef4444'], ['Resellers', ev.owed_res, '#f59e0b'], ['Platform', ev.platform, '#22c55e']].map(([l, v, c]) => (
                     <div key={l} style={{ background: '#f8fafc', borderRadius: 12, padding: '10px 10px' }}>
                       <p style={{ margin: '0 0 3px', fontSize: 8, color: '#94a3b8', fontWeight: 900, letterSpacing: '1px' }}>{l.toUpperCase()}</p>
@@ -562,7 +562,7 @@ export default function AdminDashboard() {
             <h2 style={{ fontSize: 16, fontWeight: 950, margin: '0 0 8px', color: '#0f172a' }}>USSD Ticket Sales</h2>
             <p style={{ margin: '0 0 18px', fontSize: 13, color: '#64748b', fontWeight: 600 }}>Tickets purchased via *USSD# shortcode. Payments go to your account; organizers tracked in payouts tab.</p>
             {/* USSD stats */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, marginBottom: 20 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(100px,1fr))', gap: 8, marginBottom: 16 }}>
               {[
                 ['Total Sales', ussdPending.filter(u => u.status === 'completed').length],
                 ['Pending', ussdPending.filter(u => u.status === 'pending').length],
@@ -696,7 +696,7 @@ export default function AdminDashboard() {
                     </span>
                   </div>
                   {/* Rows */}
-                  <div style={{ border: '1px solid #e2e8f0', borderTop: 'none', borderRadius: '0 0 16px 16px', overflow: 'hidden', maxHeight: 520, overflowY: 'auto' }}>
+                  <div style={{ border: '1px solid #e2e8f0', borderTop: 'none', borderRadius: '0 0 16px 16px', overflowX: 'auto', maxHeight: 520, overflowY: 'auto', WebkitOverflowScrolling: 'touch' }}>
                     {filteredSms.length === 0 ? (
                       <div style={{ textAlign: 'center', padding: '40px 20px', background: '#fff' }}>
                         <p style={{ color: '#94a3b8', fontWeight: 700, margin: 0 }}>No records match your filter</p>
