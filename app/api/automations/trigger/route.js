@@ -57,34 +57,52 @@ export async function POST(req) {
 
   // Log results
   const logEntries = results.map((r, i) => ({
-    rule_id: rules[i].id,
+    rule_id:      rules[i].id,
     organizer_id: rules[i].organizer_id,
-    event_id: event_id || null,
+    event_id:     event_id || null,
     event_type,
-    action_type: 'webhook',
-    status: r.status === 'fulfilled' ? 'ok' : 'failed',
-    response_ms: r.status === 'fulfilled' ? r.value?.ms : null,
-    error: r.status === 'rejected' ? String(r.reason?.message || r.reason).substring(0, 500) : null,
+    action_type:  'webhook',
+    status:       r.status === 'fulfilled' ? 'ok' : 'failed',
+    response_ms:  r.status === 'fulfilled' ? r.value?.ms : null,
+    error:        r.status === 'rejected'  ? String(r.reason?.message || r.reason).substring(0, 500) : null,
     payload,
   }));
 
   await db.from('automation_log').insert(logEntries).catch(() => {});
 
-  // Update fire_count + last_fired_at on successful rules
+  // Update last_fired_at on successful rules, then increment fire_count via a separate
+  // plain UPDATE that reads the current value first (avoids passing a Promise as a column value)
   const firedIds = results
     .map((r, i) => r.status === 'fulfilled' ? rules[i].id : null)
     .filter(Boolean);
 
   if (firedIds.length) {
+    const now = new Date().toISOString();
+
+    // Update last_fired_at for all fired rules at once
     await db.from('automation_rules')
-      .update({ last_fired_at: new Date().toISOString(), fire_count: db.rpc('increment', { x: 1 }) })
+      .update({ last_fired_at: now })
       .in('id', firedIds)
       .catch(() => {});
+
+    // Increment fire_count one by one using raw SQL expression via RPC.
+    // Falls back to a read-then-write if the RPC doesn't exist.
+    for (const ruleId of firedIds) {
+      const { error: rpcErr } = await db.rpc('increment_automation_fire_count', { rule_id_param: ruleId }).catch(() => ({ error: true }));
+      if (rpcErr) {
+        // Fallback: read current count, add 1
+        const { data: rule } = await db.from('automation_rules').select('fire_count').eq('id', ruleId).single().catch(() => ({ data: null }));
+        await db.from('automation_rules')
+          .update({ fire_count: (rule?.fire_count || 0) + 1 })
+          .eq('id', ruleId)
+          .catch(() => {});
+      }
+    }
   }
 
   return NextResponse.json({
-    ok: true,
-    fired: results.filter(r => r.status === 'fulfilled').length,
+    ok:     true,
+    fired:  results.filter(r => r.status === 'fulfilled').length,
     failed: results.filter(r => r.status === 'rejected').length,
   });
 }
@@ -93,23 +111,22 @@ async function fireWebhook(rule, payload) {
   const { url, secret } = rule.action_config || {};
   if (!url) throw new Error('No webhook URL configured on rule ' + rule.id);
 
-  const body = JSON.stringify(payload);
+  const body    = JSON.stringify(payload);
   const headers = {
-    'Content-Type': 'application/json',
-    'User-Agent': 'OUSTED-Webhooks/1.0',
-    'X-OUSTED-Event': payload.event_type,
-    'X-OUSTED-Timestamp': payload.timestamp,
-    'X-OUSTED-Delivery': crypto.randomUUID(),
+    'Content-Type':        'application/json',
+    'User-Agent':          'OUSTED-Webhooks/1.0',
+    'X-OUSTED-Event':      payload.event_type,
+    'X-OUSTED-Timestamp':  payload.timestamp,
+    'X-OUSTED-Delivery':   crypto.randomUUID(),
   };
 
-  // HMAC-SHA256 signature so receiver can verify authenticity
   if (secret) {
     const sig = crypto.createHmac('sha256', secret).update(body).digest('hex');
     headers['X-OUSTED-Signature'] = `sha256=${sig}`;
   }
 
   const start = Date.now();
-  const res = await fetch(url, {
+  const res   = await fetch(url, {
     method: 'POST',
     headers,
     body,
