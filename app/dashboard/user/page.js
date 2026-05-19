@@ -86,7 +86,7 @@ function TicketCard({ ticket, onQR, onNav, onShare, onGoogleWallet, onAppleWalle
       </div>
       {/* Body */}
       <div style={{ background: '#111', padding: '15px 15px 18px' }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 11, marginBottom: 13 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(110px,1fr))', gap: 9, marginBottom: 11 }}>
           {[['📅 DATE', ev.date ? new Date(ev.date).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : 'TBA'], ['📍 VENUE', ev.location || 'TBA'], ['🎫 REF', (ticket.ticket_number || ticket.reference || '—').substring(0, 14)], ['💳 PAID', `${ticket.currency || 'GHS'} ${Number(ticket.base_amount || ticket.amount || 0).toFixed(2)}`]].map(([l, v]) => (
             <div key={l}><p style={{ margin: '0 0 2px', fontSize: 8, color: '#444', fontWeight: 900, letterSpacing: '1.5px' }}>{l}</p><p style={{ margin: 0, fontSize: 12, fontWeight: 800, color: '#ccc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v}</p></div>
           ))}
@@ -178,7 +178,7 @@ function TransportSheet({ ticket, onClose }) {
         <div style={{ width: 36, height: 4, background: 'rgba(255,255,255,.12)', borderRadius: 2, margin: '0 auto 20px' }} />
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 5 }}><MapPin size={14} color="#CDA434" /><h3 style={{ color: '#fff', fontWeight: 950, fontSize: 18, margin: 0 }}>Get to {ev.location || 'the venue'}</h3></div>
         <p style={{ color: '#444', fontSize: 12, fontWeight: 600, margin: '0 0 20px 24px' }}>{ev.title}</p>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(80px,1fr))', gap: 8 }}>
           {apps.map(app => <button key={app.label} onClick={() => open(app)} style={{ background: 'rgba(255,255,255,.04)', border: '1px solid rgba(255,255,255,.07)', borderRadius: 20, padding: '18px 8px', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}><span style={{ fontSize: 26 }}>{app.emoji}</span><span style={{ color: '#bbb', fontSize: 10, fontWeight: 800 }}>{app.label}</span></button>)}
         </div>
       </div>
@@ -424,7 +424,7 @@ export default function UserDashboard() {
 
       {/* Header */}
       <div style={{ position: 'sticky', top: 0, zIndex: 50, background: 'rgba(5,5,5,.93)', backdropFilter: 'blur(24px)', WebkitBackdropFilter: 'blur(24px)', borderBottom: '1px solid rgba(255,255,255,.05)', padding: '12px 16px' }}>
-        <div style={{ maxWidth: 480, margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ maxWidth: 480, margin: '0 auto', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 4px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{ width: 32, height: 32, background: 'linear-gradient(135deg,#CDA434,#7a5c1e)', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15 }}>🎟</div>
             <div><h1 style={{ fontSize: 15, fontWeight: 950, letterSpacing: '-.3px', margin: 0, lineHeight: 1 }}>MY VAULT</h1><p style={{ margin: '2px 0 0', fontSize: 10, color: '#444', fontWeight: 700 }}>{user?.email?.split('@')[0]}</p></div>
@@ -436,7 +436,7 @@ export default function UserDashboard() {
         </div>
       </div>
 
-      <div style={{ maxWidth: 480, margin: '0 auto', padding: '18px 15px 100px' }}>
+      <div style={{ maxWidth: 480, margin: '0 auto', padding: '14px 12px 100px' }}>
         {pendingRef && <PaymentBanner reference={pendingRef} onDone={() => { setPendingRef(null); loadTickets(user); }} />}
 
         {/* Next event hero */}
@@ -461,7 +461,7 @@ export default function UserDashboard() {
         )}
 
         {/* Stats */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 10, marginBottom: 18, animation: 'fadeUp .5s ease .08s both' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(90px,1fr))', gap: 8, marginBottom: 16, animation: 'fadeUp .5s ease .08s both' }}>
           {[['🎟️', tickets.length, 'TICKETS'], ['📅', upcoming.length, 'UPCOMING'], [`GHS ${spent.toFixed(0)}`, null, 'TOTAL SPENT']].map(([emoji, num, label]) => (
             <div key={label} style={{ background: 'rgba(255,255,255,.03)', border: '1px solid rgba(255,255,255,.06)', borderRadius: 20, padding: '14px 10px', textAlign: 'center' }}>
               <p style={{ margin: '0 0 4px', fontSize: num !== null ? 20 : 13, fontWeight: 950, letterSpacing: '-1px' }}>{num !== null ? num : emoji}</p>
