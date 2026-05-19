@@ -3,268 +3,144 @@
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-// UI & Icons
-import { 
-  X, Plus, Trash2, Image as ImageIcon, 
-  MapPin, Calendar, Clock, Ticket, 
+import {
+  X, Plus, Trash2, Image as ImageIcon,
+  MapPin, Calendar, Ticket,
   Loader2, ChevronLeft, Upload, FileText,
   CheckCircle2, AlertCircle, Sparkles,
-  ShieldCheck, Lock, Percent, Search, Map as MapIcon,
-  Info, Eye, EyeOff, Settings, CreditCard,
-  ChevronRight, HelpCircle, ArrowRight
+  ShieldCheck, Lock, Map as MapIcon,
+  ArrowRight
 } from 'lucide-react';
-
-// CSS Imports
-
-// --- LEAFLET CSS ---
 import 'leaflet/dist/leaflet.css';
 import 'leaflet-geosearch/dist/geosearch.css';
-import dynamic from "next/dynamic";
+import dynamic from 'next/dynamic';
 import { useMap, useMapEvents } from 'react-leaflet';
-// --- DYNAMIC LEAFLET COMPONENTS ---
-const MapContainer = dynamic(() => import('react-leaflet').then(mod => mod.MapContainer), { ssr: false });
-const TileLayer = dynamic(() => import('react-leaflet').then(mod => mod.TileLayer), { ssr: false });
-const Marker = dynamic(() => import('react-leaflet').then(mod => mod.Marker), { ssr: false });
 
-// Safely import GeoSearch for client-side only
-let GeoSearchControl, OpenStreetMapProvider;
-if (typeof window !== 'undefined') {
-  const GeoSearch = require('leaflet-geosearch');
-  GeoSearchControl = GeoSearch.GeoSearchControl;
-  OpenStreetMapProvider = GeoSearch.OpenStreetMapProvider;
-}
+const MapContainer = dynamic(() => import('react-leaflet').then(m => m.MapContainer), { ssr: false });
+const TileLayer    = dynamic(() => import('react-leaflet').then(m => m.TileLayer),    { ssr: false });
+const Marker       = dynamic(() => import('react-leaflet').then(m => m.Marker),       { ssr: false });
 
-
-// Custom Luxury Icon
+// ── Luxury map pin ────────────────────────────────────────────
 const getLuxuryIcon = () => {
   if (typeof window === 'undefined') return null;
   const L = require('leaflet');
   return L.divIcon({
     className: 'luxury-pin',
-    html: `
-      <div style="position: relative; width: 20px; height: 20px; background: #000; border: 3px solid #fff; border-radius: 50%; box-shadow: 0 4px 15px rgba(0,0,0,0.4);">
-        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 50px; height: 50px; background: rgba(0,0,0,0.1); border-radius: 50%; animation: pulse 2s infinite; z-index: -1;"></div>
-      </div>`,
-    iconSize: [50, 50],
-    iconAnchor: [25, 25]
+    html: `<div style="width:20px;height:20px;background:#000;border:3px solid #fff;border-radius:50%;box-shadow:0 4px 15px rgba(0,0,0,.4)"></div>`,
+    iconSize: [20, 20],
+    iconAnchor: [10, 10],
   });
 };
 
-// Location Picker Logic
-// Location Picker Logic
-const MapLogic = ({ lat, lng, setEventData }) => {
-  const map = useMap(); // Now correctly uses the hook from the import
-
-  // 1. Click to Place Pin
+// ── Map logic (search + click) ────────────────────────────────
+const MapLogic = ({ setEventData }) => {
+  const map = useMap();
   useMapEvents({
     click(e) {
       setEventData(prev => ({ ...prev, lat: e.latlng.lat, lng: e.latlng.lng }));
-      map.flyTo(e.latlng, map.getZoom()); // Smooth animation to click
     },
   });
-
-  // 2. Search Bar Integration
   useEffect(() => {
-    // Dynamically require GeoSearch to avoid SSR issues
-    const setupSearch = async () => {
+    let searchControl;
+    (async () => {
       if (typeof window === 'undefined') return;
-
       try {
-        // Load the library dynamically
         const { GeoSearchControl, OpenStreetMapProvider } = await import('leaflet-geosearch');
-        
         const provider = new OpenStreetMapProvider();
-        const searchControl = new GeoSearchControl({
+        searchControl = new GeoSearchControl({
           provider,
           style: 'bar',
           showMarker: false,
-          retainZoomLevel: false,
           animateZoom: true,
-          searchLabel: 'Search venue by city or address...',
-          classNames: { 
-            container: 'luxury-search-container',
-            button: 'luxury-search-btn',
-            input: 'luxury-search-input'
-          }
+          searchLabel: 'Search venue or address…',
         });
-
         map.addControl(searchControl);
-        
-        const handleSearch = (result) => {
-           setEventData(prev => ({
+        map.on('geosearch/showlocation', (result) => {
+          setEventData(prev => ({
             ...prev,
             location: result.location.label,
             lat: result.location.y,
-            lng: result.location.x
+            lng: result.location.x,
           }));
-        };
-
-        map.on('geosearch/showlocation', handleSearch);
-
-        // Cleanup
-        return () => {
-          map.removeControl(searchControl);
-          map.off('geosearch/showlocation', handleSearch);
-        };
-      } catch (error) {
-        console.error("Search module failed to load", error);
+        });
+      } catch (e) {
+        console.error('GeoSearch load error', e);
+      }
+    })();
+    return () => {
+      if (searchControl) {
+        try { map.removeControl(searchControl); } catch (_) {}
       }
     };
-
-    setupSearch();
   }, [map, setEventData]);
-
   return null;
 };
-/**
- * CREATE EVENT COMPONENT
- * Features:
- * - Luxury UI Design System
- * - Multi-tier Ticketing Support
- * - Paystack Subaccount Integration (5% Split)
- * - Mapbox Geocoding & Manual Location Override
- * - Supabase Storage for High-Res Media
- */
 
+// ── Main component ────────────────────────────────────────────
 export default function CreateEvent() {
-  const router = useRouter();
+  const router      = useRouter();
   const fileInputRef = useRef(null);
 
-  // --- 1. STATE MANAGEMENT ---
-  const [loading, setLoading] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [user, setUser] = useState(null);
-  const [organizerSubaccount, setOrganizerSubaccount] = useState(null);
-  const [formError, setFormError] = useState(null);
-  const [success, setSuccess] = useState(false);
-  const [dragActive, setDragActive] = useState(false);
-  
-  // Map Modal State
+  const [loading, setLoading]           = useState(false);
+  const [uploading, setUploading]       = useState(false);
+  const [user, setUser]                 = useState(null);
+  const [orgSubaccount, setOrgSubaccount] = useState(null);
+  const [formError, setFormError]       = useState(null);
+  const [success, setSuccess]           = useState(false);
   const [showMapModal, setShowMapModal] = useState(false);
-  const [isSearching, setIsSearching] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
 
-  // Event Data State
   const [eventData, setEventData] = useState({
-    title: '',
-    description: '',
-    date: '',
-    hour: '08',
-    minute: '00',
-    period: 'PM',
-    location: '', 
-    lat: null, // Set when user picks location
-    lng: null,
-    category: 'Entertainment',
-    images: [], 
-    is_published: true
+    title: '', description: '', date: '',
+    hour: '08', minute: '00', period: 'PM',
+    location: '', lat: null, lng: null,
+    category: 'Entertainment', images: [], is_published: true,
   });
 
-  // Tiers State
-  const [tiers, setTiers] = useState([
-    { 
-      id: crypto.randomUUID(), 
-      name: 'Standard Access', 
-      price: '', 
-      capacity: '', 
-      description: 'General admission to the experience'
-    }
-  ]);
+  const [tiers, setTiers] = useState([{
+    id: crypto.randomUUID(),
+    name: 'Standard Access', price: '', capacity: '',
+    description: 'General admission to the experience',
+  }]);
 
-  // --- 2. AUTHENTICATION & ONBOARDING CHECK ---
+  // Auth check
   useEffect(() => {
-    const initialize = async () => {
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
-      if (authError || !user) {
-        router.push('/login');
-        return;
-      }
+    (async () => {
+      const { data: { user }, error } = await supabase.auth.getUser();
+      if (error || !user) { router.push('/login'); return; }
       setUser(user);
-
-      // Verify Paystack Payout Setup (Crucial for 5% split)
       const { data: profile } = await supabase
-        .from('profiles')
-        .select('paystack_subaccount_code')
-        .eq('id', user.id)
-        .single();
-
+        .from('profiles').select('paystack_subaccount_code').eq('id', user.id).single();
       if (!profile?.paystack_subaccount_code) {
-        setFormError("Action Required: Payout Account not detected. Please complete onboarding in Settings.");
+        setFormError('Action Required: Payout account not set up. Complete onboarding in Settings.');
       } else {
-        setOrganizerSubaccount(profile.paystack_subaccount_code);
+        setOrgSubaccount(profile.paystack_subaccount_code);
       }
-    };
-    initialize();
+    })();
   }, [router]);
 
-  // Close map modal on Escape key
+  // ESC closes modal
   useEffect(() => {
-    const handler = (e) => { if (e.key === 'Escape') setShowMapModal(false); };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
+    const h = (e) => { if (e.key === 'Escape') setShowMapModal(false); };
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
   }, []);
 
-  // --- 3. LOCATION LOGIC ---
-  const handleMapClick = (e) => {
-    const { lng, lat } = e.lngLat;
-    setEventData(prev => ({ ...prev, lat, lng }));
-  };
-
-  const handleManualSearch = async () => {
-    if (!searchQuery.trim()) return;
-    setIsSearching(true);
-    setFormError(null);
-    try {
-      // Nominatim — free OpenStreetMap geocoding, no API key needed
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(searchQuery)}&format=json&limit=1&addressdetails=1`,
-        { headers: { 'Accept-Language': 'en', 'User-Agent': 'OUSTED/1.0 (ousted.live)' } }
-      );
-      const data = await res.json();
-      if (data && data.length > 0) {
-        const result = data[0];
-        const lat = parseFloat(result.lat);
-        const lng = parseFloat(result.lon);
-        const displayName = result.display_name;
-        setEventData(prev => ({ ...prev, location: displayName, lat, lng }));
-      } else {
-        setFormError('Location not found. Try a more specific search.');
-      }
-    } catch (err) {
-      console.error('Geocoding error:', err);
-      setFormError('Search unavailable. Click the map to set location manually.');
-    } finally {
-      setIsSearching(false);
-    }
-  };
-
-  // --- 4. MEDIA HANDLING (SUPABASE STORAGE) ---
+  // ── File upload ───────────────────────────────────────────
   const handleFileUpload = async (files) => {
-    if (!files || files.length === 0) return;
-    setUploading(true);
-    setFormError(null);
-    const uploadedUrls = [...eventData.images];
-
+    if (!files?.length) return;
+    setUploading(true); setFormError(null);
+    const urls = [...eventData.images];
     try {
       for (const file of Array.from(files)) {
-        if (file.size > 10 * 1024 * 1024) throw new Error("File too large (Max 10MB for luxury themes)");
-        
-        const fileExt = file.name.split('.').pop();
-        const fileName = `${user.id}/${Date.now()}-${Math.random()}.${fileExt}`;
-
-        const { error: uploadError } = await supabase.storage
-          .from('event-images')
-          .upload(fileName, file);
-
-        if (uploadError) throw uploadError;
-
-        const { data: { publicUrl } } = supabase.storage
-          .from('event-images')
-          .getPublicUrl(fileName);
-
-        uploadedUrls.push(publicUrl);
+        if (file.size > 10 * 1024 * 1024) throw new Error('File too large (max 10 MB)');
+        const ext      = file.name.split('.').pop();
+        const fileName = `${user.id}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
+        const { error: up } = await supabase.storage.from('event-images').upload(fileName, file);
+        if (up) throw up;
+        const { data: { publicUrl } } = supabase.storage.from('event-images').getPublicUrl(fileName);
+        urls.push(publicUrl);
       }
-      setEventData(prev => ({ ...prev, images: uploadedUrls }));
+      setEventData(prev => ({ ...prev, images: urls }));
     } catch (err) {
       setFormError(err.message);
     } finally {
@@ -272,78 +148,50 @@ export default function CreateEvent() {
     }
   };
 
-  const removeImage = (index) => {
-    const filtered = eventData.images.filter((_, i) => i !== index);
-    setEventData({ ...eventData, images: filtered });
-  };
+  // ── Tiers ─────────────────────────────────────────────────
+  const addTier    = () => setTiers(t => [...t, { id: crypto.randomUUID(), name: '', price: '', capacity: '', description: '' }]);
+  const removeTier = (id) => { if (tiers.length > 1) setTiers(t => t.filter(x => x.id !== id)); };
+  const updateTier = (id, field, val) => setTiers(t => t.map(x => x.id === id ? { ...x, [field]: val } : x));
 
-  // --- 5. TIER MANAGEMENT ---
-  const addTier = () => {
-    setTiers([...tiers, { id: crypto.randomUUID(), name: '', price: '', capacity: '', description: '' }]);
-  };
-
-  const removeTier = (id) => {
-    if (tiers.length > 1) {
-      setTiers(tiers.filter(t => t.id !== id));
-    }
-  };
-
-  const updateTier = (id, field, value) => {
-    setTiers(tiers.map(t => t.id === id ? { ...t, [field]: value } : t));
-  };
-
-  // --- 6. SUBMISSION LOGIC ---
+  // ── Submit ────────────────────────────────────────────────
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!organizerSubaccount) {
-      setFormError("Payout account missing. Please check settings.");
-      return;
-    }
-    
-    setLoading(true);
-    setFormError(null);
-
+    if (!orgSubaccount) { setFormError('Payout account missing. Please check settings.'); return; }
+    setLoading(true); setFormError(null);
     try {
-      if (!eventData.title) throw new Error("Please provide an experience title.");
-      if (!eventData.location) throw new Error("A venue name or address is required.");
-      if (eventData.images.length === 0) throw new Error("Upload at least one promotional image.");
+      if (!eventData.title)         throw new Error('Experience title is required.');
+      if (!eventData.location)      throw new Error('A venue name or address is required.');
+      if (!eventData.images.length) throw new Error('Upload at least one promotional image.');
 
-      // Step 1: Create Main Event Record
-      const { data: event, error: eventError } = await supabase
-        .from('events')
-        .insert([{
-          organizer_id: user.id,
-          title: eventData.title,
-          description: eventData.description,
-          date: eventData.date,
-          time: `${eventData.hour}:${eventData.minute} ${eventData.period}`,
-          location: eventData.location,
-          lat: eventData.lat,
-          lng: eventData.lng,
-          images: eventData.images,
-          organizer_subaccount: organizerSubaccount,
-          category: eventData.category,
-          is_published: eventData.is_published
-        }])
-        .select().single();
+      const { data: ev, error: evErr } = await supabase.from('events').insert([{
+        organizer_id:          user.id,
+        title:                 eventData.title,
+        description:           eventData.description,
+        date:                  eventData.date,
+        time:                  `${eventData.hour}:${eventData.minute} ${eventData.period}`,
+        location:              eventData.location,
+        lat:                   eventData.lat,
+        lng:                   eventData.lng,
+        images:                eventData.images,
+        organizer_subaccount:  orgSubaccount,
+        category:              eventData.category,
+        is_published:          eventData.is_published,
+      }]).select().single();
+      if (evErr) throw evErr;
 
-      if (eventError) throw eventError;
-
-      // Step 2: Bulk Insert Ticket Tiers
-      const tiersPayload = tiers.map(t => ({
-        event_id: event.id,
-        name: t.name,
-        price: parseFloat(t.price) || 0,
-        max_quantity: parseInt(t.capacity) || 0,
-        description: t.description
-      }));
-
-      const { error: tiersError } = await supabase.from('ticket_tiers').insert(tiersPayload);
-      if (tiersError) throw tiersError;
+      const { error: tiersErr } = await supabase.from('ticket_tiers').insert(
+        tiers.map(t => ({
+          event_id:     ev.id,
+          name:         t.name,
+          price:        parseFloat(t.price) || 0,
+          max_quantity: parseInt(t.capacity) || 0,
+          description:  t.description,
+        }))
+      );
+      if (tiersErr) throw tiersErr;
 
       setSuccess(true);
       setTimeout(() => router.push('/dashboard/organizer'), 2000);
-
     } catch (err) {
       setFormError(err.message);
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -352,385 +200,291 @@ export default function CreateEvent() {
     }
   };
 
-  // --- 7. STYLING OBJECT (LUXURY SYSTEM) ---
-  const styles = {
-    wrapper: { 
-      background: '#fcfdfe', 
-      minHeight: '100vh', 
-      padding: '40px 20px 120px',
-      fontFamily: 'inherit'
-    },
-    container: { 
-      maxWidth: '1240px', 
-      margin: '0 auto' 
-    },
-    mainCard: { 
-      background: '#fff', 
-      borderRadius: '32px', 
-      padding: '36px', 
-      border: '1px solid #f1f5f9', 
-      marginBottom: '28px', 
-      boxShadow: '0 10px 40px rgba(0,0,0,0.02)' 
-    },
-    sidebarCard: { 
-      background: '#fff', 
-      borderRadius: '28px', 
-      padding: '28px', 
-      border: '1px solid #f1f5f9', 
-      position: 'sticky', 
-      top: '32px',
-      boxShadow: '0 10px 40px rgba(0,0,0,0.02)'
-    },
-    label: { 
-      fontSize: '11px', 
-      fontWeight: '900', 
-      color: '#94a3b8', 
-      textTransform: 'uppercase', 
-      letterSpacing: '0.1em', 
-      marginBottom: '12px', 
-      display: 'block' 
-    },
-    input: { 
-      width: '100%', 
-      padding: '18px', 
-      borderRadius: '18px', 
-      border: '2px solid #f1f5f9', 
-      background: '#f8fafc', 
-      fontWeight: '600', 
-      fontSize: '16px', 
-      outline: 'none', 
-      transition: 'all 0.2s ease',
-      color: '#0f172a'
-    },
-    iconBox: (color) => ({ 
-      width: '46px', 
-      height: '46px', 
-      borderRadius: '14px', 
-      background: `${color}10`, 
-      display: 'flex', 
-      alignItems: 'center', 
-      justifyContent: 'center', 
-      color: color 
-    }),
-    submitBtn: { 
-      width: '100%', 
-      background: '#000', 
-      color: '#fff', 
-      padding: '22px', 
-      borderRadius: '22px', 
-      fontWeight: '900', 
-      border: 'none', 
-      cursor: 'pointer', 
-      display: 'flex', 
-      alignItems: 'center', 
-      justifyContent: 'center', 
-      gap: '12px', 
-      fontSize: '17px',
-      transition: 'transform 0.2s ease',
-      boxShadow: '0 20px 40px rgba(0,0,0,0.1)'
-    },
-    locationBar: { 
-      display: 'flex', 
-      gap: '12px', 
-      alignItems: 'center', 
-      background: '#f8fafc', 
-      padding: '10px', 
-      borderRadius: '22px', 
-      border: '2px solid #f1f5f9' 
-    },
-    mapModalOverlay: { 
-      position: 'fixed', 
-      top: 0, 
-      left: 0, 
-      right: 0, 
-      bottom: 0, 
-      background: 'rgba(15, 23, 42, 0.92)', 
-      backdropFilter: 'blur(12px)', 
-      zIndex: 2000, 
-      display: 'flex', 
-      alignItems: 'center', 
-      justifyContent: 'center', 
-      padding: '24px' 
-    },
-    mapModalContent: { 
-      background: '#fff', 
-      width: '100%', 
-      maxWidth: '1000px', 
-      borderRadius: '40px', 
-      overflow: 'hidden', 
-      position: 'relative',
-      boxShadow: '0 30px 100px rgba(0,0,0,0.4)'
-    },
-    tierCard: {
-      background: '#f8fafc',
-      padding: '24px',
-      borderRadius: '24px',
-      marginBottom: '20px',
-      border: '1px solid #f1f5f9',
-      transition: 'all 0.3s ease'
-    },
-    // Add these inside your const styles = { ... } object
-  leafletSearch: {
-    position: 'absolute',
-    top: '20px',
-    left: '20px',
-    zIndex: 1000,
-    width: '350px',
-    background: '#fff',
-    border: '2px solid #000',
-    borderRadius: '18px',
-    boxShadow: '0 10px 30px rgba(0,0,0,0.1)',
-    overflow: 'hidden'
-  },
-  luxuryPin: {
-    width: '16px', 
-    height: '16px',
-    background: '#000', 
-    border: '3px solid #fff',
-    borderRadius: '50%',
-    boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-    position: 'relative'
-  },
-  pulseAnimation: {
-    position: 'absolute',
-    top: '50%',
-    left: '50%',
-    transform: 'translate(-50%, -50%)',
-    width: '40px',
-    height: '40px',
-    background: 'rgba(0,0,0,0.1)',
-    borderRadius: '50%',
-    // Note: CSS animations must still be defined in a style tag or global CSS
-    animation: 'pinPulse 2s infinite' 
-  }
+  // ── Shared input style ────────────────────────────────────
+  const inp = {
+    width: '100%', padding: '16px', borderRadius: '16px',
+    border: '2px solid #f1f5f9', background: '#f8fafc',
+    fontWeight: '600', fontSize: '16px', outline: 'none',
+    color: '#0f172a', fontFamily: 'inherit', boxSizing: 'border-box',
+  };
+
+  const iconBox = (color) => ({
+    width: '42px', height: '42px', borderRadius: '13px',
+    background: `${color}18`, display: 'flex',
+    alignItems: 'center', justifyContent: 'center', color, flexShrink: 0,
+  });
+
+  const label = {
+    fontSize: '11px', fontWeight: '900', color: '#94a3b8',
+    textTransform: 'uppercase', letterSpacing: '0.1em',
+    marginBottom: '10px', display: 'block',
+  };
+
+  const card = {
+    background: '#fff', borderRadius: '28px',
+    padding: 'clamp(18px,4vw,32px)',
+    border: '1px solid #f1f5f9', marginBottom: '20px',
+    boxShadow: '0 4px 20px rgba(0,0,0,0.03)',
   };
 
   return (
-    <div style={styles.wrapper}>
-      <div style={styles.container}>
-        {/* --- HEADER --- */}
-        <div style={{ marginBottom: '48px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-          <div>
-            <button 
-              onClick={() => router.back()} 
-              style={{ border: 'none', background: 'none', color: '#94a3b8', fontWeight: '800', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', letterSpacing: '0.05em' }}
-            >
-              <ChevronLeft size={16} strokeWidth={3} /> RETURN TO PORTAL
-            </button>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginTop: '20px' }}>
-              <h1 style={{ fontSize: '42px', fontWeight: '950', letterSpacing: '-0.05em', margin: 0, color: '#0f172a' }}>Create Experience</h1>
-              <div style={{ background: '#000', color: '#fff', padding: '6px 14px', borderRadius: '100px', fontSize: '10px', fontWeight: '900', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <Sparkles size={12} /> PREMIUM
-              </div>
+    <div style={{ background: '#f8fafc', minHeight: '100vh', padding: 'clamp(14px,4vw,40px) clamp(12px,3vw,20px) 100px', fontFamily: 'inherit' }}>
+      <style>{`
+        /* ── Create-event mobile fixes ── */
+        @keyframes spin{to{transform:rotate(360deg)}}
+        @keyframes pulse{0%,100%{opacity:.6}50%{opacity:1}}
+        .ce-form-grid{display:grid;grid-template-columns:1.8fr 1fr;gap:32px;align-items:start}
+        .ce-sidebar{position:sticky;top:24px}
+        .ce-date-row{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+        .ce-tier-price-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+        .ce-location-bar{display:flex;gap:10px;align-items:center;background:#f8fafc;padding:8px;border-radius:20px;border:2px solid #f1f5f9}
+        .ce-location-input{background:none;border:none;outline:none;flex:1;font-weight:700;font-size:16px;color:#0f172a;min-width:0;font-family:inherit}
+        .ce-map-btn{background:#000;color:#fff;border:none;padding:11px 16px;border-radius:14px;font-weight:900;cursor:pointer;display:flex;align-items:center;gap:8px;font-size:12px;white-space:nowrap;flex-shrink:0}
+        .ce-img-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:16px;width:100%;padding:16px}
+
+        /* Map modal */
+        .ce-map-overlay{position:fixed;inset:0;background:rgba(15,23,42,.92);backdrop-filter:blur(12px);z-index:2000;display:flex;align-items:center;justify-content:center;padding:clamp(8px,3vw,24px)}
+        .ce-map-modal{background:#fff;width:100%;max-width:980px;border-radius:clamp(20px,4vw,36px);overflow:hidden;position:relative;box-shadow:0 30px 100px rgba(0,0,0,.4);max-height:calc(100dvh - 16px);display:flex;flex-direction:column}
+        .ce-map-header{padding:clamp(14px,3vw,28px) clamp(16px,4vw,36px);border-bottom:1px solid #f1f5f9;display:flex;justify-content:space-between;align-items:center;background:#fff;flex-shrink:0}
+        .ce-map-body{padding:clamp(14px,3vw,28px) clamp(16px,4vw,36px);overflow-y:auto;flex:1}
+        .ce-map-container{height:clamp(260px,45vw,480px);border-radius:24px;overflow:hidden;border:1px solid #f1f5f9;position:relative}
+        .ce-coord-bar{position:absolute;bottom:14px;left:14px;right:14px;background:rgba(255,255,255,.95);backdrop-filter:blur(10px);padding:12px 16px;border-radius:16px;display:flex;justify-content:space-between;align-items:center;border:1px solid #f1f5f9;z-index:1000;flex-wrap:wrap;gap:8px}
+        .ce-confirm-btn{width:100%;background:#000;color:#fff;padding:18px;border-radius:18px;font-weight:900;border:none;cursor:pointer;font-size:15px;margin-top:18px;font-family:inherit}
+
+        @media(max-width:768px){
+          .ce-form-grid{grid-template-columns:1fr!important;gap:0}
+          .ce-sidebar{position:static!important;top:auto}
+        }
+        @media(max-width:520px){
+          .ce-date-row{grid-template-columns:1fr!important;gap:14px}
+          .ce-tier-price-row{grid-template-columns:1fr 1fr!important}
+          .ce-location-bar{flex-wrap:wrap;border-radius:16px}
+          .ce-location-input{width:100%;min-height:44px}
+          .ce-map-btn{width:100%;justify-content:center}
+          .ce-img-grid{grid-template-columns:repeat(auto-fill,minmax(100px,1fr));gap:10px}
+        }
+        /* Leaflet geosearch mobile */
+        .leaflet-control-geosearch{width:calc(100% - 20px)!important;left:10px!important;right:10px!important}
+        .leaflet-control-geosearch form input{font-size:15px!important}
+        /* Leaflet zoom control — keep visible on mobile */
+        .leaflet-control-zoom{margin:8px!important}
+      `}</style>
+
+      <div style={{ maxWidth: '1240px', margin: '0 auto' }}>
+
+        {/* ── Header ── */}
+        <div style={{ marginBottom: 'clamp(20px,4vw,44px)' }}>
+          <button
+            onClick={() => router.back()}
+            style={{ border: 'none', background: 'none', color: '#94a3b8', fontWeight: '800', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', letterSpacing: '0.05em', padding: '0 0 12px', fontFamily: 'inherit' }}
+          >
+            <ChevronLeft size={15} strokeWidth={3} /> RETURN TO PORTAL
+          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+            <h1 style={{ fontSize: 'clamp(26px,6vw,42px)', fontWeight: '950', letterSpacing: '-0.04em', margin: 0, color: '#0f172a' }}>
+              Create Experience
+            </h1>
+            <div style={{ background: '#000', color: '#fff', padding: '5px 12px', borderRadius: '100px', fontSize: '10px', fontWeight: '900', letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '5px' }}>
+              <Sparkles size={11} /> PREMIUM
             </div>
-          </div>
-          <div style={{ textAlign: 'right', display: 'none' }}>
-            {/* Optional draft status indicators */}
           </div>
         </div>
 
-        {/* --- ALERTS --- */}
+        {/* ── Alerts ── */}
         {formError && (
-          <div style={{ background: '#fff1f2', border: '1px solid #ffe4e6', color: '#be123c', padding: '24px', borderRadius: '24px', marginBottom: '32px', display: 'flex', alignItems: 'center', gap: '16px', fontSize: '15px', fontWeight: '700', boxShadow: '0 10px 30px rgba(225, 29, 72, 0.05)' }}>
-            <div style={{ background: '#be123c', color: '#fff', width: '32px', height: '32px', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <AlertCircle size={18} />
+          <div style={{ background: '#fff1f2', border: '1px solid #ffe4e6', color: '#be123c', padding: '18px 20px', borderRadius: '20px', marginBottom: '24px', display: 'flex', alignItems: 'flex-start', gap: '12px', fontSize: '14px', fontWeight: '700' }}>
+            <div style={{ background: '#be123c', color: '#fff', width: '30px', height: '30px', minWidth: '30px', borderRadius: '9px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <AlertCircle size={16} />
             </div>
-            {formError}
+            <span>{formError}</span>
           </div>
         )}
-
         {success && (
-          <div style={{ background: '#f0fdf4', border: '1px solid #dcfce7', color: '#15803d', padding: '24px', borderRadius: '24px', marginBottom: '32px', display: 'flex', alignItems: 'center', gap: '16px', fontSize: '15px', fontWeight: '700', boxShadow: '0 10px 30px rgba(22, 163, 74, 0.05)' }}>
-            <div style={{ background: '#15803d', color: '#fff', width: '32px', height: '32px', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <CheckCircle2 size={18} />
+          <div style={{ background: '#f0fdf4', border: '1px solid #dcfce7', color: '#15803d', padding: '18px 20px', borderRadius: '20px', marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px', fontSize: '14px', fontWeight: '700' }}>
+            <div style={{ background: '#15803d', color: '#fff', width: '30px', height: '30px', minWidth: '30px', borderRadius: '9px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <CheckCircle2 size={16} />
             </div>
-            Your experience is now live. Redirecting to management console...
+            Your experience is live! Redirecting…
           </div>
         )}
 
-        {/* --- FORM GRID --- */}
-        <form onSubmit={handleSubmit} style={{ display: 'grid', gridTemplateColumns: '1.8fr 1fr', gap: '48px', alignItems: 'start' }}>
-          
-          <div className="main-content-flow">
-            {/* Visuals Section */}
-            <div style={styles.mainCard}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '32px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                  <div style={styles.iconBox('#8b5cf6')}><ImageIcon size={24} /></div>
+        {/* ── Form grid ── */}
+        <form onSubmit={handleSubmit} className="ce-form-grid">
+
+          {/* ── Main column ── */}
+          <div>
+
+            {/* Aesthetics / images */}
+            <div style={card}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px', gap: '12px', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                  <div style={iconBox('#8b5cf6')}><ImageIcon size={20} /></div>
                   <div>
-                    <h2 style={{ fontSize: '22px', fontWeight: '900', margin: 0, color: '#0f172a' }}>Aesthetics</h2>
-                    <p style={{ margin: 0, fontSize: '13px', color: '#94a3b8', fontWeight: '600' }}>High-resolution posters for the experience</p>
+                    <h2 style={{ fontSize: 'clamp(16px,3vw,20px)', fontWeight: '900', margin: 0, color: '#0f172a' }}>Aesthetics</h2>
+                    <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8', fontWeight: '600' }}>High-res promotional media</p>
                   </div>
                 </div>
-                <button type="button" onClick={() => fileInputRef.current.click()} style={{ background: '#f8fafc', border: '1px solid #e2e8f0', padding: '10px 18px', borderRadius: '14px', fontSize: '13px', fontWeight: '800', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                   <Plus size={16} /> ADD IMAGES
+                <button type="button" onClick={() => fileInputRef.current.click()}
+                  style={{ background: '#f8fafc', border: '1px solid #e2e8f0', padding: '9px 16px', borderRadius: '12px', fontSize: '12px', fontWeight: '800', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '7px', fontFamily: 'inherit' }}>
+                  <Plus size={14} /> ADD IMAGES
                 </button>
               </div>
 
-              <div 
-                style={{ 
-                  border: '2px dashed #e2e8f0', 
-                  background: '#f8fafc', 
-                  borderRadius: '28px', 
-                  minHeight: '220px', 
-                  display: 'flex', 
-                  flexDirection: 'column', 
-                  alignItems: 'center', 
-                  justifyContent: 'center', 
-                  cursor: 'pointer',
-                  transition: 'all 0.3s ease'
-                }}
+              <div
+                style={{ border: '2px dashed #e2e8f0', background: '#f8fafc', borderRadius: '22px', minHeight: '180px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', transition: 'all 0.2s' }}
                 onClick={() => fileInputRef.current.click()}
               >
                 {uploading ? (
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ position: 'relative', width: '60px', height: '60px', margin: '0 auto 16px' }}>
-                      <Loader2 className="animate-spin" size={60} strokeWidth={1} color="#000" />
-                      <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', fontWeight: '900', fontSize: '10px' }}>%</div>
-                    </div>
-                    <p style={{ fontWeight: '900', fontSize: '14px', color: '#0f172a' }}>OPTIMIZING ASSETS</p>
+                  <div style={{ textAlign: 'center', padding: '24px' }}>
+                    <Loader2 style={{ animation: 'spin .8s linear infinite' }} size={40} strokeWidth={1.5} color="#000" />
+                    <p style={{ fontWeight: '900', fontSize: '13px', color: '#0f172a', margin: '12px 0 0' }}>UPLOADING…</p>
                   </div>
                 ) : eventData.images.length === 0 ? (
-                  <div style={{ textAlign: 'center' }}>
-                    <div style={{ background: '#fff', width: '64px', height: '64px', borderRadius: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', boxShadow: '0 8px 20px rgba(0,0,0,0.04)' }}>
-                      <Upload size={24} color="#64748b" />
+                  <div style={{ textAlign: 'center', padding: '28px 16px' }}>
+                    <div style={{ background: '#fff', width: '56px', height: '56px', borderRadius: '18px', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px', boxShadow: '0 4px 14px rgba(0,0,0,0.06)' }}>
+                      <Upload size={22} color="#64748b" />
                     </div>
-                    <p style={{ fontWeight: '850', color: '#0f172a', margin: '0 0 6px', fontSize: '16px' }}>Drop your promotional media</p>
-                    <p style={{ fontSize: '13px', color: '#94a3b8', fontWeight: '600' }}>4K/High-Res supported (Max 10MB per file)</p>
+                    <p style={{ fontWeight: '850', color: '#0f172a', margin: '0 0 5px', fontSize: '15px' }}>Drop promotional media</p>
+                    <p style={{ fontSize: '12px', color: '#94a3b8', fontWeight: '600', margin: 0 }}>Max 10 MB per file</p>
                   </div>
                 ) : (
-                  <div style={{ width: '100%', padding: '24px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '20px' }}>
+                  <div className="ce-img-grid">
                     {eventData.images.map((url, i) => (
-                      <div key={url} style={{ height: '160px', borderRadius: '20px', position: 'relative', overflow: 'hidden', border: '1px solid #f1f5f9', boxShadow: '0 10px 20px rgba(0,0,0,0.05)' }}>
+                      <div key={url} style={{ height: '120px', borderRadius: '16px', position: 'relative', overflow: 'hidden', border: '1px solid #f1f5f9' }}>
                         <img src={url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="Poster" />
-                        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'linear-gradient(to bottom, rgba(0,0,0,0.3), transparent 40%)' }} />
-                        <button type="button" onClick={(e) => { e.stopPropagation(); removeImage(i); }} style={{ position: 'absolute', top: '10px', right: '10px', background: '#fff', border: 'none', borderRadius: '10px', color: '#ef4444', width: '32px', height: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 4px 10px rgba(0,0,0,0.1)' }}>
-                          <Trash2 size={16} />
+                        <button type="button" onClick={(e) => { e.stopPropagation(); setEventData(p => ({ ...p, images: p.images.filter((_, j) => j !== i) })); }}
+                          style={{ position: 'absolute', top: '8px', right: '8px', background: '#fff', border: 'none', borderRadius: '8px', color: '#ef4444', width: '28px', height: '28px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
+                          <Trash2 size={13} />
                         </button>
                       </div>
                     ))}
-                    <div style={{ height: '160px', borderRadius: '20px', border: '2px dashed #cbd5e1', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' }}>
-                       <Plus size={24} />
+                    <div style={{ height: '120px', borderRadius: '16px', border: '2px dashed #cbd5e1', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8' }}>
+                      <Plus size={22} />
                     </div>
                   </div>
                 )}
-                <input type="file" multiple ref={fileInputRef} hidden onChange={(e) => handleFileUpload(e.target.files)} accept="image/*" />
+                <input type="file" multiple ref={fileInputRef} hidden onChange={e => handleFileUpload(e.target.files)} accept="image/*" />
               </div>
             </div>
 
-            {/* Core Details Section */}
-            <div style={styles.mainCard}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '36px' }}>
-                <div style={styles.iconBox('#0ea5e9')}><FileText size={24} /></div>
+            {/* Core details */}
+            <div style={card}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '28px' }}>
+                <div style={iconBox('#0ea5e9')}><FileText size={20} /></div>
                 <div>
-                  <h2 style={{ fontSize: '22px', fontWeight: '900', margin: 0, color: '#0f172a' }}>Experience Info</h2>
-                  <p style={{ margin: 0, fontSize: '13px', color: '#94a3b8', fontWeight: '600' }}>The narrative and logistics of your event</p>
+                  <h2 style={{ fontSize: 'clamp(16px,3vw,20px)', fontWeight: '900', margin: 0, color: '#0f172a' }}>Experience Info</h2>
+                  <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8', fontWeight: '600' }}>Narrative and logistics</p>
                 </div>
               </div>
 
-              <div style={{ marginBottom: '32px' }}>
-                <label style={styles.label}>EXPERIENCE TITLE</label>
-                <input style={styles.input} placeholder="Enter a name that commands attention..." value={eventData.title} onChange={e => setEventData({...eventData, title: e.target.value})} />
+              <div style={{ marginBottom: '24px' }}>
+                <label style={label}>EXPERIENCE TITLE</label>
+                <input style={inp} placeholder="A name that commands attention…" value={eventData.title} onChange={e => setEventData(p => ({ ...p, title: e.target.value }))} />
               </div>
 
-              <div style={{ marginBottom: '32px' }}>
-                <label style={styles.label}>VENUE LOCATION</label>
-                <div style={styles.locationBar}>
-                  <div style={{ padding: '0 12px', color: '#0ea5e9' }}>
-                    <MapPin size={22} strokeWidth={2.5} />
+              <div style={{ marginBottom: '24px' }}>
+                <label style={label}>VENUE LOCATION</label>
+                <div className="ce-location-bar">
+                  <div style={{ padding: '0 10px', color: '#0ea5e9', flexShrink: 0 }}>
+                    <MapPin size={20} strokeWidth={2.5} />
                   </div>
-                  <input 
-                    style={{ background: 'none', border: 'none', outline: 'none', flex: 1, fontWeight: '700', fontSize: '16px', color: '#0f172a' }} 
-                    placeholder="Enter venue name manually..."
+                  <input
+                    className="ce-location-input"
+                    placeholder="Enter venue name…"
                     value={eventData.location}
-                    onChange={(e) => setEventData({...eventData, location: e.target.value})}
+                    onChange={e => setEventData(p => ({ ...p, location: e.target.value }))}
                   />
-                  <button 
-                    type="button" 
-                    onClick={() => setShowMapModal(true)}
-                    style={{ background: '#000', color: '#fff', border: 'none', padding: '12px 20px', borderRadius: '16px', fontWeight: '900', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '10px', fontSize: '13px', boxShadow: '0 8px 20px rgba(0,0,0,0.1)' }}
-                  >
-                    <MapIcon size={16} /> PICK ON MAP
+                  <button type="button" className="ce-map-btn" onClick={() => setShowMapModal(true)}>
+                    <MapIcon size={15} /> PICK ON MAP
                   </button>
                 </div>
+                {eventData.lat != null && (
+                  <p style={{ margin: '6px 0 0 8px', fontSize: '11px', color: '#64748b', fontWeight: '700' }}>
+                    📍 {eventData.lat.toFixed(5)}, {eventData.lng.toFixed(5)}
+                  </p>
+                )}
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '28px', marginBottom: '32px' }}>
+              <div className="ce-date-row" style={{ marginBottom: '24px' }}>
                 <div>
-                  <label style={styles.label}>EVENT DATE</label>
+                  <label style={label}>EVENT DATE</label>
                   <div style={{ position: 'relative' }}>
-                    <Calendar size={18} style={{ position: 'absolute', left: '18px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
-                    <input type="date" style={{ ...styles.input, paddingLeft: '50px' }} onChange={e => setEventData({...eventData, date: e.target.value})} />
+                    <Calendar size={16} style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8', pointerEvents: 'none' }} />
+                    <input type="date" style={{ ...inp, paddingLeft: '46px' }} onChange={e => setEventData(p => ({ ...p, date: e.target.value }))} />
                   </div>
                 </div>
                 <div>
-                  <label style={styles.label}>START TIME</label>
-                  <div style={{ display: 'flex', gap: '12px' }}>
-                    <div style={{ display: 'flex', flex: 1, background: '#f8fafc', border: '2px solid #f1f5f9', borderRadius: '18px', padding: '6px' }}>
-                      <input style={{ width: '100%', border: 'none', background: 'none', textAlign: 'center', fontWeight: '800', fontSize: '16px' }} value={eventData.hour} onChange={e => setEventData({...eventData, hour: e.target.value})} maxLength="2" />
-                      <span style={{ alignSelf: 'center', fontWeight: '950', color: '#cbd5e1' }}>:</span>
-                      <input style={{ width: '100%', border: 'none', background: 'none', textAlign: 'center', fontWeight: '800', fontSize: '16px' }} value={eventData.minute} onChange={e => setEventData({...eventData, minute: e.target.value})} maxLength="2" />
+                  <label style={label}>START TIME</label>
+                  <div style={{ display: 'flex', gap: '10px' }}>
+                    <div style={{ display: 'flex', flex: 1, background: '#f8fafc', border: '2px solid #f1f5f9', borderRadius: '16px', padding: '4px 8px', alignItems: 'center', minWidth: 0 }}>
+                      <input style={{ width: '100%', border: 'none', background: 'none', textAlign: 'center', fontWeight: '800', fontSize: '16px', outline: 'none', minWidth: 0, fontFamily: 'inherit' }} value={eventData.hour} onChange={e => setEventData(p => ({ ...p, hour: e.target.value }))} maxLength="2" placeholder="08" />
+                      <span style={{ fontWeight: '950', color: '#cbd5e1', flexShrink: 0 }}>:</span>
+                      <input style={{ width: '100%', border: 'none', background: 'none', textAlign: 'center', fontWeight: '800', fontSize: '16px', outline: 'none', minWidth: 0, fontFamily: 'inherit' }} value={eventData.minute} onChange={e => setEventData(p => ({ ...p, minute: e.target.value }))} maxLength="2" placeholder="00" />
                     </div>
-                    <button type="button" onClick={() => setEventData({...eventData, period: eventData.period === 'AM' ? 'PM' : 'AM'})} style={{ background: '#0f172a', color: '#fff', border: 'none', borderRadius: '16px', width: '70px', fontWeight: '900', cursor: 'pointer', letterSpacing: '0.1em' }}>
+                    <button type="button" onClick={() => setEventData(p => ({ ...p, period: p.period === 'AM' ? 'PM' : 'AM' }))}
+                      style={{ background: '#0f172a', color: '#fff', border: 'none', borderRadius: '14px', width: '60px', fontWeight: '900', cursor: 'pointer', letterSpacing: '0.1em', fontSize: '13px', flexShrink: 0, fontFamily: 'inherit' }}>
                       {eventData.period}
                     </button>
                   </div>
                 </div>
               </div>
 
-              <div style={{ marginBottom: '10px' }}>
-                <label style={styles.label}>DESCRIPTION & PROGRAM</label>
-                <textarea 
-                  style={{ ...styles.input, height: '180px', resize: 'none', lineHeight: '1.6' }} 
-                  placeholder="Elaborate on the exclusivity, the schedule, or the dress code..."
+              <div>
+                <label style={label}>DESCRIPTION &amp; PROGRAM</label>
+                <textarea
+                  style={{ ...inp, height: '160px', resize: 'vertical', lineHeight: '1.6' }}
+                  placeholder="Elaborate on the schedule, dress code, or exclusivity…"
                   value={eventData.description}
-                  onChange={e => setEventData({...eventData, description: e.target.value})}
+                  onChange={e => setEventData(p => ({ ...p, description: e.target.value }))}
                 />
               </div>
             </div>
           </div>
 
-          {/* --- SIDEBAR --- */}
-          <div className="sidebar-sticky">
-            <div style={styles.sidebarCard}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '28px' }}>
-                <div style={styles.iconBox('#f59e0b')}><Ticket size={24} /></div>
+          {/* ── Sidebar ── */}
+          <div className="ce-sidebar">
+            <div style={{ background: '#fff', borderRadius: '28px', padding: 'clamp(18px,3vw,28px)', border: '1px solid #f1f5f9', boxShadow: '0 4px 20px rgba(0,0,0,0.03)' }}>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px' }}>
+                <div style={iconBox('#f59e0b')}><Ticket size={20} /></div>
                 <div>
-                  <h2 style={{ fontSize: '19px', fontWeight: '900', margin: 0, color: '#0f172a' }}>Access Tiers</h2>
+                  <h2 style={{ fontSize: 'clamp(15px,3vw,19px)', fontWeight: '900', margin: 0, color: '#0f172a' }}>Access Tiers</h2>
                   <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8', fontWeight: '600' }}>Manage invitation levels</p>
                 </div>
               </div>
 
-              <div style={{ maxHeight: '500px', overflowY: 'auto', paddingRight: '4px', marginBottom: '24px' }}>
+              <div style={{ maxHeight: '460px', overflowY: 'auto', paddingRight: '2px', marginBottom: '20px' }}>
                 {tiers.map((tier, index) => (
-                  <div key={tier.id} style={styles.tierCard}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '18px' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: index === 0 ? '#10b981' : '#f59e0b' }} />
-                        <span style={{ fontSize: '11px', fontWeight: '900', color: '#64748b', letterSpacing: '0.05em' }}>TIER {index + 1}</span>
+                  <div key={tier.id} style={{ background: '#f8fafc', padding: 'clamp(14px,3vw,20px)', borderRadius: '20px', marginBottom: '16px', border: '1px solid #f1f5f9' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+                        <div style={{ width: '7px', height: '7px', borderRadius: '50%', background: index === 0 ? '#10b981' : '#f59e0b' }} />
+                        <span style={{ fontSize: '10px', fontWeight: '900', color: '#64748b', letterSpacing: '0.05em' }}>TIER {index + 1}</span>
                       </div>
-                      <button type="button" onClick={() => removeTier(tier.id)} style={{ background: '#fee2e2', border: 'none', color: '#ef4444', width: '28px', height: '28px', borderRadius: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <Trash2 size={14} />
+                      <button type="button" onClick={() => removeTier(tier.id)}
+                        style={{ background: '#fee2e2', border: 'none', color: '#ef4444', width: '26px', height: '26px', borderRadius: '7px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                        <Trash2 size={13} />
                       </button>
                     </div>
-                    
-                    <div style={{ marginBottom: '14px' }}>
-                      <input style={{ ...styles.input, padding: '14px', fontSize: '14px', border: '1px solid #e2e8f0' }} placeholder="Tier Label (e.g. VIP Access)" value={tier.name} onChange={e => updateTier(tier.id, 'name', e.target.value)} />
+
+                    <div style={{ marginBottom: '12px' }}>
+                      <input style={{ ...inp, padding: '13px', fontSize: '14px', border: '1px solid #e2e8f0' }} placeholder="Tier Label (e.g. VIP Access)" value={tier.name} onChange={e => updateTier(tier.id, 'name', e.target.value)} />
                     </div>
 
-                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
+                    <div className="ce-tier-price-row" style={{ marginBottom: '12px' }}>
                       <div style={{ position: 'relative' }}>
-                        <span style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', fontWeight: '900', fontSize: '14px', color: '#94a3b8' }}>GH₵</span>
-                        <input style={{ ...styles.input, padding: '14px 14px 14px 45px', fontSize: '14px', border: '1px solid #e2e8f0' }} type="number" placeholder="0.00" value={tier.price} onChange={e => updateTier(tier.id, 'price', e.target.value)} />
+                        <span style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', fontWeight: '900', fontSize: '13px', color: '#94a3b8' }}>GH₵</span>
+                        <input style={{ ...inp, padding: '13px 12px 13px 42px', fontSize: '14px', border: '1px solid #e2e8f0' }} type="number" placeholder="0.00" value={tier.price} onChange={e => updateTier(tier.id, 'price', e.target.value)} />
                       </div>
                       <div style={{ position: 'relative' }}>
-                        <Ticket size={16} style={{ position: 'absolute', left: '14px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
-                        <input style={{ ...styles.input, padding: '14px 14px 14px 40px', fontSize: '14px', border: '1px solid #e2e8f0' }} type="number" placeholder="Qty" value={tier.capacity} onChange={e => updateTier(tier.id, 'capacity', e.target.value)} />
+                        <Ticket size={14} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
+                        <input style={{ ...inp, padding: '13px 12px 13px 34px', fontSize: '14px', border: '1px solid #e2e8f0' }} type="number" placeholder="Qty" value={tier.capacity} onChange={e => updateTier(tier.id, 'capacity', e.target.value)} />
                       </div>
                     </div>
-                    <textarea 
-                      style={{ ...styles.input, height: '70px', padding: '12px', fontSize: '13px', border: '1px solid #e2e8f0', resize: 'none' }} 
-                      placeholder="Benefits included..."
+
+                    <textarea
+                      style={{ ...inp, height: '64px', padding: '11px', fontSize: '13px', border: '1px solid #e2e8f0', resize: 'none' }}
+                      placeholder="Benefits included…"
                       value={tier.description}
                       onChange={e => updateTier(tier.id, 'description', e.target.value)}
                     />
@@ -738,51 +492,45 @@ export default function CreateEvent() {
                 ))}
               </div>
 
-              <button type="button" onClick={addTier} style={{ width: '100%', padding: '18px', borderRadius: '20px', border: '2px dashed #cbd5e1', background: 'none', fontWeight: '800', color: '#64748b', cursor: 'pointer', marginBottom: '32px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' }}>
-                <Plus size={18} /> ADD ACCESS TIER
+              <button type="button" onClick={addTier}
+                style={{ width: '100%', padding: '16px', borderRadius: '18px', border: '2px dashed #cbd5e1', background: 'none', fontWeight: '800', color: '#64748b', cursor: 'pointer', marginBottom: '24px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', fontSize: '13px', fontFamily: 'inherit' }}>
+                <Plus size={16} /> ADD ACCESS TIER
               </button>
 
-              <div style={{ background: '#0f172a', borderRadius: '28px', padding: '28px', color: '#fff', boxShadow: '0 20px 50px rgba(15, 23, 42, 0.2)' }}>
-                <div style={{ display: 'flex', gap: '16px', marginBottom: '28px' }}>
-                  <div style={{ width: '40px', height: '40px', borderRadius: '12px', background: 'rgba(74, 222, 128, 0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#4ade80' }}>
-                    <ShieldCheck size={22} />
+              {/* Payout info + submit */}
+              <div style={{ background: '#0f172a', borderRadius: '24px', padding: 'clamp(18px,3vw,26px)', color: '#fff', boxShadow: '0 16px 40px rgba(15,23,42,.2)' }}>
+                <div style={{ display: 'flex', gap: '14px', marginBottom: '22px' }}>
+                  <div style={{ width: '38px', height: '38px', minWidth: '38px', borderRadius: '11px', background: 'rgba(74,222,128,.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#4ade80' }}>
+                    <ShieldCheck size={20} />
                   </div>
                   <div>
-                    <h4 style={{ margin: '0 0 6px', fontSize: '15px', fontWeight: '900' }}>Smart Split Payout</h4>
-                    <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8', lineHeight: '1.5', fontWeight: '500' }}>Your 95% revenue is sent instantly to your bank. Our 5% fee is handled at checkout.</p>
+                    <h4 style={{ margin: '0 0 5px', fontSize: '14px', fontWeight: '900' }}>Smart Split Payout</h4>
+                    <p style={{ margin: 0, fontSize: '12px', color: '#94a3b8', lineHeight: '1.5', fontWeight: '500' }}>Your 95% sent instantly to your bank. 5% platform fee collected at checkout.</p>
                   </div>
                 </div>
 
-                <div style={{ borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '24px', marginBottom: '24px' }}>
-                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                      <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: '700' }}>Visibility</span>
-                      <span style={{ fontSize: '12px', color: '#4ade80', fontWeight: '900' }}>PUBLIC</span>
-                   </div>
-                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: '700' }}>Processing</span>
-                      <span style={{ fontSize: '12px', color: '#fff', fontWeight: '900' }}>PAYSTACK SECURE</span>
-                   </div>
+                <div style={{ borderTop: '1px solid rgba(255,255,255,.08)', paddingTop: '18px', marginBottom: '20px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: '700' }}>Visibility</span>
+                    <span style={{ fontSize: '12px', color: '#4ade80', fontWeight: '900' }}>PUBLIC</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: '700' }}>Processing</span>
+                    <span style={{ fontSize: '12px', color: '#fff', fontWeight: '900' }}>PAYSTACK SECURE</span>
+                  </div>
                 </div>
 
-                <button 
-                  disabled={loading || !organizerSubaccount} 
-                  style={{ 
-                    ...styles.submitBtn, 
-                    background: loading ? '#334155' : '#fff', 
-                    color: '#000',
-                    opacity: organizerSubaccount ? 1 : 0.5 
-                  }}
+                <button
+                  type="submit"
+                  disabled={loading || !orgSubaccount}
+                  style={{ width: '100%', background: loading ? '#334155' : '#fff', color: '#000', padding: '18px', borderRadius: '18px', fontWeight: '900', border: 'none', cursor: loading || !orgSubaccount ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', fontSize: '15px', opacity: orgSubaccount ? 1 : 0.5, fontFamily: 'inherit', boxSizing: 'border-box' }}
                 >
-                  {loading ? (
-                    <Loader2 className="animate-spin" size={22} />
-                  ) : (
-                    <>PUBLISH EXPERIENCE <ArrowRight size={18} /></>
-                  )}
+                  {loading ? <Loader2 style={{ animation: 'spin .8s linear infinite' }} size={20} /> : <>PUBLISH EXPERIENCE <ArrowRight size={16} /></>}
                 </button>
-                
-                {!organizerSubaccount && (
-                  <p style={{ textAlign: 'center', fontSize: '11px', color: '#fca5a5', fontWeight: '800', marginTop: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
-                    <Lock size={12} /> ONBOARDING REQUIRED
+
+                {!orgSubaccount && (
+                  <p style={{ textAlign: 'center', fontSize: '11px', color: '#fca5a5', fontWeight: '800', marginTop: '14px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '5px' }}>
+                    <Lock size={11} /> ONBOARDING REQUIRED
                   </p>
                 )}
               </div>
@@ -791,69 +539,64 @@ export default function CreateEvent() {
         </form>
       </div>
 
-      {/* --- MAP MODAL SYSTEM --- */}
+      {/* ── Map modal ── */}
       {showMapModal && (
-        <div style={styles.mapModalOverlay} onClick={() => setShowMapModal(false)}>
-          <div style={styles.mapModalContent} onClick={e => e.stopPropagation()}>
-            {/* Modal Header */}
-            <div style={{ padding: '30px 40px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fff' }}>
+        <div className="ce-map-overlay" onClick={() => setShowMapModal(false)}>
+          <div className="ce-map-modal" onClick={e => e.stopPropagation()}>
+
+            <div className="ce-map-header">
               <div>
-                <h3 style={{ margin: '0 0 4px', fontWeight: '950', fontSize: '24px', letterSpacing: '-0.02em' }}>Spatial Positioning</h3>
-                <p style={{ margin: 0, fontSize: '14px', color: '#94a3b8', fontWeight: '600' }}>Define the exact coordinates for the luxury concierge</p>
+                <h3 style={{ margin: '0 0 3px', fontWeight: '950', fontSize: 'clamp(16px,3vw,22px)', letterSpacing: '-0.02em' }}>Pick Location</h3>
+                <p style={{ margin: 0, fontSize: '13px', color: '#94a3b8', fontWeight: '600' }}>Click the map or search to pin your venue</p>
               </div>
-              <button 
-                onClick={() => setShowMapModal(false)} 
-                style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '16px', width: '48px', height: '48px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b', transition: 'all 0.2s' }}
+              <button
+                onClick={() => setShowMapModal(false)}
+                style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '13px', width: '42px', height: '42px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b', flexShrink: 0, marginLeft: '12px' }}
               >
-                <X size={22}/>
+                <X size={18} />
               </button>
             </div>
 
-            {/* Modal Body */}
-            <div style={{ padding: '32px 40px' }}>
-             {/* Replace the "Search Bar" div (lines 434-453) and "Map Engine" div (lines 456-508) with this: */}
+            <div className="ce-map-body">
+              <div className="ce-map-container">
+                <MapContainer
+                  center={[eventData.lat ?? 5.6037, eventData.lng ?? -0.187]}
+                  zoom={14}
+                  style={{ height: '100%', width: '100%' }}
+                  zoomControl={true}
+                >
+                  <TileLayer
+                    url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
+                    attribution="&copy; CARTO"
+                  />
+                  <MapLogic setEventData={setEventData} />
+                  {eventData.lat != null && eventData.lng != null && (
+                    <Marker position={[eventData.lat, eventData.lng]} icon={getLuxuryIcon()} />
+                  )}
+                </MapContainer>
 
-<div style={{ height: '520px', borderRadius: '32px', overflow: 'hidden', border: '1px solid #f1f5f9', position: 'relative' }}>
-  <MapContainer 
-    center={[eventData.lat || 5.6, eventData.lng || -0.2]} 
-    zoom={15} 
-    style={{ height: '100%', width: '100%' }}
-    zoomControl={false}
-  >
-    {/* Clean Luxury Tiles */}
-    <TileLayer
-      url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png"
-      attribution='&copy; CARTO'
-    />
-    
-    <MapLogic lat={eventData.lat} lng={eventData.lng} setEventData={setEventData} />
-    
-    {eventData.lat && eventData.lng && <Marker position={[eventData.lat, eventData.lng]} icon={getLuxuryIcon()} />}
-  </MapContainer>
-  
-  {/* Coordinates Overlay */}
-  <div style={{ position: 'absolute', bottom: '24px', left: '24px', right: '24px', background: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(10px)', padding: '16px 24px', borderRadius: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', border: '1px solid #f1f5f9', zIndex: 1000 }}>
-     <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-        <div style={{ background: '#f8fafc', width: '36px', height: '36px', borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-           <MapPin size={18} color="#000" />
-        </div>
-        <div>
-           <p style={{ margin: 0, fontSize: '10px', fontWeight: '900', color: '#94a3b8' }}>SELECTED COORDINATES</p>
-           <p style={{ margin: 0, fontSize: '13px', fontWeight: '800', color: '#0f172a' }}>{eventData.lat != null ? eventData.lat.toFixed(5) : '—'}, {eventData.lng != null ? eventData.lng.toFixed(5) : '—'}</p>
-        </div>
-     </div>
-     <p style={{ margin: 0, fontSize: '12px', color: '#64748b', fontWeight: '600' }}>
-       Click map or search to reposition
-     </p>
-  </div>
-</div>
+                <div className="ce-coord-bar">
+                  <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                    <div style={{ background: '#f8fafc', width: '32px', height: '32px', minWidth: '32px', borderRadius: '9px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <MapPin size={15} color="#000" />
+                    </div>
+                    <div>
+                      <p style={{ margin: 0, fontSize: '10px', fontWeight: '900', color: '#94a3b8' }}>COORDINATES</p>
+                      <p style={{ margin: 0, fontSize: '13px', fontWeight: '800', color: '#0f172a' }}>
+                        {eventData.lat != null ? `${eventData.lat.toFixed(5)}, ${eventData.lng.toFixed(5)}` : 'Click map to pin'}
+                      </p>
+                    </div>
+                  </div>
+                  {eventData.location && (
+                    <p style={{ margin: 0, fontSize: '11px', color: '#64748b', fontWeight: '600', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {eventData.location}
+                    </p>
+                  )}
+                </div>
+              </div>
 
-              {/* Action */}
-              <button 
-                onClick={() => setShowMapModal(false)}
-                style={{ ...styles.submitBtn, marginTop: '32px' }}
-              >
-                CONFIRM THIS POSITION
+              <button className="ce-confirm-btn" onClick={() => setShowMapModal(false)}>
+                ✓ CONFIRM THIS LOCATION
               </button>
             </div>
           </div>
