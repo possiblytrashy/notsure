@@ -258,16 +258,32 @@ export default function EventPage() {
     return () => { supabase.removeChannel(channel); };
   }, [id]);
 
-  // Pricing: organizer keeps full price. 5% platform fee added on top. Reseller adds 10% on top.
-  const getDisplayPrice = (price) => {
+  // Pricing: organizer keeps full price. 5% OUSTED fee + 10% reseller (optional) + Paystack processing fee on top.
+  // Paystack Ghana MoMo: 1.95% + GHS 0.50 per transaction. Grossed up so platform receives correct net.
+  const calcPaystackFee = (desiredNetGHS) => {
+    const total = (desiredNetGHS + 0.50) / (1 - 0.0195);
+    return parseFloat((total - desiredNetGHS).toFixed(2));
+  };
+  const getSubTotal = (price) => {
     if (!price) return 0;
     const base = Number(price);
     const platformFee = base * 0.05;
     const resellerMarkup = isResellerMode ? base * 0.10 : 0;
-    return (base + platformFee + resellerMarkup).toFixed(2);
+    return base + platformFee + resellerMarkup;
+  };
+  const getDisplayPrice = (price) => {
+    if (!price) return 0;
+    const subTotal = getSubTotal(price) * (quantity || 1);
+    const psFee = calcPaystackFee(subTotal);
+    return ((subTotal + psFee) / (quantity || 1)).toFixed(2);
   };
   const getPlatformFee = (price) => price ? (Number(price) * 0.05).toFixed(2) : '0.00';
   const getResellerMarkup = (price) => isResellerMode && price ? (Number(price) * 0.10).toFixed(2) : null;
+  const getPaystackFee = (price, qty) => {
+    if (!price) return '0.00';
+    const subTotal = getSubTotal(price) * (qty || 1);
+    return calcPaystackFee(subTotal).toFixed(2);
+  };
 
   const handleRide = useCallback((type) => {
     if (!event?.lat || !event?.lng) { alert('Location coordinates not available.'); return; }
@@ -513,8 +529,8 @@ export default function EventPage() {
                         <div style={{ textAlign: 'right' }}>
                           <div style={{ fontSize: '17px', fontWeight: 950, color: '#000' }}>GHS {display}</div>
                           {isResellerMode
-                            ? <div style={{ fontSize: '10px', color: '#94a3b8' }}>Base GHS {tier.price} + 10% reseller + 5% fee</div>
-                            : <div style={{ fontSize: '10px', color: '#94a3b8' }}>GHS {tier.price} + GHS {getPlatformFee(tier.price)} service fee</div>
+                            ? <div style={{ fontSize: '10px', color: '#94a3b8' }}>Base GHS {tier.price} + 10% reseller + 5% fee + processing</div>
+                            : <div style={{ fontSize: '10px', color: '#94a3b8' }}>GHS {tier.price} + GHS {getPlatformFee(tier.price)} OUSTED fee + processing</div>
                           }
                         </div>
                       </div>
@@ -533,7 +549,7 @@ export default function EventPage() {
               {activeTier && (
                 <div style={{ background: '#f8fafc', borderRadius: '16px', padding: '16px 18px', marginBottom: '18px', border: '1px solid #f1f5f9' }}>
                   <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'8px' }}>
-                    <span style={{ fontSize:'12px', fontWeight:700, color:'#64748b' }}>Organizer price × {quantity}</span>
+                    <span style={{ fontSize:'12px', fontWeight:700, color:'#64748b' }}>Ticket price × {quantity}</span>
                     <span style={{ fontSize:'14px', fontWeight:800 }}>GHS {(Number(activeTier.price)*quantity).toFixed(2)}</span>
                   </div>
                   {isResellerMode && (
@@ -542,9 +558,13 @@ export default function EventPage() {
                       <span style={{ fontSize:'14px', fontWeight:800 }}>GHS {(Number(activeTier.price)*0.10*quantity).toFixed(2)}</span>
                     </div>
                   )}
-                  <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'10px' }}>
-                    <span style={{ fontSize:'12px', fontWeight:700, color:'#64748b' }}>Platform fee (5%)</span>
+                  <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'8px' }}>
+                    <span style={{ fontSize:'12px', fontWeight:700, color:'#64748b' }}>OUSTED platform fee (5%)</span>
                     <span style={{ fontSize:'14px', fontWeight:800 }}>GHS {(Number(activeTier.price)*0.05*quantity).toFixed(2)}</span>
+                  </div>
+                  <div style={{ display:'flex', justifyContent:'space-between', marginBottom:'10px' }}>
+                    <span style={{ fontSize:'12px', fontWeight:700, color:'#64748b' }}>Paystack processing (1.95% + GHS 0.50)</span>
+                    <span style={{ fontSize:'14px', fontWeight:800 }}>GHS {getPaystackFee(activeTier.price, quantity)}</span>
                   </div>
                   <div style={{ height:'1px', background:'#e2e8f0', marginBottom:'10px' }}/>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
