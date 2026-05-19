@@ -185,6 +185,115 @@ export default function RootLayout({ children }) {
           ::-webkit-scrollbar{width:5px;height:5px}::-webkit-scrollbar-thumb{background:rgba(0,0,0,.12);border-radius:3px}
           ::selection{background:rgba(231,60,126,.15)}
           @media print{.bg-canvas,.nav,.footer{display:none!important}}
+          /* ── GLOBAL MOBILE FIXES ─────────────────────────────────── */
+          *{box-sizing:border-box}
+          html,body{overflow-x:hidden;width:100%}
+          img,video,canvas,svg{max-width:100%}
+          input,select,textarea,button{max-width:100%;font-family:inherit}
+
+          /* Prevent iOS input zoom */
+          input[type="text"],input[type="email"],input[type="tel"],
+          input[type="number"],input[type="password"],select,textarea{
+            font-size:16px!important
+          }
+
+          /* Organizer dashboard — full desktop layout collapses on mobile */
+          @media(max-width:768px){
+            /* Main wrapper: remove desktop padding */
+            .od-wrapper{padding:16px 12px 90px!important;max-width:100vw!important}
+
+            /* Balance card: reduce padding, font sizes */
+            .od-balance-card{padding:24px 20px!important;border-radius:20px!important}
+            .od-balance-value{font-size:36px!important;letter-spacing:-1.5px!important;margin:12px 0!important}
+
+            /* Stat cards: single column */
+            .od-stats-row{flex-direction:column!important;gap:12px!important}
+            .od-stat-card{padding:18px!important}
+
+            /* Nav: stack logo + actions */
+            .od-top-nav{flex-wrap:wrap;gap:10px!important;margin-bottom:24px!important}
+            .od-header-actions{gap:8px!important}
+            .od-user-brief{display:none}
+
+            /* Tab bar: scrollable, no wrap */
+            .od-tabs{overflow-x:auto!important;flex-wrap:nowrap!important;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+            .od-tabs::-webkit-scrollbar{display:none}
+
+            /* Card grids: single column */
+            .od-card-grid{grid-template-columns:1fr!important;gap:16px!important}
+            .od-analytics-grid{grid-template-columns:1fr!important;gap:14px!important}
+
+            /* Tables: card layout */
+            .od-table-wrapper{overflow-x:auto!important;-webkit-overflow-scrolling:touch}
+            .od-data-table{min-width:600px}
+
+            /* View headers: stack */
+            .od-view-header{flex-direction:column!important;gap:12px!important;align-items:flex-start!important;margin-bottom:20px!important}
+
+            /* Edit modal grid: single column */
+            .od-edit-grid{grid-template-columns:1fr!important;gap:18px!important}
+
+            /* Filter row: wrap */
+            .od-filter-group{flex-wrap:wrap!important;gap:8px!important}
+            .od-search-input{width:120px!important}
+
+            /* Balance action buttons: stack */
+            .od-settings-btn{padding:12px 16px!important;width:100%!important;justify-content:center!important}
+
+            /* Event card images: shorter on mobile */
+            .od-item-image{height:160px!important}
+          }
+
+          /* Organizer Create page */
+          @media(max-width:768px){
+            .oc-main{padding:14px 12px 80px!important}
+            .oc-two-col{grid-template-columns:1fr!important;gap:0!important}
+            .oc-tier-grid{grid-template-columns:1fr!important}
+            .oc-img-grid{grid-template-columns:repeat(2,1fr)!important}
+            .oc-map-coord{font-size:11px!important}
+          }
+
+          /* User dashboard */
+          @media(max-width:640px){
+            .ud-stats-grid{grid-template-columns:1fr 1fr!important;gap:8px!important}
+            .ud-header-actions{gap:6px!important}
+            .ud-next-event{padding:14px!important}
+            .ud-wallet-row{grid-template-columns:1fr!important;gap:8px!important}
+          }
+
+          /* Event page */
+          @media(max-width:640px){
+            .ep-hero{height:220px!important}
+            .ep-content{padding:14px 12px 100px!important}
+            .ep-tier-grid{grid-template-columns:1fr!important}
+            .ep-qty-row{flex-direction:column!important;gap:8px!important}
+            .ep-buy-sticky{padding:12px 14px!important}
+          }
+
+          /* Reseller dashboard */
+          @media(max-width:640px){
+            .rd-stats{grid-template-columns:1fr 1fr!important;gap:10px!important}
+            .rd-table{overflow-x:auto;-webkit-overflow-scrolling:touch}
+            .rd-table table{min-width:500px}
+            .rd-link-card{flex-direction:column!important;align-items:flex-start!important;gap:10px!important}
+          }
+
+          /* Admin dashboard */
+          @media(max-width:768px){
+            .ad-wrapper{padding:14px 12px 90px!important}
+            .ad-stats{grid-template-columns:1fr 1fr!important;gap:10px!important}
+            .ad-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+            .ad-table{min-width:560px}
+            .ad-ledger-filter{flex-wrap:wrap!important;gap:8px!important}
+          }
+
+          /* Scan page — make the camera reader full width on mobile */
+          @media(max-width:640px){
+            #reader{width:100%!important}
+            #reader video{width:100%!important;height:auto!important;object-fit:cover}
+            #reader__dashboard_section_swaplink{font-size:11px!important}
+          }
+
         `}</style>
       </head>
       <body className={outfit.className} style={{ margin: 0, minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
