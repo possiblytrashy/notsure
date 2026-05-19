@@ -46,7 +46,7 @@ function ShareSheet({ link, onClose }) {
           <CopyBtn text={url} />
         </div>
         {/* Channel grid */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(70px,1fr))', gap: 10 }}>
           {channels.map(ch => (
             <a key={ch.label} href={ch.href} target="_blank" rel="noreferrer" style={{ background: 'rgba(255,255,255,.04)', border: '1px solid rgba(255,255,255,.07)', borderRadius: 18, padding: '16px 8px', textDecoration: 'none', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: 24 }}>{ch.emoji}</span>
@@ -91,7 +91,7 @@ function LinkCard({ link, onShare }) {
         </div>
 
         {/* Mini stats */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8, marginBottom: 14 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(130px,1fr))', gap: 8, marginBottom: 14 }}>
           {[['👆 CLICKS', link.clicks || 0], ['🎟 SOLD', link.tickets_sold || 0], [`📈 CVR`, `${convRate}%`]].map(([l, v]) => (
             <div key={l} style={{ background: 'rgba(255,255,255,.04)', borderRadius: 12, padding: '10px 8px', textAlign: 'center' }}>
               <p style={{ margin: '0 0 3px', fontSize: 8, color: '#444', fontWeight: 900, letterSpacing: '1px' }}>{l}</p>
@@ -212,12 +212,12 @@ export default function ResellerDashboard() {
     <div style={{ minHeight: '100vh', background: '#050505', color: '#fff' }}>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}@keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}@keyframes slideUp{from{transform:translateY(100%)}to{transform:none}}`}</style>
       <div style={{ position: 'sticky', top: 0, zIndex: 50, background: 'rgba(5,5,5,.93)', backdropFilter: 'blur(24px)', borderBottom: '1px solid rgba(255,255,255,.05)', padding: '12px 16px' }}>
-        <div style={{ maxWidth: 480, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div style={{ maxWidth: 480, margin: '0 auto', display: 'flex', alignItems: 'center', gap: 8 }}>
           <button onClick={() => setView('dashboard')} style={btnSm}><ArrowLeft size={15} /></button>
           <h2 style={{ fontSize: 16, fontWeight: 950, margin: 0 }}>Add Events to Sell</h2>
         </div>
       </div>
-      <div style={{ maxWidth: 480, margin: '0 auto', padding: '18px 15px 80px' }}>
+      <div style={{ maxWidth: 480, margin: '0 auto', padding: '14px 12px 80px' }}>
         <div style={{ background: 'rgba(205,164,52,.07)', border: '1px solid rgba(205,164,52,.14)', borderRadius: 18, padding: '13px 16px', marginBottom: 18, display: 'flex', gap: 10, alignItems: 'center' }}>
           <Zap size={16} color="#CDA434" />
           <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: '#CDA434' }}>You earn 10% on every ticket sold through your link. No cap.</p>
@@ -289,7 +289,7 @@ export default function ResellerDashboard() {
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 10 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(70px,1fr))', gap: 10 }}>
             {[['🖱️', totalClicks, 'CLICKS'], ['🎟️', totalSold, 'SOLD'], [`${convRate}%`, null, 'CONV.'], [`${links.length}`, null, 'EVENTS']].map(([emoji, num, label]) => (
               <div key={label} style={{ background: 'rgba(205,164,52,.06)', border: '1px solid rgba(205,164,52,.1)', borderRadius: 14, padding: '12px 8px', textAlign: 'center' }}>
                 <p style={{ margin: '0 0 3px', fontSize: num !== null ? 18 : 14, fontWeight: 950, color: '#CDA434', letterSpacing: '-0.5px' }}>{num !== null ? num : emoji}</p>
