@@ -12,7 +12,8 @@ import {
   BarChart3, ArrowUpRight, Filter, DownloadCloud,
   Eye, MousePointer2, Share2, Star, Clock, Trash2, Edit3,
   Layers, Activity, Sparkles, ChevronDown, UserPlus,
-  BarChart, PieChart, CreditCard, Layout, Grip
+  BarChart, PieChart, CreditCard, Layout, Grip,
+  Phone, KeyRound, RefreshCw, CheckCircle
 } from 'lucide-react';
 
 // --- LEAFLET DYNAMIC IMPORTS ---
@@ -162,6 +163,15 @@ const [showEventModal, setShowEventModal] = useState(false); // Reuse your exist
     subaccountCode: "", 
     isVerified: false
   });
+
+  // OTP / Payout-change gate state
+  const [showOtpGate, setShowOtpGate]             = useState(false);
+  const [otpGateStep, setOtpGateStep]             = useState('send'); // 'send' | 'verify'
+  const [otpCode, setOtpCode]                     = useState('');
+  const [otpLoading, setOtpLoading]               = useState(false);
+  const [otpStatus, setOtpStatus]                 = useState(null);
+  const [otpResendCooldown, setOtpResendCooldown] = useState(0);
+  const [pendingPayoutData, setPendingPayoutData] = useState(null);
 
   // Candidate Creation Form State
   const [newCandidate, setNewCandidate] = useState({ name: '', image_url: '', bio: '' });
@@ -375,29 +385,78 @@ useEffect(() => {
     setTimeout(() => setCopying(null), 2000);
   };
 
-  // Payout Onboarding Save
-  const saveOnboardingDetails = async () => {
-    setIsProcessing(true);
-    try {
-      const { error } = await supabase.from('profiles').update({
-        business_name: paystackConfig.businessName,
-        bank_code: paystackConfig.bankCode,
-        account_number: paystackConfig.accountNumber,
-        // In a real app, this triggers a backend function to create the Paystack Subaccount
-        updated_at: new Date().toISOString()
-      }).eq('id', data.profile.id);
+  // ── OTP GATE: open modal and stage the payout change ─────────────────────────
+  const requestPayoutChange = () => {
+    // Stage the pending change
+    setPendingPayoutData({
+      business_name:   paystackConfig.businessName,
+      settlement_bank: paystackConfig.bankCode,
+      account_number:  paystackConfig.accountNumber,
+    });
+    setOtpCode('');
+    setOtpStatus(null);
+    setOtpGateStep('send');
+    setShowOtpGate(true);
+  };
 
-      if (error) throw error;
-      
-      setShowSettingsModal(false);
-      loadDashboardData(true); // Silent refresh
-      alert("Settings saved. Verifying with Paystack...");
+  // ── OTP: send code ────────────────────────────────────────────────────────────
+  const sendPayoutOtp = async () => {
+    setOtpLoading(true);
+    setOtpStatus(null);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const phone = data?.profile?.phone_number;
+      if (!phone) throw new Error('No verified phone number on file. Please contact support.');
+      const res = await fetch('/api/organizer/phone-verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'send', phone, userId: user.id }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Failed to send code.');
+      setOtpGateStep('verify');
+      setOtpStatus({ type: 'success', msg: d.message });
+      // Resend cooldown
+      setOtpResendCooldown(60);
+      const t = setInterval(() => {
+        setOtpResendCooldown(c => { if (c <= 1) { clearInterval(t); return 0; } return c - 1; });
+      }, 1000);
     } catch (err) {
-      alert("Update failed. Please check your connection.");
+      setOtpStatus({ type: 'error', msg: err.message });
     } finally {
-      setIsProcessing(false);
+      setOtpLoading(false);
     }
   };
+
+  // ── OTP: verify code then apply payout change ─────────────────────────────────
+  const confirmPayoutWithOtp = async () => {
+    if (!otpCode || otpCode.length < 6) return;
+    setOtpLoading(true);
+    setOtpStatus(null);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const res = await fetch('/api/organizer/payout-update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, otp: otpCode, ...pendingPayoutData }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Update failed.');
+      setOtpStatus({ type: 'success', msg: 'Payout settings updated successfully!' });
+      setTimeout(() => {
+        setShowOtpGate(false);
+        setShowSettingsModal(false);
+        loadDashboardData(true);
+      }, 1500);
+    } catch (err) {
+      setOtpStatus({ type: 'error', msg: err.message });
+    } finally {
+      setOtpLoading(false);
+    }
+  };
+
+  // Kept for backward compat (no longer used directly)
+  const saveOnboardingDetails = requestPayoutChange;
 // --- EVENT ACTIONS ---
 
 // --- EVENT ACTIONS ---
@@ -1066,14 +1125,181 @@ const handleEditSubmit = async (e) => {
               <button style={closeBtn} onClick={() => setShowSettingsModal(false)}><X size={20} /></button>
             </div>
             <div style={modalBody}>
+              {/* Phone-verified notice */}
+              {data?.profile?.phone_verified && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20,
+                  background: '#f0fdf4', padding: '12px 16px', borderRadius: 14,
+                  border: '1px solid #bbf7d0',
+                }}>
+                  <ShieldCheck size={16} color="#16a34a"/>
+                  <div style={{fontSize: 12, fontWeight: 700, color: '#166534'}}>
+                    OTP required to save changes — sent to {data.profile.phone_number}
+                  </div>
+                </div>
+              )}
+              {!data?.profile?.phone_verified && (
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20,
+                  background: '#fff7ed', padding: '12px 16px', borderRadius: 14,
+                  border: '1px solid #fed7aa',
+                }}>
+                  <AlertCircle size={16} color="#c2410c"/>
+                  <div style={{fontSize: 12, fontWeight: 700, color: '#9a3412'}}>
+                    No verified phone. Please complete phone verification before changing payout settings.
+                  </div>
+                </div>
+              )}
               <div style={inputStack}>
                 <label style={fieldLabel}>BUSINESS LEGAL NAME</label>
                 <input style={modalInput} value={paystackConfig.businessName} onChange={(e) => setPaystackConfig({ ...paystackConfig, businessName: e.target.value })} />
               </div>
-              <button style={actionSubmitBtn(isProcessing)} onClick={saveOnboardingDetails} disabled={isProcessing}>
-                {isProcessing ? 'UPDATING...' : 'CONFIRM SETTINGS'}
+              <div style={inputStack}>
+                <label style={fieldLabel}>SETTLEMENT BANK / MOMO</label>
+                <select style={modalInput} value={paystackConfig.bankCode} onChange={(e) => setPaystackConfig({ ...paystackConfig, bankCode: e.target.value })}>
+                  {[
+                    { name: "MTN Mobile Money", code: "MTN" },
+                    { name: "Telecel Cash",      code: "VOD" },
+                    { name: "AirtelTigo Money",  code: "ATL" },
+                    { name: "GCB Bank",          code: "044" },
+                    { name: "Ecobank Ghana",     code: "013" },
+                    { name: "Zenith Bank",       code: "057" },
+                  ].map(b => <option key={b.code} value={b.code}>{b.name}</option>)}
+                </select>
+              </div>
+              <div style={inputStack}>
+                <label style={fieldLabel}>ACCOUNT / MOMO NUMBER</label>
+                <input style={modalInput} value={paystackConfig.accountNumber} placeholder="054XXXXXXX" onChange={(e) => setPaystackConfig({ ...paystackConfig, accountNumber: e.target.value })} />
+              </div>
+              <button
+                style={actionSubmitBtn(!data?.profile?.phone_verified)}
+                onClick={requestPayoutChange}
+                disabled={!data?.profile?.phone_verified}
+              >
+                {!data?.profile?.phone_verified ? 'PHONE VERIFICATION REQUIRED' : 'SAVE WITH OTP VERIFICATION'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── OTP GATE MODAL ─────────────────────────────────────────────────────── */}
+      {showOtpGate && (
+        <div style={{...overlay, zIndex: 3000}} onClick={() => { setShowOtpGate(false); setOtpCode(''); }}>
+          <div style={{
+            background: '#fff', borderRadius: 28, padding: 36, maxWidth: 420, width: '90%',
+            boxShadow: '0 25px 60px rgba(0,0,0,0.25)',
+          }} onClick={e => e.stopPropagation()}>
+
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <div style={{ background: '#000', borderRadius: 12, padding: 8, display: 'flex' }}>
+                  <ShieldCheck size={18} color="#fff"/>
+                </div>
+                <div>
+                  <div style={{ fontSize: 16, fontWeight: 900, color: '#0f172a' }}>Verify Identity</div>
+                  <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>Payout Settings Change</div>
+                </div>
+              </div>
+              <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}
+                onClick={() => { setShowOtpGate(false); setOtpCode(''); }}>
+                <X size={20}/>
+              </button>
+            </div>
+
+            {/* Step: Send */}
+            {otpGateStep === 'send' && (
+              <>
+                <p style={{ fontSize: 14, color: '#475569', fontWeight: 600, marginBottom: 24, lineHeight: 1.5 }}>
+                  To protect your earnings, we need to verify it's you before changing payout settings.<br/>
+                  A one-time code will be sent to <strong>{data?.profile?.phone_number}</strong>.
+                </p>
+                <button
+                  onClick={sendPayoutOtp}
+                  disabled={otpLoading}
+                  style={{
+                    width: '100%', padding: '16px', borderRadius: 16, border: 'none',
+                    background: '#000', color: '#fff', fontWeight: 900, fontSize: 15,
+                    cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+                    opacity: otpLoading ? 0.7 : 1,
+                  }}>
+                  {otpLoading ? <Loader2 size={18} className="animate-spin"/> : <Phone size={18}/>}
+                  {otpLoading ? 'Sending...' : 'Send Verification Code'}
+                </button>
+              </>
+            )}
+
+            {/* Step: Verify */}
+            {otpGateStep === 'verify' && (
+              <>
+                <p style={{ fontSize: 13, color: '#475569', fontWeight: 600, marginBottom: 8 }}>
+                  Enter the 6-digit code sent to <strong>{data?.profile?.phone_number}</strong>
+                </p>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="\d{6}"
+                  maxLength={6}
+                  placeholder="000000"
+                  value={otpCode}
+                  onChange={e => setOtpCode(e.target.value.replace(/\D/g, '').slice(0,6))}
+                  autoFocus
+                  style={{
+                    width: '100%', padding: '18px', borderRadius: 16,
+                    border: '2px solid #e2e8f0', fontSize: 28, fontWeight: 900,
+                    textAlign: 'center', letterSpacing: '0.3em', outline: 'none',
+                    background: '#f8fafc', marginBottom: 16, boxSizing: 'border-box',
+                  }}
+                />
+                <button
+                  onClick={confirmPayoutWithOtp}
+                  disabled={otpLoading || otpCode.length < 6}
+                  style={{
+                    width: '100%', padding: '16px', borderRadius: 16, border: 'none',
+                    background: otpCode.length < 6 ? '#e2e8f0' : '#000',
+                    color: otpCode.length < 6 ? '#94a3b8' : '#fff',
+                    fontWeight: 900, fontSize: 15, cursor: otpCode.length < 6 ? 'not-allowed' : 'pointer',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+                    opacity: otpLoading ? 0.7 : 1,
+                  }}>
+                  {otpLoading ? <Loader2 size={18} className="animate-spin"/> : <ShieldCheck size={18}/>}
+                  {otpLoading ? 'Verifying...' : 'Confirm & Save'}
+                </button>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 14 }}>
+                  <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 600 }}>Didn't get it?</span>
+                  <button
+                    onClick={sendPayoutOtp}
+                    disabled={otpResendCooldown > 0 || otpLoading}
+                    style={{
+                      background: 'none', border: 'none', cursor: otpResendCooldown > 0 ? 'not-allowed' : 'pointer',
+                      fontSize: 12, fontWeight: 800, color: otpResendCooldown > 0 ? '#94a3b8' : '#000',
+                      display: 'flex', alignItems: 'center', gap: 5,
+                    }}>
+                    <RefreshCw size={12}/>
+                    {otpResendCooldown > 0 ? `Resend in ${otpResendCooldown}s` : 'Resend'}
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* Status */}
+            {otpStatus && (
+              <div style={{
+                marginTop: 16, padding: '12px 16px', borderRadius: 14,
+                background: otpStatus.type === 'success' ? '#f0fdf4' : '#fef2f2',
+                color: otpStatus.type === 'success' ? '#166534' : '#991b1b',
+                fontSize: 13, fontWeight: 700,
+                display: 'flex', alignItems: 'center', gap: 8,
+                border: '1px solid currentColor',
+              }}>
+                {otpStatus.type === 'success'
+                  ? <CheckCircle size={16}/>
+                  : <AlertCircle size={16}/>
+                }
+                {otpStatus.msg}
+              </div>
+            )}
           </div>
         </div>
       )}
