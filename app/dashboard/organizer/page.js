@@ -164,6 +164,14 @@ const [showEventModal, setShowEventModal] = useState(false); // Reuse your exist
     isVerified: false
   });
 
+  // Inline phone setup state (inside the payout settings modal)
+  const [phoneSetupStep, setPhoneSetupStep]       = useState('enter'); // 'enter' | 'verify'
+  const [inlinePhone, setInlinePhone]             = useState('');
+  const [inlineOtp, setInlineOtp]                 = useState('');
+  const [inlinePhoneStatus, setInlinePhoneStatus] = useState(null);
+  const [inlinePhoneLoading, setInlinePhoneLoading] = useState(false);
+  const [inlineResendCooldown, setInlineResendCooldown] = useState(0);
+
   // OTP / Payout-change gate state
   const [showOtpGate, setShowOtpGate]             = useState(false);
   const [otpGateStep, setOtpGateStep]             = useState('send'); // 'send' | 'verify'
@@ -457,6 +465,82 @@ useEffect(() => {
 
   // Kept for backward compat (no longer used directly)
   const saveOnboardingDetails = requestPayoutChange;
+
+  // ── INLINE PHONE SETUP (inside settings modal) ────────────────────────────
+
+  const startInlineResendCooldown = () => {
+    setInlineResendCooldown(60);
+    const t = setInterval(() => {
+      setInlineResendCooldown(c => { if (c <= 1) { clearInterval(t); return 0; } return c - 1; });
+    }, 1000);
+  };
+
+  const sendInlinePhoneOtp = async () => {
+    setInlinePhoneLoading(true);
+    setInlinePhoneStatus(null);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const res = await fetch('/api/organizer/phone-verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'set-phone', phone: inlinePhone, userId: user.id }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Failed to send code.');
+      setPhoneSetupStep('verify');
+      setInlinePhoneStatus({ type: 'success', msg: d.message });
+      startInlineResendCooldown();
+    } catch (err) {
+      setInlinePhoneStatus({ type: 'error', msg: err.message });
+    } finally {
+      setInlinePhoneLoading(false);
+    }
+  };
+
+  const resendInlinePhoneOtp = async () => {
+    if (inlineResendCooldown > 0) return;
+    setInlinePhoneLoading(true);
+    setInlinePhoneStatus(null);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const res = await fetch('/api/organizer/phone-verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'set-phone', phone: inlinePhone, userId: user.id }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Could not resend.');
+      startInlineResendCooldown();
+      setInlinePhoneStatus({ type: 'success', msg: 'New code sent!' });
+    } catch (err) {
+      setInlinePhoneStatus({ type: 'error', msg: err.message });
+    } finally {
+      setInlinePhoneLoading(false);
+    }
+  };
+
+  const verifyInlinePhone = async () => {
+    setInlinePhoneLoading(true);
+    setInlinePhoneStatus(null);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const res = await fetch('/api/organizer/phone-verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'verify', otp: inlineOtp, userId: user.id }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Verification failed.');
+      // Refresh dashboard data so phone_verified flips to true in the UI
+      await loadDashboardData(true);
+      setInlinePhoneStatus({ type: 'success', msg: `Phone verified! You can now save payout settings.` });
+      setInlineOtp('');
+    } catch (err) {
+      setInlinePhoneStatus({ type: 'error', msg: err.message });
+    } finally {
+      setInlinePhoneLoading(false);
+    }
+  };
 // --- EVENT ACTIONS ---
 
 // --- EVENT ACTIONS ---
@@ -786,10 +870,15 @@ const handleEditSubmit = async (e) => {
               {paystackConfig.subaccountCode ? 'Paystack Connected' : 'Payouts Paused'}
             </div>
           </div>
-          {/* Change the onClick from setShowSettingsModal(true) to a router push */}
 <button 
   style={settingsIconBtn} 
-  onClick={() => router.push('/dashboard/organizer/onboarding')}
+  onClick={() => {
+    setPhoneSetupStep('enter'); // reset inline phone setup state
+    setInlinePhone('');
+    setInlineOtp('');
+    setInlinePhoneStatus(null);
+    setShowSettingsModal(true);
+  }}
 >
   <Wallet size={16}/> EDIT PAYOUT & BANK SETTINGS
 </button>
@@ -1121,63 +1210,166 @@ const handleEditSubmit = async (e) => {
         <div style={overlay} onClick={() => setShowSettingsModal(false)}>
           <div style={modal} onClick={e => e.stopPropagation()}>
             <div style={modalHead}>
-              <h2 style={modalTitle}>Payout Config</h2>
+              <h2 style={modalTitle}>Payout Settings</h2>
               <button style={closeBtn} onClick={() => setShowSettingsModal(false)}><X size={20} /></button>
             </div>
             <div style={modalBody}>
-              {/* Phone-verified notice */}
-              {data?.profile?.phone_verified && (
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20,
-                  background: '#f0fdf4', padding: '12px 16px', borderRadius: 14,
-                  border: '1px solid #bbf7d0',
-                }}>
-                  <ShieldCheck size={16} color="#16a34a"/>
-                  <div style={{fontSize: 12, fontWeight: 700, color: '#166534'}}>
-                    OTP required to save changes — sent to {data.profile.phone_number}
-                  </div>
-                </div>
-              )}
+
+              {/* ── PHONE NOT VERIFIED: show inline setup ── */}
               {!data?.profile?.phone_verified && (
-                <div style={{
-                  display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20,
-                  background: '#fff7ed', padding: '12px 16px', borderRadius: 14,
-                  border: '1px solid #fed7aa',
-                }}>
-                  <AlertCircle size={16} color="#c2410c"/>
-                  <div style={{fontSize: 12, fontWeight: 700, color: '#9a3412'}}>
-                    No verified phone. Please complete phone verification before changing payout settings.
+                <div>
+                  {/* Banner */}
+                  <div style={{
+                    display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 24,
+                    background: '#fff7ed', padding: '14px 16px', borderRadius: 14,
+                    border: '1px solid #fed7aa',
+                  }}>
+                    <Phone size={16} color="#c2410c" style={{marginTop: 2, flexShrink: 0}}/>
+                    <div>
+                      <div style={{fontSize: 13, fontWeight: 800, color: '#9a3412', marginBottom: 2}}>
+                        Verify your phone number first
+                      </div>
+                      <div style={{fontSize: 12, fontWeight: 600, color: '#c2410c', lineHeight: 1.5}}>
+                        A verified phone is required to protect your payout settings. Set it up below — you only do this once.
+                      </div>
+                    </div>
                   </div>
+
+                  {/* Step: Enter phone */}
+                  {phoneSetupStep === 'enter' && (
+                    <>
+                      <label style={fieldLabel}>YOUR PHONE NUMBER</label>
+                      <input
+                        style={modalInput}
+                        type="tel"
+                        placeholder="054 000 0000"
+                        value={inlinePhone}
+                        onChange={e => setInlinePhone(e.target.value)}
+                      />
+                      <button
+                        style={actionSubmitBtn(inlinePhoneLoading || !inlinePhone)}
+                        disabled={inlinePhoneLoading || !inlinePhone}
+                        onClick={sendInlinePhoneOtp}
+                      >
+                        {inlinePhoneLoading
+                          ? <><Loader2 size={15} className="animate-spin"/> SENDING...</>
+                          : <><Phone size={15}/> SEND VERIFICATION CODE</>
+                        }
+                      </button>
+                    </>
+                  )}
+
+                  {/* Step: Enter OTP */}
+                  {phoneSetupStep === 'verify' && (
+                    <>
+                      <div style={{fontSize: 12, fontWeight: 600, color: '#64748b', marginBottom: 12}}>
+                        Enter the 6-digit code sent to <strong>{inlinePhone}</strong>
+                      </div>
+                      <input
+                        style={{
+                          ...modalInput,
+                          fontSize: 24, fontWeight: 900, textAlign: 'center',
+                          letterSpacing: '0.3em', padding: '16px',
+                        }}
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={6}
+                        placeholder="000000"
+                        value={inlineOtp}
+                        autoFocus
+                        onChange={e => setInlineOtp(e.target.value.replace(/\D/g, '').slice(0,6))}
+                      />
+                      <button
+                        style={actionSubmitBtn(inlinePhoneLoading || inlineOtp.length < 6)}
+                        disabled={inlinePhoneLoading || inlineOtp.length < 6}
+                        onClick={verifyInlinePhone}
+                      >
+                        {inlinePhoneLoading
+                          ? <><Loader2 size={15} className="animate-spin"/> VERIFYING...</>
+                          : <><ShieldCheck size={15}/> CONFIRM CODE</>
+                        }
+                      </button>
+                      <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginTop: 12}}>
+                        <button
+                          onClick={() => { setPhoneSetupStep('enter'); setInlineOtp(''); setInlinePhoneStatus(null); }}
+                          style={{background:'none', border:'none', fontSize:12, fontWeight:700, color:'#64748b', cursor:'pointer', padding:0}}
+                        >
+                          ← Change number
+                        </button>
+                        <button
+                          onClick={resendInlinePhoneOtp}
+                          disabled={inlineResendCooldown > 0 || inlinePhoneLoading}
+                          style={{
+                            background:'none', border:'none', fontSize:12, fontWeight:800,
+                            color: inlineResendCooldown > 0 ? '#94a3b8' : '#000',
+                            cursor: inlineResendCooldown > 0 ? 'not-allowed' : 'pointer',
+                            display:'flex', alignItems:'center', gap:5, padding:0,
+                          }}
+                        >
+                          <RefreshCw size={11}/>
+                          {inlineResendCooldown > 0 ? `Resend in ${inlineResendCooldown}s` : 'Resend code'}
+                        </button>
+                      </div>
+                    </>
+                  )}
+
+                  {/* Inline status message */}
+                  {inlinePhoneStatus && (
+                    <div style={{
+                      marginTop: 16, padding: '11px 14px', borderRadius: 12,
+                      background: inlinePhoneStatus.type === 'success' ? '#f0fdf4' : '#fef2f2',
+                      color: inlinePhoneStatus.type === 'success' ? '#166534' : '#991b1b',
+                      fontSize: 12, fontWeight: 700,
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      border: '1px solid currentColor',
+                    }}>
+                      {inlinePhoneStatus.type === 'success' ? <CheckCircle size={14}/> : <AlertCircle size={14}/>}
+                      {inlinePhoneStatus.msg}
+                    </div>
+                  )}
                 </div>
               )}
-              <div style={inputStack}>
-                <label style={fieldLabel}>BUSINESS LEGAL NAME</label>
-                <input style={modalInput} value={paystackConfig.businessName} onChange={(e) => setPaystackConfig({ ...paystackConfig, businessName: e.target.value })} />
-              </div>
-              <div style={inputStack}>
-                <label style={fieldLabel}>SETTLEMENT BANK / MOMO</label>
-                <select style={modalInput} value={paystackConfig.bankCode} onChange={(e) => setPaystackConfig({ ...paystackConfig, bankCode: e.target.value })}>
-                  {[
-                    { name: "MTN Mobile Money", code: "MTN" },
-                    { name: "Telecel Cash",      code: "VOD" },
-                    { name: "AirtelTigo Money",  code: "ATL" },
-                    { name: "GCB Bank",          code: "044" },
-                    { name: "Ecobank Ghana",     code: "013" },
-                    { name: "Zenith Bank",       code: "057" },
-                  ].map(b => <option key={b.code} value={b.code}>{b.name}</option>)}
-                </select>
-              </div>
-              <div style={inputStack}>
-                <label style={fieldLabel}>ACCOUNT / MOMO NUMBER</label>
-                <input style={modalInput} value={paystackConfig.accountNumber} placeholder="054XXXXXXX" onChange={(e) => setPaystackConfig({ ...paystackConfig, accountNumber: e.target.value })} />
-              </div>
-              <button
-                style={actionSubmitBtn(!data?.profile?.phone_verified)}
-                onClick={requestPayoutChange}
-                disabled={!data?.profile?.phone_verified}
-              >
-                {!data?.profile?.phone_verified ? 'PHONE VERIFICATION REQUIRED' : 'SAVE WITH OTP VERIFICATION'}
-              </button>
+
+              {/* ── PHONE VERIFIED: show payout form ── */}
+              {data?.profile?.phone_verified && (
+                <>
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20,
+                    background: '#f0fdf4', padding: '12px 16px', borderRadius: 14,
+                    border: '1px solid #bbf7d0',
+                  }}>
+                    <ShieldCheck size={16} color="#16a34a"/>
+                    <div style={{fontSize: 12, fontWeight: 700, color: '#166534'}}>
+                      Changes require an OTP — sent to ••••••{data.profile.phone_number?.slice(-4)}
+                    </div>
+                  </div>
+                  <div style={inputStack}>
+                    <label style={fieldLabel}>BUSINESS LEGAL NAME</label>
+                    <input style={modalInput} value={paystackConfig.businessName} onChange={(e) => setPaystackConfig({ ...paystackConfig, businessName: e.target.value })} />
+                  </div>
+                  <div style={inputStack}>
+                    <label style={fieldLabel}>SETTLEMENT BANK / MOMO</label>
+                    <select style={modalInput} value={paystackConfig.bankCode} onChange={(e) => setPaystackConfig({ ...paystackConfig, bankCode: e.target.value })}>
+                      {[
+                        { name: "MTN Mobile Money", code: "MTN" },
+                        { name: "Telecel Cash",      code: "VOD" },
+                        { name: "AirtelTigo Money",  code: "ATL" },
+                        { name: "GCB Bank",          code: "044" },
+                        { name: "Ecobank Ghana",     code: "013" },
+                        { name: "Zenith Bank",       code: "057" },
+                      ].map(b => <option key={b.code} value={b.code}>{b.name}</option>)}
+                    </select>
+                  </div>
+                  <div style={inputStack}>
+                    <label style={fieldLabel}>ACCOUNT / MOMO NUMBER</label>
+                    <input style={modalInput} value={paystackConfig.accountNumber} placeholder="054XXXXXXX" onChange={(e) => setPaystackConfig({ ...paystackConfig, accountNumber: e.target.value })} />
+                  </div>
+                  <button style={actionSubmitBtn(isProcessing)} onClick={requestPayoutChange} disabled={isProcessing}>
+                    {isProcessing ? 'UPDATING...' : 'SAVE — VERIFY WITH OTP'}
+                  </button>
+                </>
+              )}
+
             </div>
           </div>
         </div>
