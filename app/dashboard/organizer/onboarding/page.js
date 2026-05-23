@@ -77,7 +77,7 @@ export default function Onboarding() {
       const res  = await fetch('/api/organizer/phone-verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'send', phone, userId: user.id }),
+        body: JSON.stringify({ action: 'set-phone', phone, userId: user.id }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to send code.');
@@ -125,7 +125,7 @@ export default function Onboarding() {
       const res  = await fetch('/api/organizer/phone-verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'send', phone, userId: user.id }),
+        body: JSON.stringify({ action: 'set-phone', phone, userId: user.id }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Could not resend.');

@@ -405,12 +405,12 @@ useEffect(() => {
     setOtpStatus(null);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      const phone = data?.profile?.phone_number;
-      if (!phone) throw new Error('No verified phone number on file. Please contact support.');
+      // No phone param — the API always reads the verified phone from the DB.
+      // This prevents any possibility of redirecting the OTP to a different number.
       const res = await fetch('/api/organizer/phone-verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'send', phone, userId: user.id }),
+        body: JSON.stringify({ action: 'send', userId: user.id }),
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || 'Failed to send code.');
@@ -1208,12 +1208,33 @@ const handleEditSubmit = async (e) => {
               </button>
             </div>
 
-            {/* Step: Send */}
+            {/* Step: Send — phone is read from DB, never from input */}
             {otpGateStep === 'send' && (
               <>
-                <p style={{ fontSize: 14, color: '#475569', fontWeight: 600, marginBottom: 24, lineHeight: 1.5 }}>
-                  To protect your earnings, we need to verify it's you before changing payout settings.<br/>
-                  A one-time code will be sent to <strong>{data?.profile?.phone_number}</strong>.
+                <div style={{
+                  background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 16,
+                  padding: '14px 18px', marginBottom: 20,
+                  display: 'flex', alignItems: 'center', gap: 12,
+                }}>
+                  <div style={{
+                    background: '#000', borderRadius: 10, width: 36, height: 36,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                  }}>
+                    <Phone size={16} color="#fff"/>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      Your verified number
+                    </div>
+                    <div style={{ fontSize: 15, fontWeight: 900, color: '#0f172a' }}>
+                      {data?.profile?.phone_number
+                        ? '••••••' + data.profile.phone_number.slice(-4)
+                        : 'No number on file'}
+                    </div>
+                  </div>
+                </div>
+                <p style={{ fontSize: 13, color: '#64748b', fontWeight: 600, marginBottom: 20, lineHeight: 1.6 }}>
+                  We'll send a one-time code to your registered number. You cannot change which number receives this code here — update it in Account Settings.
                 </p>
                 <button
                   onClick={sendPayoutOtp}
@@ -1225,7 +1246,7 @@ const handleEditSubmit = async (e) => {
                     opacity: otpLoading ? 0.7 : 1,
                   }}>
                   {otpLoading ? <Loader2 size={18} className="animate-spin"/> : <Phone size={18}/>}
-                  {otpLoading ? 'Sending...' : 'Send Verification Code'}
+                  {otpLoading ? 'Sending...' : 'Send Code to My Number'}
                 </button>
               </>
             )}
@@ -1234,7 +1255,12 @@ const handleEditSubmit = async (e) => {
             {otpGateStep === 'verify' && (
               <>
                 <p style={{ fontSize: 13, color: '#475569', fontWeight: 600, marginBottom: 8 }}>
-                  Enter the 6-digit code sent to <strong>{data?.profile?.phone_number}</strong>
+                  Enter the 6-digit code sent to{' '}
+                  <strong>
+                    {data?.profile?.phone_number
+                      ? '••••••' + data.profile.phone_number.slice(-4)
+                      : 'your number'}
+                  </strong>
                 </p>
                 <input
                   type="text"
