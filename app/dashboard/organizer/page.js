@@ -164,23 +164,14 @@ const [showEventModal, setShowEventModal] = useState(false); // Reuse your exist
     isVerified: false
   });
 
-  // Inline phone setup state (inside the payout settings modal)
-  const [phoneSetupStep, setPhoneSetupStep]       = useState('enter'); // 'enter' | 'verify'
-  const [inlinePhone, setInlinePhone]             = useState('');
-  const [inlineOtp, setInlineOtp]                 = useState('');
-  const [inlinePhoneStatus, setInlinePhoneStatus] = useState(null);
-  const [inlinePhoneLoading, setInlinePhoneLoading] = useState(false);
-  const [inlineResendCooldown, setInlineResendCooldown] = useState(0);
-
-  // OTP / Payout-change gate state
-  const [showOtpGate, setShowOtpGate]             = useState(false);
-  const [otpGateStep, setOtpGateStep]             = useState('send'); // 'send' | 'verify'
-  const [otpCode, setOtpCode]                     = useState('');
-  const [otpLoading, setOtpLoading]               = useState(false);
-  const [otpStatus, setOtpStatus]                 = useState(null);
-  const [otpResendCooldown, setOtpResendCooldown] = useState(0);
-  const [pendingPayoutData, setPendingPayoutData] = useState(null);
-
+  // Payout settings modal — unified state machine
+  // modalView: 'phone-enter' | 'phone-otp' | 'access-send' | 'access-verify' | 'edit'
+  const [modalView, setModalView]           = useState('access-send');
+  const [modalPhone, setModalPhone]         = useState('');
+  const [modalOtp, setModalOtp]             = useState('');
+  const [modalStatus, setModalStatus]       = useState(null);
+  const [modalLoading, setModalLoading]     = useState(false);
+  const [modalResendCooldown, setModalResendCooldown] = useState(0);
   // Candidate Creation Form State
   const [newCandidate, setNewCandidate] = useState({ name: '', image_url: '', bio: '' });
 const [showContestModal, setShowContestModal] = useState(null);
@@ -286,9 +277,9 @@ const uploadToSupabase = async (file) => {
 
      const profileData = getSingle(profileRes);
 
-// NEW: Check for onboarding completion
-// If business_name or bank_code is missing, they haven't finished onboarding
-if (profileData && (!profileData.business_name || !profileData.bank_code)) {
+// Check for onboarding completion.
+// Use paystack_subaccount_code — bank_code is null for MoMo users so it's unreliable.
+if (profileData && (!profileData.business_name || !profileData.paystack_subaccount_code)) {
   router.push('/dashboard/organizer/onboarding');
   return;
 }
@@ -393,28 +384,82 @@ useEffect(() => {
     setTimeout(() => setCopying(null), 2000);
   };
 
-  // ── OTP GATE: open modal and stage the payout change ─────────────────────────
-  const requestPayoutChange = () => {
-    // Stage the pending change
-    setPendingPayoutData({
-      business_name:   paystackConfig.businessName,
-      settlement_bank: paystackConfig.bankCode,
-      account_number:  paystackConfig.accountNumber,
-    });
-    setOtpCode('');
-    setOtpStatus(null);
-    setOtpGateStep('send');
-    setShowOtpGate(true);
+  // ── MODAL RESEND COOLDOWN ────────────────────────────────────────────────────
+  const startModalCooldown = () => {
+    setModalResendCooldown(60);
+    const t = setInterval(() => {
+      setModalResendCooldown(c => { if (c <= 1) { clearInterval(t); return 0; } return c - 1; });
+    }, 1000);
   };
 
-  // ── OTP: send code ────────────────────────────────────────────────────────────
-  const sendPayoutOtp = async () => {
-    setOtpLoading(true);
-    setOtpStatus(null);
+  // ── MODAL: open — decide which view to start on ───────────────────────────────
+  const openPayoutModal = () => {
+    setModalOtp('');
+    setModalPhone('');
+    setModalStatus(null);
+    setModalResendCooldown(0);
+    // If phone isn't verified yet, go straight to phone setup
+    // Otherwise go to the OTP access gate
+    const phoneVerified = data?.profile?.phone_verified;
+    setModalView(phoneVerified ? 'access-send' : 'phone-enter');
+    setShowSettingsModal(true);
+  };
+
+  // ── phone-enter: send OTP to new phone number ─────────────────────────────────
+  const modalSendPhoneOtp = async () => {
+    setModalLoading(true);
+    setModalStatus(null);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      // No phone param — the API always reads the verified phone from the DB.
-      // This prevents any possibility of redirecting the OTP to a different number.
+      const res = await fetch('/api/organizer/phone-verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'set-phone', phone: modalPhone, userId: user.id }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Failed to send code.');
+      setModalView('phone-otp');
+      setModalStatus({ type: 'success', msg: d.message });
+      startModalCooldown();
+    } catch (err) {
+      setModalStatus({ type: 'error', msg: err.message });
+    } finally {
+      setModalLoading(false);
+    }
+  };
+
+  // ── phone-otp: verify the new phone number ────────────────────────────────────
+  const modalVerifyPhone = async () => {
+    setModalLoading(true);
+    setModalStatus(null);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const res = await fetch('/api/organizer/phone-verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'verify', otp: modalOtp, userId: user.id }),
+      });
+      const d = await res.json();
+      if (!res.ok) throw new Error(d.error || 'Incorrect code. Try again.');
+      // Phone is now verified — move straight to the access OTP gate
+      await loadDashboardData(true);
+      setModalOtp('');
+      setModalStatus(null);
+      setModalView('access-send');
+    } catch (err) {
+      setModalStatus({ type: 'error', msg: err.message });
+    } finally {
+      setModalLoading(false);
+    }
+  };
+
+  // ── access-send: send OTP to the stored verified number ──────────────────────
+  // No phone param — reads from DB. Cannot be redirected.
+  const modalSendAccessOtp = async () => {
+    setModalLoading(true);
+    setModalStatus(null);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
       const res = await fetch('/api/organizer/phone-verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -422,123 +467,67 @@ useEffect(() => {
       });
       const d = await res.json();
       if (!res.ok) throw new Error(d.error || 'Failed to send code.');
-      setOtpGateStep('verify');
-      setOtpStatus({ type: 'success', msg: d.message });
-      // Resend cooldown
-      setOtpResendCooldown(60);
-      const t = setInterval(() => {
-        setOtpResendCooldown(c => { if (c <= 1) { clearInterval(t); return 0; } return c - 1; });
-      }, 1000);
+      setModalView('access-verify');
+      setModalStatus({ type: 'success', msg: d.message });
+      startModalCooldown();
     } catch (err) {
-      setOtpStatus({ type: 'error', msg: err.message });
+      setModalStatus({ type: 'error', msg: err.message });
     } finally {
-      setOtpLoading(false);
+      setModalLoading(false);
     }
   };
 
-  // ── OTP: verify code then apply payout change ─────────────────────────────────
-  const confirmPayoutWithOtp = async () => {
-    if (!otpCode || otpCode.length < 6) return;
-    setOtpLoading(true);
-    setOtpStatus(null);
+  // ── access-verify: confirm OTP → unlock the edit form ────────────────────────
+  const modalVerifyAccess = async () => {
+    setModalLoading(true);
+    setModalStatus(null);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      const res = await fetch('/api/organizer/payout-update', {
+      const res = await fetch('/api/organizer/phone-verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: user.id, otp: otpCode, ...pendingPayoutData }),
+        body: JSON.stringify({ action: 'verify', otp: modalOtp, userId: user.id }),
       });
       const d = await res.json();
-      if (!res.ok) throw new Error(d.error || 'Update failed.');
-      setOtpStatus({ type: 'success', msg: 'Payout settings updated successfully!' });
-      setTimeout(() => {
-        setShowOtpGate(false);
+      if (!res.ok) throw new Error(d.error || 'Incorrect code. Try again.');
+      // OTP consumed — unlock the edit form
+      setModalOtp('');
+      setModalStatus(null);
+      setModalView('edit');
+    } catch (err) {
+      setModalStatus({ type: 'error', msg: err.message });
+    } finally {
+      setModalLoading(false);
+    }
+  };
+
+  // ── edit: save payout changes (OTP already consumed to unlock this form) ──────
+  const modalSavePayoutSettings = async () => {
+    setIsProcessing(true);
+    setModalStatus(null);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      const res = await fetch('/api/organizer/onboard', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.id,
+          business_name:   paystackConfig.businessName,
+          settlement_bank: paystackConfig.bankCode,
+          account_number:  paystackConfig.accountNumber,
+        }),
+      });
+      const d = await res.json();
+      if (!res.ok || !d.success) throw new Error(d.error || 'Update failed.');
+      setModalStatus({ type: 'success', msg: 'Payout settings updated!' });
+      setTimeout(async () => {
         setShowSettingsModal(false);
-        loadDashboardData(true);
-      }, 1500);
+        await loadDashboardData(true);
+      }, 1200);
     } catch (err) {
-      setOtpStatus({ type: 'error', msg: err.message });
+      setModalStatus({ type: 'error', msg: err.message });
     } finally {
-      setOtpLoading(false);
-    }
-  };
-
-  // Kept for backward compat (no longer used directly)
-  const saveOnboardingDetails = requestPayoutChange;
-
-  // ── INLINE PHONE SETUP (inside settings modal) ────────────────────────────
-
-  const startInlineResendCooldown = () => {
-    setInlineResendCooldown(60);
-    const t = setInterval(() => {
-      setInlineResendCooldown(c => { if (c <= 1) { clearInterval(t); return 0; } return c - 1; });
-    }, 1000);
-  };
-
-  const sendInlinePhoneOtp = async () => {
-    setInlinePhoneLoading(true);
-    setInlinePhoneStatus(null);
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      const res = await fetch('/api/organizer/phone-verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'set-phone', phone: inlinePhone, userId: user.id }),
-      });
-      const d = await res.json();
-      if (!res.ok) throw new Error(d.error || 'Failed to send code.');
-      setPhoneSetupStep('verify');
-      setInlinePhoneStatus({ type: 'success', msg: d.message });
-      startInlineResendCooldown();
-    } catch (err) {
-      setInlinePhoneStatus({ type: 'error', msg: err.message });
-    } finally {
-      setInlinePhoneLoading(false);
-    }
-  };
-
-  const resendInlinePhoneOtp = async () => {
-    if (inlineResendCooldown > 0) return;
-    setInlinePhoneLoading(true);
-    setInlinePhoneStatus(null);
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      const res = await fetch('/api/organizer/phone-verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'set-phone', phone: inlinePhone, userId: user.id }),
-      });
-      const d = await res.json();
-      if (!res.ok) throw new Error(d.error || 'Could not resend.');
-      startInlineResendCooldown();
-      setInlinePhoneStatus({ type: 'success', msg: 'New code sent!' });
-    } catch (err) {
-      setInlinePhoneStatus({ type: 'error', msg: err.message });
-    } finally {
-      setInlinePhoneLoading(false);
-    }
-  };
-
-  const verifyInlinePhone = async () => {
-    setInlinePhoneLoading(true);
-    setInlinePhoneStatus(null);
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      const res = await fetch('/api/organizer/phone-verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'verify', otp: inlineOtp, userId: user.id }),
-      });
-      const d = await res.json();
-      if (!res.ok) throw new Error(d.error || 'Verification failed.');
-      // Refresh dashboard data so phone_verified flips to true in the UI
-      await loadDashboardData(true);
-      setInlinePhoneStatus({ type: 'success', msg: `Phone verified! You can now save payout settings.` });
-      setInlineOtp('');
-    } catch (err) {
-      setInlinePhoneStatus({ type: 'error', msg: err.message });
-    } finally {
-      setInlinePhoneLoading(false);
+      setIsProcessing(false);
     }
   };
 // --- EVENT ACTIONS ---
@@ -870,16 +859,7 @@ const handleEditSubmit = async (e) => {
               {paystackConfig.subaccountCode ? 'Paystack Connected' : 'Payouts Paused'}
             </div>
           </div>
-<button 
-  style={settingsIconBtn} 
-  onClick={() => {
-    setPhoneSetupStep('enter'); // reset inline phone setup state
-    setInlinePhone('');
-    setInlineOtp('');
-    setInlinePhoneStatus(null);
-    setShowSettingsModal(true);
-  }}
->
+<button style={settingsIconBtn} onClick={openPayoutModal}>
   <Wallet size={16}/> EDIT PAYOUT & BANK SETTINGS
 </button>
         </div>
@@ -1205,169 +1185,233 @@ const handleEditSubmit = async (e) => {
         </div>
       )}
 
-      {/* MODALS */}
+      {/* ── PAYOUT SETTINGS MODAL ─────────────────────────────────────────────── */}
       {showSettingsModal && (
         <div style={overlay} onClick={() => setShowSettingsModal(false)}>
           <div style={modal} onClick={e => e.stopPropagation()}>
+
+            {/* Header */}
             <div style={modalHead}>
-              <h2 style={modalTitle}>Payout Settings</h2>
+              <div style={{display:'flex', alignItems:'center', gap:10}}>
+                <div style={{background:'#000', borderRadius:12, padding:8, display:'flex'}}>
+                  <ShieldCheck size={16} color="#fff"/>
+                </div>
+                <div>
+                  <h2 style={{...modalTitle, margin:0}}>Payout Settings</h2>
+                  <div style={{fontSize:11, color:'#94a3b8', fontWeight:700}}>
+                    {modalView === 'phone-enter' && 'Step 1 of 3 — Set phone number'}
+                    {modalView === 'phone-otp'   && 'Step 2 of 3 — Verify phone'}
+                    {modalView === 'access-send' && 'Step 1 of 2 — Verify identity'}
+                    {modalView === 'access-verify' && 'Step 2 of 2 — Enter code'}
+                    {modalView === 'edit'         && 'Unlocked — edit your settings'}
+                  </div>
+                </div>
+              </div>
               <button style={closeBtn} onClick={() => setShowSettingsModal(false)}><X size={20} /></button>
             </div>
+
             <div style={modalBody}>
 
-              {/* ── PHONE NOT VERIFIED: show inline setup ── */}
-              {!data?.profile?.phone_verified && (
+              {/* ── VIEW: phone-enter ── no phone on file, ask for number */}
+              {modalView === 'phone-enter' && (
                 <div>
-                  {/* Banner */}
-                  <div style={{
-                    display: 'flex', alignItems: 'flex-start', gap: 12, marginBottom: 24,
-                    background: '#fff7ed', padding: '14px 16px', borderRadius: 14,
-                    border: '1px solid #fed7aa',
-                  }}>
-                    <Phone size={16} color="#c2410c" style={{marginTop: 2, flexShrink: 0}}/>
-                    <div>
-                      <div style={{fontSize: 13, fontWeight: 800, color: '#9a3412', marginBottom: 2}}>
-                        Verify your phone number first
-                      </div>
-                      <div style={{fontSize: 12, fontWeight: 600, color: '#c2410c', lineHeight: 1.5}}>
-                        A verified phone is required to protect your payout settings. Set it up below — you only do this once.
-                      </div>
+                  <div style={{display:'flex', alignItems:'flex-start', gap:12, marginBottom:20,
+                    background:'#fff7ed', padding:'14px 16px', borderRadius:14, border:'1px solid #fed7aa'}}>
+                    <Phone size={15} color="#c2410c" style={{marginTop:2, flexShrink:0}}/>
+                    <div style={{fontSize:12, fontWeight:700, color:'#9a3412', lineHeight:1.5}}>
+                      You don't have a verified phone number yet. Set one up — you'll use it as a security gate for all future payout changes.
                     </div>
                   </div>
-
-                  {/* Step: Enter phone */}
-                  {phoneSetupStep === 'enter' && (
-                    <>
-                      <label style={fieldLabel}>YOUR PHONE NUMBER</label>
-                      <input
-                        style={modalInput}
-                        type="tel"
-                        placeholder="054 000 0000"
-                        value={inlinePhone}
-                        onChange={e => setInlinePhone(e.target.value)}
-                      />
-                      <button
-                        style={actionSubmitBtn(inlinePhoneLoading || !inlinePhone)}
-                        disabled={inlinePhoneLoading || !inlinePhone}
-                        onClick={sendInlinePhoneOtp}
-                      >
-                        {inlinePhoneLoading
-                          ? <><Loader2 size={15} className="animate-spin"/> SENDING...</>
-                          : <><Phone size={15}/> SEND VERIFICATION CODE</>
-                        }
-                      </button>
-                    </>
-                  )}
-
-                  {/* Step: Enter OTP */}
-                  {phoneSetupStep === 'verify' && (
-                    <>
-                      <div style={{fontSize: 12, fontWeight: 600, color: '#64748b', marginBottom: 12}}>
-                        Enter the 6-digit code sent to <strong>{inlinePhone}</strong>
-                      </div>
-                      <input
-                        style={{
-                          ...modalInput,
-                          fontSize: 24, fontWeight: 900, textAlign: 'center',
-                          letterSpacing: '0.3em', padding: '16px',
-                        }}
-                        type="text"
-                        inputMode="numeric"
-                        maxLength={6}
-                        placeholder="000000"
-                        value={inlineOtp}
-                        autoFocus
-                        onChange={e => setInlineOtp(e.target.value.replace(/\D/g, '').slice(0,6))}
-                      />
-                      <button
-                        style={actionSubmitBtn(inlinePhoneLoading || inlineOtp.length < 6)}
-                        disabled={inlinePhoneLoading || inlineOtp.length < 6}
-                        onClick={verifyInlinePhone}
-                      >
-                        {inlinePhoneLoading
-                          ? <><Loader2 size={15} className="animate-spin"/> VERIFYING...</>
-                          : <><ShieldCheck size={15}/> CONFIRM CODE</>
-                        }
-                      </button>
-                      <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', marginTop: 12}}>
-                        <button
-                          onClick={() => { setPhoneSetupStep('enter'); setInlineOtp(''); setInlinePhoneStatus(null); }}
-                          style={{background:'none', border:'none', fontSize:12, fontWeight:700, color:'#64748b', cursor:'pointer', padding:0}}
-                        >
-                          ← Change number
-                        </button>
-                        <button
-                          onClick={resendInlinePhoneOtp}
-                          disabled={inlineResendCooldown > 0 || inlinePhoneLoading}
-                          style={{
-                            background:'none', border:'none', fontSize:12, fontWeight:800,
-                            color: inlineResendCooldown > 0 ? '#94a3b8' : '#000',
-                            cursor: inlineResendCooldown > 0 ? 'not-allowed' : 'pointer',
-                            display:'flex', alignItems:'center', gap:5, padding:0,
-                          }}
-                        >
-                          <RefreshCw size={11}/>
-                          {inlineResendCooldown > 0 ? `Resend in ${inlineResendCooldown}s` : 'Resend code'}
-                        </button>
-                      </div>
-                    </>
-                  )}
-
-                  {/* Inline status message */}
-                  {inlinePhoneStatus && (
-                    <div style={{
-                      marginTop: 16, padding: '11px 14px', borderRadius: 12,
-                      background: inlinePhoneStatus.type === 'success' ? '#f0fdf4' : '#fef2f2',
-                      color: inlinePhoneStatus.type === 'success' ? '#166534' : '#991b1b',
-                      fontSize: 12, fontWeight: 700,
-                      display: 'flex', alignItems: 'center', gap: 8,
-                      border: '1px solid currentColor',
-                    }}>
-                      {inlinePhoneStatus.type === 'success' ? <CheckCircle size={14}/> : <AlertCircle size={14}/>}
-                      {inlinePhoneStatus.msg}
-                    </div>
-                  )}
+                  <label style={fieldLabel}>YOUR PHONE NUMBER</label>
+                  <input
+                    style={modalInput}
+                    type="tel"
+                    placeholder="054 000 0000"
+                    value={modalPhone}
+                    onChange={e => setModalPhone(e.target.value)}
+                  />
+                  <button
+                    style={actionSubmitBtn(modalLoading || !modalPhone)}
+                    disabled={modalLoading || !modalPhone}
+                    onClick={modalSendPhoneOtp}
+                  >
+                    {modalLoading
+                      ? <><Loader2 size={14} className="animate-spin"/> SENDING...</>
+                      : <><Phone size={14}/> SEND VERIFICATION CODE</>}
+                  </button>
                 </div>
               )}
 
-              {/* ── PHONE VERIFIED: show payout form ── */}
-              {data?.profile?.phone_verified && (
-                <>
+              {/* ── VIEW: phone-otp ── verify the new phone */}
+              {modalView === 'phone-otp' && (
+                <div>
+                  <div style={{fontSize:13, fontWeight:700, color:'#475569', marginBottom:16, lineHeight:1.5}}>
+                    Enter the 6-digit code sent to <strong>{modalPhone}</strong>
+                  </div>
+                  <input
+                    style={{...modalInput, fontSize:26, fontWeight:900, textAlign:'center', letterSpacing:'0.3em', padding:16}}
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={6}
+                    placeholder="000000"
+                    value={modalOtp}
+                    autoFocus
+                    onChange={e => setModalOtp(e.target.value.replace(/\D/g,'').slice(0,6))}
+                  />
+                  <button
+                    style={actionSubmitBtn(modalLoading || modalOtp.length < 6)}
+                    disabled={modalLoading || modalOtp.length < 6}
+                    onClick={modalVerifyPhone}
+                  >
+                    {modalLoading
+                      ? <><Loader2 size={14} className="animate-spin"/> VERIFYING...</>
+                      : <><CheckCircle size={14}/> CONFIRM & CONTINUE</>}
+                  </button>
+                  <div style={{display:'flex', justifyContent:'space-between', marginTop:12}}>
+                    <button onClick={()=>{setModalView('phone-enter');setModalOtp('');setModalStatus(null);}}
+                      style={{background:'none',border:'none',fontSize:12,fontWeight:700,color:'#64748b',cursor:'pointer',padding:0}}>
+                      ← Change number
+                    </button>
+                    <button onClick={modalSendPhoneOtp} disabled={modalResendCooldown > 0 || modalLoading}
+                      style={{background:'none',border:'none',fontSize:12,fontWeight:800,
+                        color:modalResendCooldown>0?'#94a3b8':'#000',
+                        cursor:modalResendCooldown>0?'not-allowed':'pointer',
+                        display:'flex',alignItems:'center',gap:5,padding:0}}>
+                      <RefreshCw size={11}/>
+                      {modalResendCooldown > 0 ? `Resend in ${modalResendCooldown}s` : 'Resend code'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* ── VIEW: access-send ── phone verified, send OTP to unlock */}
+              {modalView === 'access-send' && (
+                <div>
                   <div style={{
-                    display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20,
-                    background: '#f0fdf4', padding: '12px 16px', borderRadius: 14,
-                    border: '1px solid #bbf7d0',
+                    background:'#f8fafc', border:'1px solid #e2e8f0', borderRadius:16,
+                    padding:'16px 18px', marginBottom:20,
+                    display:'flex', alignItems:'center', gap:14,
                   }}>
-                    <ShieldCheck size={16} color="#16a34a"/>
-                    <div style={{fontSize: 12, fontWeight: 700, color: '#166534'}}>
-                      Changes require an OTP — sent to ••••••{data.profile.phone_number?.slice(-4)}
+                    <div style={{background:'#000', borderRadius:10, width:40, height:40,
+                      display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0}}>
+                      <Phone size={17} color="#fff"/>
                     </div>
+                    <div>
+                      <div style={{fontSize:11, fontWeight:800, color:'#94a3b8', textTransform:'uppercase', letterSpacing:'0.05em'}}>
+                        Verification will be sent to
+                      </div>
+                      <div style={{fontSize:16, fontWeight:900, color:'#0f172a'}}>
+                        {data?.profile?.phone_number
+                          ? '••••••' + data.profile.phone_number.slice(-4)
+                          : '—'}
+                      </div>
+                    </div>
+                  </div>
+                  <p style={{fontSize:13, color:'#64748b', fontWeight:600, marginBottom:20, lineHeight:1.6}}>
+                    For your protection, your existing settings are hidden until you verify it's you. The code goes to your registered number only.
+                  </p>
+                  <button
+                    style={actionSubmitBtn(modalLoading)}
+                    disabled={modalLoading}
+                    onClick={modalSendAccessOtp}
+                  >
+                    {modalLoading
+                      ? <><Loader2 size={14} className="animate-spin"/> SENDING CODE...</>
+                      : <><Phone size={14}/> SEND CODE TO MY NUMBER</>}
+                  </button>
+                </div>
+              )}
+
+              {/* ── VIEW: access-verify ── enter OTP to unlock edit form */}
+              {modalView === 'access-verify' && (
+                <div>
+                  <div style={{fontSize:13, fontWeight:700, color:'#475569', marginBottom:16, lineHeight:1.5}}>
+                    Enter the 6-digit code sent to <strong>••••••{data?.profile?.phone_number?.slice(-4)}</strong>
+                  </div>
+                  <input
+                    style={{...modalInput, fontSize:26, fontWeight:900, textAlign:'center', letterSpacing:'0.3em', padding:16}}
+                    type="text"
+                    inputMode="numeric"
+                    maxLength={6}
+                    placeholder="000000"
+                    value={modalOtp}
+                    autoFocus
+                    onChange={e => setModalOtp(e.target.value.replace(/\D/g,'').slice(0,6))}
+                  />
+                  <button
+                    style={actionSubmitBtn(modalLoading || modalOtp.length < 6)}
+                    disabled={modalLoading || modalOtp.length < 6}
+                    onClick={modalVerifyAccess}
+                  >
+                    {modalLoading
+                      ? <><Loader2 size={14} className="animate-spin"/> VERIFYING...</>
+                      : <><ShieldCheck size={14}/> CONFIRM & VIEW SETTINGS</>}
+                  </button>
+                  <div style={{display:'flex', justifyContent:'flex-end', marginTop:12}}>
+                    <button onClick={modalSendAccessOtp} disabled={modalResendCooldown > 0 || modalLoading}
+                      style={{background:'none',border:'none',fontSize:12,fontWeight:800,
+                        color:modalResendCooldown>0?'#94a3b8':'#000',
+                        cursor:modalResendCooldown>0?'not-allowed':'pointer',
+                        display:'flex',alignItems:'center',gap:5,padding:0}}>
+                      <RefreshCw size={11}/>
+                      {modalResendCooldown > 0 ? `Resend in ${modalResendCooldown}s` : 'Resend code'}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* ── VIEW: edit ── OTP already consumed, show and save settings */}
+              {modalView === 'edit' && (
+                <div>
+                  <div style={{display:'flex', alignItems:'center', gap:8, marginBottom:20,
+                    background:'#f0fdf4', padding:'10px 14px', borderRadius:12, border:'1px solid #bbf7d0'}}>
+                    <CheckCircle size={14} color="#16a34a"/>
+                    <div style={{fontSize:12, fontWeight:700, color:'#166534'}}>Identity verified — edit your settings below</div>
                   </div>
                   <div style={inputStack}>
                     <label style={fieldLabel}>BUSINESS LEGAL NAME</label>
-                    <input style={modalInput} value={paystackConfig.businessName} onChange={(e) => setPaystackConfig({ ...paystackConfig, businessName: e.target.value })} />
+                    <input style={modalInput} value={paystackConfig.businessName}
+                      onChange={e => setPaystackConfig({...paystackConfig, businessName: e.target.value})} />
                   </div>
                   <div style={inputStack}>
                     <label style={fieldLabel}>SETTLEMENT BANK / MOMO</label>
-                    <select style={modalInput} value={paystackConfig.bankCode} onChange={(e) => setPaystackConfig({ ...paystackConfig, bankCode: e.target.value })}>
-                      {[
-                        { name: "MTN Mobile Money", code: "MTN" },
-                        { name: "Telecel Cash",      code: "VOD" },
-                        { name: "AirtelTigo Money",  code: "ATL" },
-                        { name: "GCB Bank",          code: "044" },
-                        { name: "Ecobank Ghana",     code: "013" },
-                        { name: "Zenith Bank",       code: "057" },
-                      ].map(b => <option key={b.code} value={b.code}>{b.name}</option>)}
+                    <select style={modalInput} value={paystackConfig.bankCode}
+                      onChange={e => setPaystackConfig({...paystackConfig, bankCode: e.target.value})}>
+                        <option key="MTN" value="MTN">MTN Mobile Money</option>
+                        <option key="VOD" value="VOD">Telecel Cash</option>
+                        <option key="ATL" value="ATL">AirtelTigo Money</option>
+                        <option key="044" value="044">GCB Bank</option>
+                        <option key="013" value="013">Ecobank Ghana</option>
+                        <option key="057" value="057">Zenith Bank</option>
                     </select>
                   </div>
                   <div style={inputStack}>
                     <label style={fieldLabel}>ACCOUNT / MOMO NUMBER</label>
-                    <input style={modalInput} value={paystackConfig.accountNumber} placeholder="054XXXXXXX" onChange={(e) => setPaystackConfig({ ...paystackConfig, accountNumber: e.target.value })} />
+                    <input style={modalInput} value={paystackConfig.accountNumber}
+                      placeholder="054XXXXXXX"
+                      onChange={e => setPaystackConfig({...paystackConfig, accountNumber: e.target.value})} />
                   </div>
-                  <button style={actionSubmitBtn(isProcessing)} onClick={requestPayoutChange} disabled={isProcessing}>
-                    {isProcessing ? 'UPDATING...' : 'SAVE — VERIFY WITH OTP'}
+                  <button style={actionSubmitBtn(isProcessing)} onClick={modalSavePayoutSettings} disabled={isProcessing}>
+                    {isProcessing
+                      ? <><Loader2 size={14} className="animate-spin"/> SAVING...</>
+                      : 'SAVE CHANGES'}
                   </button>
-                </>
+                </div>
+              )}
+
+              {/* Status message — shown in all views */}
+              {modalStatus && (
+                <div style={{
+                  marginTop:16, padding:'11px 14px', borderRadius:12,
+                  background: modalStatus.type === 'success' ? '#f0fdf4' : '#fef2f2',
+                  color:       modalStatus.type === 'success' ? '#166534'  : '#991b1b',
+                  fontSize:12, fontWeight:700,
+                  display:'flex', alignItems:'center', gap:8,
+                  border:'1px solid currentColor',
+                }}>
+                  {modalStatus.type === 'success' ? <CheckCircle size={14}/> : <AlertCircle size={14}/>}
+                  {modalStatus.msg}
+                </div>
               )}
 
             </div>
@@ -1375,152 +1419,6 @@ const handleEditSubmit = async (e) => {
         </div>
       )}
 
-      {/* ── OTP GATE MODAL ─────────────────────────────────────────────────────── */}
-      {showOtpGate && (
-        <div style={{...overlay, zIndex: 3000}} onClick={() => { setShowOtpGate(false); setOtpCode(''); }}>
-          <div style={{
-            background: '#fff', borderRadius: 28, padding: 36, maxWidth: 420, width: '90%',
-            boxShadow: '0 25px 60px rgba(0,0,0,0.25)',
-          }} onClick={e => e.stopPropagation()}>
-
-            {/* Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <div style={{ background: '#000', borderRadius: 12, padding: 8, display: 'flex' }}>
-                  <ShieldCheck size={18} color="#fff"/>
-                </div>
-                <div>
-                  <div style={{ fontSize: 16, fontWeight: 900, color: '#0f172a' }}>Verify Identity</div>
-                  <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>Payout Settings Change</div>
-                </div>
-              </div>
-              <button style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8' }}
-                onClick={() => { setShowOtpGate(false); setOtpCode(''); }}>
-                <X size={20}/>
-              </button>
-            </div>
-
-            {/* Step: Send — phone is read from DB, never from input */}
-            {otpGateStep === 'send' && (
-              <>
-                <div style={{
-                  background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 16,
-                  padding: '14px 18px', marginBottom: 20,
-                  display: 'flex', alignItems: 'center', gap: 12,
-                }}>
-                  <div style={{
-                    background: '#000', borderRadius: 10, width: 36, height: 36,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-                  }}>
-                    <Phone size={16} color="#fff"/>
-                  </div>
-                  <div>
-                    <div style={{ fontSize: 11, fontWeight: 800, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                      Your verified number
-                    </div>
-                    <div style={{ fontSize: 15, fontWeight: 900, color: '#0f172a' }}>
-                      {data?.profile?.phone_number
-                        ? '••••••' + data.profile.phone_number.slice(-4)
-                        : 'No number on file'}
-                    </div>
-                  </div>
-                </div>
-                <p style={{ fontSize: 13, color: '#64748b', fontWeight: 600, marginBottom: 20, lineHeight: 1.6 }}>
-                  We'll send a one-time code to your registered number. You cannot change which number receives this code here — update it in Account Settings.
-                </p>
-                <button
-                  onClick={sendPayoutOtp}
-                  disabled={otpLoading}
-                  style={{
-                    width: '100%', padding: '16px', borderRadius: 16, border: 'none',
-                    background: '#000', color: '#fff', fontWeight: 900, fontSize: 15,
-                    cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
-                    opacity: otpLoading ? 0.7 : 1,
-                  }}>
-                  {otpLoading ? <Loader2 size={18} className="animate-spin"/> : <Phone size={18}/>}
-                  {otpLoading ? 'Sending...' : 'Send Code to My Number'}
-                </button>
-              </>
-            )}
-
-            {/* Step: Verify */}
-            {otpGateStep === 'verify' && (
-              <>
-                <p style={{ fontSize: 13, color: '#475569', fontWeight: 600, marginBottom: 8 }}>
-                  Enter the 6-digit code sent to{' '}
-                  <strong>
-                    {data?.profile?.phone_number
-                      ? '••••••' + data.profile.phone_number.slice(-4)
-                      : 'your number'}
-                  </strong>
-                </p>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  pattern="\d{6}"
-                  maxLength={6}
-                  placeholder="000000"
-                  value={otpCode}
-                  onChange={e => setOtpCode(e.target.value.replace(/\D/g, '').slice(0,6))}
-                  autoFocus
-                  style={{
-                    width: '100%', padding: '18px', borderRadius: 16,
-                    border: '2px solid #e2e8f0', fontSize: 28, fontWeight: 900,
-                    textAlign: 'center', letterSpacing: '0.3em', outline: 'none',
-                    background: '#f8fafc', marginBottom: 16, boxSizing: 'border-box',
-                  }}
-                />
-                <button
-                  onClick={confirmPayoutWithOtp}
-                  disabled={otpLoading || otpCode.length < 6}
-                  style={{
-                    width: '100%', padding: '16px', borderRadius: 16, border: 'none',
-                    background: otpCode.length < 6 ? '#e2e8f0' : '#000',
-                    color: otpCode.length < 6 ? '#94a3b8' : '#fff',
-                    fontWeight: 900, fontSize: 15, cursor: otpCode.length < 6 ? 'not-allowed' : 'pointer',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
-                    opacity: otpLoading ? 0.7 : 1,
-                  }}>
-                  {otpLoading ? <Loader2 size={18} className="animate-spin"/> : <ShieldCheck size={18}/>}
-                  {otpLoading ? 'Verifying...' : 'Confirm & Save'}
-                </button>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 14 }}>
-                  <span style={{ fontSize: 12, color: '#94a3b8', fontWeight: 600 }}>Didn't get it?</span>
-                  <button
-                    onClick={sendPayoutOtp}
-                    disabled={otpResendCooldown > 0 || otpLoading}
-                    style={{
-                      background: 'none', border: 'none', cursor: otpResendCooldown > 0 ? 'not-allowed' : 'pointer',
-                      fontSize: 12, fontWeight: 800, color: otpResendCooldown > 0 ? '#94a3b8' : '#000',
-                      display: 'flex', alignItems: 'center', gap: 5,
-                    }}>
-                    <RefreshCw size={12}/>
-                    {otpResendCooldown > 0 ? `Resend in ${otpResendCooldown}s` : 'Resend'}
-                  </button>
-                </div>
-              </>
-            )}
-
-            {/* Status */}
-            {otpStatus && (
-              <div style={{
-                marginTop: 16, padding: '12px 16px', borderRadius: 14,
-                background: otpStatus.type === 'success' ? '#f0fdf4' : '#fef2f2',
-                color: otpStatus.type === 'success' ? '#166534' : '#991b1b',
-                fontSize: 13, fontWeight: 700,
-                display: 'flex', alignItems: 'center', gap: 8,
-                border: '1px solid currentColor',
-              }}>
-                {otpStatus.type === 'success'
-                  ? <CheckCircle size={16}/>
-                  : <AlertCircle size={16}/>
-                }
-                {otpStatus.msg}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
 {showEventModal && (
   <div style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.92)', backdropFilter: 'blur(12px)', zIndex: 2000, overflowY: 'auto' }}>
     <div style={{ maxWidth: 1100, margin: '0 auto', padding: '32px 20px 80px' }}>
