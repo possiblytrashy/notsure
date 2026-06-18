@@ -1,13 +1,16 @@
-// OUSTED WEBHOOK ENGINE v3.2
+// OUSTED WEBHOOK ENGINE v3.3
 // Handles: charge.success for TICKET and VOTE purchases
 // USSD purchases (meta.channel === 'USSD') are routed to processUSSDPayment.
 // Web purchases go through processTicket.
 // Idempotent, timing-safe HMAC verification.
 //
-// v3.2 changes:
-//   - guest_phone saved directly on every ticket row (no more digging through webhook_log)
-//   - Every SMS attempt (sent / failed / skipped) logged to sms_log table
-//   - Single shared sendSMS() + logSMS() helpers — no more inline duplicates
+// v3.3 changes (BUGFIX):
+//   - Replaced ALL .catch() chained directly on Supabase query builders.
+//     In @supabase/supabase-js v2, the query builder is a PromiseLike (thenable),
+//     NOT a real Promise. .catch() is not guaranteed to exist on its prototype.
+//     Every chained .catch() is now replaced with try/catch around await.
+//   - Fire-and-forget DB writes (logs, counters) are wrapped in async IIFEs
+//     with try/catch so they never crash the main flow.
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
@@ -68,16 +71,18 @@ async function sendSMS(phone, message) {
 // Upsert on (reference, phone) so replaying a webhook never creates duplicate rows.
 async function logSMS(supabase, { reference, phone, message, result, channel = 'web' }) {
   const e164 = normalisePhone(phone) || phone || 'unknown';
-  await supabase.from('sms_log').upsert({
-    reference,
-    phone:   e164,
-    message,
-    status:  result.success ? 'sent'   : 'failed',
-    error:   result.success ? null      : (result.error || 'unknown'),
-    channel,
-  }, { onConflict: 'reference,phone' }).catch(err =>
-    console.warn('[SMS] Failed to write sms_log:', err.message)
-  );
+  try {
+    await supabase.from('sms_log').upsert({
+      reference,
+      phone:   e164,
+      message,
+      status:  result.success ? 'sent'   : 'failed',
+      error:   result.success ? null      : (result.error || 'unknown'),
+      channel,
+    }, { onConflict: 'reference,phone' });
+  } catch (err) {
+    console.warn('[SMS] Failed to write sms_log:', err.message);
+  }
 }
 
 // ─── WEBHOOK ENTRY POINT ──────────────────────────────────────
@@ -111,22 +116,33 @@ export async function POST(req) {
 
   const { reference } = event.data;
 
-  // Idempotency check
-  const { data: existing } = await supabase
-    .from('webhook_log')
-    .select('id,status')
-    .eq('reference', reference)
-    .single()
-    .catch(() => ({ data: null }));
+  // ── IDEMPOTENCY CHECK ────────────────────────────────────────
+  // FIX: was .single().catch() — .catch() is not a function on Supabase PromiseLike builders.
+  // Now using try/catch around await.
+  let existing = null;
+  try {
+    const { data } = await supabase
+      .from('webhook_log')
+      .select('id,status')
+      .eq('reference', reference)
+      .single();
+    existing = data;
+  } catch {
+    // No row found or DB error — treat as not yet processed
+  }
+
   if (existing?.status === 'processed') {
     console.log(`[WEBHOOK] Already processed: ${reference}`);
     return NextResponse.json({ ok: true });
   }
 
-  await supabase.from('webhook_log').upsert(
-    { reference, status: 'processing', raw_payload: event },
-    { onConflict: 'reference' }
-  ).catch(() => {});
+  // FIX: was .upsert(...).catch(() => {}) — replaced with try/catch around await
+  try {
+    await supabase.from('webhook_log').upsert(
+      { reference, status: 'processing', raw_payload: event },
+      { onConflict: 'reference' }
+    );
+  } catch { /* non-fatal */ }
 
   const meta      = event.data.metadata || {};
   const startTime = Date.now();
@@ -143,22 +159,28 @@ export async function POST(req) {
       await processVote(supabase, event.data, meta);
     }
 
-    await supabase.from('webhook_log').upsert({
-      reference,
-      status:      'processed',
-      duration_ms: Date.now() - startTime,
-      raw_payload: event,
-    }, { onConflict: 'reference' }).catch(() => {});
+    // FIX: was .upsert(...).catch(() => {})
+    try {
+      await supabase.from('webhook_log').upsert({
+        reference,
+        status:      'processed',
+        duration_ms: Date.now() - startTime,
+        raw_payload: event,
+      }, { onConflict: 'reference' });
+    } catch { /* non-fatal */ }
 
   } catch (err) {
     console.error('[WEBHOOK] Processing error:', err.message);
-    await supabase.from('webhook_log').upsert({
-      reference,
-      status:      'failed',
-      duration_ms: Date.now() - startTime,
-      raw_payload: { ...event, _error: err.message },
-    }, { onConflict: 'reference' }).catch(() => {});
-    // 200 to prevent Paystack retry storms
+    // FIX: was .upsert(...).catch(() => {})
+    try {
+      await supabase.from('webhook_log').upsert({
+        reference,
+        status:      'failed',
+        duration_ms: Date.now() - startTime,
+        raw_payload: { ...event, _error: err.message },
+      }, { onConflict: 'reference' });
+    } catch { /* non-fatal */ }
+    // Return 200 to prevent Paystack retry storms
   }
 
   return NextResponse.json({ ok: true });
@@ -176,11 +198,17 @@ async function processTicket(supabase, data, meta) {
 
   const qty = Math.max(1, Math.min(10, parseInt(quantity, 10) || 1));
 
-  const { data: tier } = await supabase
-    .from('ticket_tiers')
-    .select('max_quantity,name')
-    .eq('id', tier_id)
-    .single();
+  // FIX: was .single() with no await guard needed here as result is destructured immediately
+  // but we add try/catch to be safe
+  let tier = null;
+  try {
+    const { data: tierData } = await supabase
+      .from('ticket_tiers')
+      .select('max_quantity,name')
+      .eq('id', tier_id)
+      .single();
+    tier = tierData;
+  } catch { /* tier not found — proceed without cap check */ }
 
   if (tier?.max_quantity > 0) {
     const { count } = await supabase
@@ -220,7 +248,7 @@ async function processTicket(supabase, data, meta) {
     ticket_number:        generateTicketNumber(),
     guest_email:          guest_email.trim().toLowerCase(),
     guest_name:           guest_name || 'Guest',
-    guest_phone:          normalisePhone(smsPhone) || smsPhone || null,  // ← saved to DB
+    guest_phone:          normalisePhone(smsPhone) || smsPhone || null,
     amount:               base_price || (data.amount / 100 / qty),
     base_amount:          base_price || (data.amount / 100 / qty),
     platform_fee:         platform_fee || 0,
@@ -234,46 +262,75 @@ async function processTicket(supabase, data, meta) {
   const { error: insertError } = await supabase.from('tickets').insert(tickets);
   if (insertError) throw insertError;
 
-  // Update event tickets_sold counter
-  await supabase
-    .rpc('increment_event_tickets_sold', { event_id_param: event_id, amount: qty })
-    .catch(() => {
-      supabase.from('events').select('tickets_sold').eq('id', event_id).single().then(({ data: ev }) => {
-        supabase.from('events').update({ tickets_sold: (ev?.tickets_sold || 0) + qty }).eq('id', event_id);
-      });
-    });
-
-  // Update reseller stats
-  if (is_reseller_purchase && event_reseller_id) {
-    const earned = (reseller_commission || 0) * qty;
-    const { data: er } = await supabase
-      .from('event_resellers')
-      .select('tickets_sold,total_earned')
-      .eq('id', event_reseller_id)
-      .single()
-      .catch(() => ({ data: null }));
-    await supabase.from('event_resellers').update({
-      tickets_sold: (er?.tickets_sold || 0) + qty,
-      total_earned: parseFloat(((er?.total_earned || 0) + earned).toFixed(2)),
-    }).eq('id', event_reseller_id).catch(() => {});
+  // ── Update event tickets_sold counter ────────────────────────
+  // FIX: .rpc(...).catch(() => { supabase.from(...).single().then(...) })
+  // Both the .catch() on rpc AND the .single().then() inside were broken.
+  // Now: try/catch the rpc, then try/catch the fallback separately.
+  try {
+    await supabase.rpc('increment_event_tickets_sold', { event_id_param: event_id, amount: qty });
+  } catch {
+    // RPC failed — fallback to direct update
+    try {
+      const { data: ev } = await supabase
+        .from('events')
+        .select('tickets_sold')
+        .eq('id', event_id)
+        .single();
+      await supabase
+        .from('events')
+        .update({ tickets_sold: (ev?.tickets_sold || 0) + qty })
+        .eq('id', event_id);
+    } catch (fallbackErr) {
+      console.warn('[WEBHOOK] tickets_sold counter fallback also failed:', fallbackErr.message);
+    }
   }
 
-  // Payout ledger
+  // ── Update reseller stats ─────────────────────────────────────
+  if (is_reseller_purchase && event_reseller_id) {
+    const earned = (reseller_commission || 0) * qty;
+    // FIX: was .single().catch(() => ({ data: null }))
+    let er = null;
+    try {
+      const { data: erData } = await supabase
+        .from('event_resellers')
+        .select('tickets_sold,total_earned')
+        .eq('id', event_reseller_id)
+        .single();
+      er = erData;
+    } catch { /* not found — default to 0 */ }
+
+    // FIX: was .update(...).eq(...).catch(() => {})
+    try {
+      await supabase.from('event_resellers').update({
+        tickets_sold: (er?.tickets_sold || 0) + qty,
+        total_earned: parseFloat(((er?.total_earned || 0) + earned).toFixed(2)),
+      }).eq('id', event_reseller_id);
+    } catch (err) {
+      console.warn('[WEBHOOK] Failed to update reseller stats:', err.message);
+    }
+  }
+
+  // ── Payout ledger ─────────────────────────────────────────────
   const orgOwes = meta.organizer_owes || (base_price * qty) || 0;
   const resOwes = meta.reseller_owes  || (is_reseller_purchase ? (reseller_commission || 0) * qty : 0);
-  await supabase.from('payout_ledger').insert({
-    reference:         data.reference,
-    event_id,
-    organizer_id:      meta.organizer_id || null,
-    event_reseller_id: is_reseller_purchase ? event_reseller_id : null,
-    transaction_type:  'TICKET',
-    total_collected:   data.amount / 100,
-    organizer_owes:    parseFloat(orgOwes.toFixed(2)),
-    reseller_owes:     parseFloat(resOwes.toFixed(2)),
-    platform_keeps:    parseFloat((data.amount / 100 - orgOwes - resOwes).toFixed(2)),
-    status:            'pending',
-    notes:             `${qty}x ${tier?.name || 'ticket'} for ${guest_email}`,
-  }).catch(() => {});
+  // FIX: was .insert(...).catch(() => {})
+  try {
+    await supabase.from('payout_ledger').insert({
+      reference:         data.reference,
+      event_id,
+      organizer_id:      meta.organizer_id || null,
+      event_reseller_id: is_reseller_purchase ? event_reseller_id : null,
+      transaction_type:  'TICKET',
+      total_collected:   data.amount / 100,
+      organizer_owes:    parseFloat(orgOwes.toFixed(2)),
+      reseller_owes:     parseFloat(resOwes.toFixed(2)),
+      platform_keeps:    parseFloat((data.amount / 100 - orgOwes - resOwes).toFixed(2)),
+      status:            'pending',
+      notes:             `${qty}x ${tier?.name || 'ticket'} for ${guest_email}`,
+    });
+  } catch (err) {
+    console.warn('[WEBHOOK] Failed to write payout_ledger:', err.message);
+  }
 
   // ── SMS ──────────────────────────────────────────────────────
   const BASE_URL      = process.env.NEXT_PUBLIC_BASE_URL || 'https://ousted.live';
@@ -291,12 +348,9 @@ async function processTicket(supabase, data, meta) {
 
     const smsResult = await sendSMS(smsPhone, message);
     console.log(`[WEBHOOK] SMS result:`, JSON.stringify(smsResult));
-
-    // Persist result — admin can see sent/failed and resend as needed
     await logSMS(supabase, { reference: data.reference, phone: smsPhone, message, result: smsResult, channel: 'web' });
   } else {
     console.warn(`[WEBHOOK] No phone for ${guest_email} — SMS skipped`);
-    // Log the skip so admin knows no phone was collected at checkout
     await logSMS(supabase, {
       reference: data.reference,
       phone:     guest_email,
@@ -321,45 +375,67 @@ async function processVote(supabase, data, meta) {
 
   const votes = parseInt(vote_count, 10);
 
-  await supabase.from('vote_transactions').upsert({
-    reference:     data.reference,
-    candidate_id,
-    contest_id,
-    competition_id,
-    voter_email:   voter_email?.toLowerCase(),
-    voter_name:    voter_name || 'Anonymous',
-    vote_count:    votes,
-    vote_price:    vote_price || 0,
-    platform_fee:  platform_fee || 0,
-    amount_paid:   data.amount / 100,
-    status:        'confirmed',
-  }, { onConflict: 'reference' }).catch(() => {});
+  // FIX: was .upsert(...).catch(() => {})
+  try {
+    await supabase.from('vote_transactions').upsert({
+      reference:     data.reference,
+      candidate_id,
+      contest_id,
+      competition_id,
+      voter_email:   voter_email?.toLowerCase(),
+      voter_name:    voter_name || 'Anonymous',
+      vote_count:    votes,
+      vote_price:    vote_price || 0,
+      platform_fee:  platform_fee || 0,
+      amount_paid:   data.amount / 100,
+      status:        'confirmed',
+    }, { onConflict: 'reference' });
+  } catch (err) {
+    console.warn('[WEBHOOK] Failed to write vote_transactions:', err.message);
+  }
 
   const { error: rpcError } = await supabase.rpc('increment_vote_count', {
     p_candidate_id:   candidate_id,
     p_vote_increment: votes,
   });
   if (rpcError) {
-    const { data: cand } = await supabase.from('candidates').select('vote_count').eq('id', candidate_id).single();
-    await supabase.from('candidates').update({ vote_count: (cand?.vote_count || 0) + votes }).eq('id', candidate_id);
+    // FIX: was .single() with no error handling inside .catch()
+    try {
+      const { data: cand } = await supabase
+        .from('candidates')
+        .select('vote_count')
+        .eq('id', candidate_id)
+        .single();
+      await supabase
+        .from('candidates')
+        .update({ vote_count: (cand?.vote_count || 0) + votes })
+        .eq('id', candidate_id);
+    } catch (fallbackErr) {
+      console.warn('[WEBHOOK] vote_count fallback failed:', fallbackErr.message);
+    }
   }
 
   const voteOrgOwes = meta.organizer_owes || (vote_price * votes) || 0;
-  await supabase.from('payout_ledger').insert({
-    reference:         data.reference,
-    event_id:          null,
-    organizer_id:      meta.organizer_id || null,
-    event_reseller_id: null,
-    transaction_type:  'VOTE',
-    total_collected:   data.amount / 100,
-    organizer_owes:    parseFloat(voteOrgOwes.toFixed(2)),
-    reseller_owes:     0,
-    platform_keeps:    parseFloat((data.amount / 100 - voteOrgOwes).toFixed(2)),
-    contest_id:        contest_id || null,
-    competition_id:    competition_id || null,
-    status:            'pending',
-    notes:             `${votes} vote(s) for ${candidate_name}`,
-  }).catch(() => {});
+  // FIX: was .insert(...).catch(() => {})
+  try {
+    await supabase.from('payout_ledger').insert({
+      reference:         data.reference,
+      event_id:          null,
+      organizer_id:      meta.organizer_id || null,
+      event_reseller_id: null,
+      transaction_type:  'VOTE',
+      total_collected:   data.amount / 100,
+      organizer_owes:    parseFloat(voteOrgOwes.toFixed(2)),
+      reseller_owes:     0,
+      platform_keeps:    parseFloat((data.amount / 100 - voteOrgOwes).toFixed(2)),
+      contest_id:        contest_id || null,
+      competition_id:    competition_id || null,
+      status:            'pending',
+      notes:             `${votes} vote(s) for ${candidate_name}`,
+    });
+  } catch (err) {
+    console.warn('[WEBHOOK] Failed to write payout_ledger (vote):', err.message);
+  }
 
   console.log(`[WEBHOOK] ✅ ${votes} vote(s) for ${candidate_name} | ref: ${data.reference}`);
 
