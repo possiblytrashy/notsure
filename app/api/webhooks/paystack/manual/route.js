@@ -1,5 +1,9 @@
 // Manual webhook fallback — triggered by payment/status polling when webhook was delayed/missed.
 // Mirrors the main webhook exactly: saves guest_phone on ticket rows, sends SMS, logs to sms_log.
+//
+// v3.3 BUGFIX: Replaced all chained .catch() on Supabase query builders with try/catch around await.
+// In @supabase/supabase-js v2, the query builder is a PromiseLike, NOT a real Promise.
+// .catch() is not defined on it and throws "is not a function" at runtime.
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
@@ -52,12 +56,15 @@ async function sendSMS(phone, message) {
 
 async function logSMS(db, { reference, phone, message, result, channel = 'manual' }) {
   const e164 = normalisePhone(phone) || phone || 'unknown';
-  await db.from('sms_log').upsert({
-    reference, phone: e164, message,
-    status:  result.success ? 'sent'  : 'failed',
-    error:   result.success ? null     : (result.error || 'unknown'),
-    channel,
-  }, { onConflict: 'reference,phone' }).catch(() => {});
+  // FIX: was .upsert(...).catch(() => {})
+  try {
+    await db.from('sms_log').upsert({
+      reference, phone: e164, message,
+      status:  result.success ? 'sent'  : 'failed',
+      error:   result.success ? null     : (result.error || 'unknown'),
+      channel,
+    }, { onConflict: 'reference,phone' });
+  } catch { /* non-fatal */ }
 }
 
 export async function POST(req) {
@@ -66,22 +73,52 @@ export async function POST(req) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const { reference, data: txData } = await req.json().catch(() => ({}));
+  let reqBody;
+  try {
+    reqBody = await req.json();
+  } catch {
+    reqBody = {};
+  }
+  const { reference, data: txData } = reqBody;
   if (!reference || !txData) return NextResponse.json({ error: 'Missing data' }, { status: 400 });
 
-  const db  = getDb();
+  const db   = getDb();
   const meta = txData.metadata || {};
 
-  // Idempotency
-  const { data: existing } = await db.from('webhook_log').select('status').eq('reference', reference).single().catch(() => ({ data: null }));
-  if (existing?.status === 'processed') return NextResponse.json({ ok: true, message: 'Already processed' });
+  // ── IDEMPOTENCY CHECK ────────────────────────────────────────
+  // FIX: was .single().catch(() => ({ data: null }))
+  let existing = null;
+  try {
+    const { data } = await db
+      .from('webhook_log')
+      .select('status')
+      .eq('reference', reference)
+      .single();
+    existing = data;
+  } catch { /* no row — not yet processed */ }
+
+  if (existing?.status === 'processed') {
+    return NextResponse.json({ ok: true, message: 'Already processed' });
+  }
 
   try {
     if (meta.type === 'TICKET') {
       // Idempotency on tickets table too
-      const { data: existingTickets } = await db.from('tickets').select('id').eq('reference', reference).limit(1);
+      const { data: existingTickets } = await db
+        .from('tickets')
+        .select('id')
+        .eq('reference', reference)
+        .limit(1);
+
       if (existingTickets?.length) {
-        await db.from('webhook_log').upsert({ reference, status: 'processed', raw_payload: { source: 'manual_fallback', data: txData } }, { onConflict: 'reference' }).catch(() => {});
+        // FIX: was .upsert(...).catch(() => {})
+        try {
+          await db.from('webhook_log').upsert({
+            reference,
+            status: 'processed',
+            raw_payload: { source: 'manual_fallback', data: txData },
+          }, { onConflict: 'reference' });
+        } catch { /* non-fatal */ }
         return NextResponse.json({ ok: true, message: 'Already processed' });
       }
 
@@ -105,7 +142,7 @@ export async function POST(req) {
         ticket_number:        generateTicketNumber(),
         guest_email:          (meta.guest_email || '').trim().toLowerCase(),
         guest_name:           meta.guest_name || 'Guest',
-        guest_phone:          normalisePhone(smsPhone) || smsPhone || null,  // saved to DB
+        guest_phone:          normalisePhone(smsPhone) || smsPhone || null,
         amount:               meta.base_price || (txData.amount / 100 / qty),
         base_amount:          meta.base_price || (txData.amount / 100 / qty),
         platform_fee:         meta.platform_fee || 0,
@@ -146,38 +183,66 @@ export async function POST(req) {
 
     } else if (meta.type === 'VOTE') {
       const votes = parseInt(meta.vote_count || 1);
-      await db.from('vote_transactions').upsert({
-        reference,
-        candidate_id:   meta.candidate_id,
-        contest_id:     meta.contest_id,
-        competition_id: meta.competition_id,
-        voter_email:    (meta.voter_email || '').toLowerCase(),
-        voter_name:     meta.voter_name || 'Anonymous',
-        vote_count:     votes,
-        vote_price:     meta.vote_price || 0,
-        platform_fee:   meta.platform_fee || 0,
-        amount_paid:    txData.amount / 100,
-        status:         'confirmed',
-      }, { onConflict: 'reference' });
+      // FIX: was .upsert(...) with no error handling
+      try {
+        await db.from('vote_transactions').upsert({
+          reference,
+          candidate_id:   meta.candidate_id,
+          contest_id:     meta.contest_id,
+          competition_id: meta.competition_id,
+          voter_email:    (meta.voter_email || '').toLowerCase(),
+          voter_name:     meta.voter_name || 'Anonymous',
+          vote_count:     votes,
+          vote_price:     meta.vote_price || 0,
+          platform_fee:   meta.platform_fee || 0,
+          amount_paid:    txData.amount / 100,
+          status:         'confirmed',
+        }, { onConflict: 'reference' });
+      } catch (err) {
+        console.warn('[MANUAL] vote_transactions upsert failed:', err.message);
+      }
 
-      const { data: cand } = await db.from('candidates').select('vote_count').eq('id', meta.candidate_id).single().catch(() => ({ data: null }));
-      await db.from('candidates').update({ vote_count: (cand?.vote_count || 0) + votes }).eq('id', meta.candidate_id);
+      // FIX: was .single().catch(() => ({ data: null }))
+      let cand = null;
+      try {
+        const { data } = await db
+          .from('candidates')
+          .select('vote_count')
+          .eq('id', meta.candidate_id)
+          .single();
+        cand = data;
+      } catch { /* default to 0 */ }
+
+      try {
+        await db
+          .from('candidates')
+          .update({ vote_count: (cand?.vote_count || 0) + votes })
+          .eq('id', meta.candidate_id);
+      } catch (err) {
+        console.warn('[MANUAL] candidate vote_count update failed:', err.message);
+      }
     }
 
-    await db.from('webhook_log').upsert({
-      reference,
-      status:      'processed',
-      raw_payload: { source: 'manual_fallback', data: txData },
-    }, { onConflict: 'reference' }).catch(() => {});
+    // FIX: was .upsert(...).catch(() => {})
+    try {
+      await db.from('webhook_log').upsert({
+        reference,
+        status:      'processed',
+        raw_payload: { source: 'manual_fallback', data: txData },
+      }, { onConflict: 'reference' });
+    } catch { /* non-fatal */ }
 
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error('[MANUAL] Error:', err.message);
-    await db.from('webhook_log').upsert({
-      reference,
-      status:      'failed',
-      raw_payload: { source: 'manual_fallback', error: err.message },
-    }, { onConflict: 'reference' }).catch(() => {});
+    // FIX: was .upsert(...).catch(() => {})
+    try {
+      await db.from('webhook_log').upsert({
+        reference,
+        status:      'failed',
+        raw_payload: { source: 'manual_fallback', error: err.message },
+      }, { onConflict: 'reference' });
+    } catch { /* non-fatal */ }
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
